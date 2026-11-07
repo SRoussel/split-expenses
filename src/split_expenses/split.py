@@ -14,6 +14,7 @@ Examples:
     python split_ledger.py add 120 partner power bill  # name can be several words
     python split_ledger.py add 60 me dinner --my-share 70   # you owe 70% of this one
     python split_ledger.py add                         # prompts for amount, payer, name
+    python split_ledger.py import split_transactions.csv    # total -> "Expenses mm/dd/yy-mm/dd/yy"
     python split_ledger.py settle                      # settle the full balance
     python split_ledger.py settle 100 me               # you paid partner $100
     python split_ledger.py balance
@@ -239,6 +240,67 @@ def cmd_settle(args, path):
     print(describe(current_balance(load_ledger(path))))
 
 
+def cmd_import(args, path):
+    """Total a split_transactions.csv from the statement script into one entry."""
+    src = Path(args.csv)
+    if not src.is_file():
+        sys.exit(f"File not found: {src}")
+
+    try:
+        payer = parse_payer(args.payer)
+        share = parse_percent(args.my_share)
+        when = parse_date(args.date) if args.date else date.today().isoformat()
+    except ValueError as e:
+        sys.exit(f"Error: {e}")
+
+    total = Decimal("0.00")
+    dates, by_category, skipped = [], {}, 0
+    with open(src, newline="") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames or not {"date", "amount"} <= set(reader.fieldnames):
+            sys.exit("CSV must have 'date' and 'amount' columns.")
+        for r in reader:
+            try:
+                amt = parse_amount(r["amount"])
+                d = datetime.strptime(r["date"].strip(), "%Y-%m-%d").date()
+            except (ValueError, AttributeError):
+                skipped += 1
+                continue
+            total += amt
+            dates.append(d)
+            cat = (r.get("category") or "uncategorized").strip() or "uncategorized"
+            by_category[cat] = by_category.get(cat, Decimal("0.00")) + amt
+
+    if not dates:
+        sys.exit("No valid transactions found in that CSV.")
+
+    start, end = min(dates), max(dates)
+    name = args.name or f"Expenses {start:%m/%d/%y}-{end:%m/%d/%y}"
+
+    rows = load_ledger(path)
+    if any(r["name"] == name for r in rows) and not args.force:
+        sys.exit(f"The ledger already has an entry named '{name}'. "
+                 "Use --force to add it again, or --name to give it a different name.")
+
+    row = {
+        "date": when,
+        "type": EXPENSE,
+        "payer": payer,
+        "amount": f"{money(total):.2f}",
+        "my_share": f"{share.normalize():f}",
+        "name": name,
+    }
+    append_row(path, row)
+
+    print(f"Imported {len(dates)} transaction(s) from {src.name}"
+          + (f" ({skipped} skipped as invalid)" if skipped else "") + ":")
+    for cat in sorted(by_category):
+        print(f"  {cat:<15}{fmt(by_category[cat]):>12}")
+    who = "You" if payer == "me" else "Partner"
+    print(f"Recorded: {who} paid {fmt(total)} for {name} (your share {row['my_share']}%).")
+    print(describe(current_balance(load_ledger(path))))
+
+
 def cmd_balance(args, path):
     rows = load_ledger(path)
     if not rows:
@@ -319,6 +381,19 @@ def main():
     p.add_argument("--name", help="Name for the settlement (default: Settlement)")
     p.add_argument("--date", help="YYYY-MM-DD (default: today)")
     p.set_defaults(func=cmd_settle)
+
+    p = sub.add_parser("import", parents=[common],
+                       help="Add the total of a split_transactions.csv as one entry")
+    p.add_argument("csv", help="CSV from split_statements.py")
+    p.add_argument("--payer", default="me",
+                   help="Who paid these expenses: 'me' (default) or 'partner'")
+    p.add_argument("--my-share", default="50",
+                   help="Your percentage of the total (default: 50)")
+    p.add_argument("--name", help="Override the entry name (default: Expenses mm/dd/yy-mm/dd/yy)")
+    p.add_argument("--date", help="Ledger date YYYY-MM-DD (default: today)")
+    p.add_argument("--force", action="store_true",
+                   help="Allow importing even if an entry with the same name exists")
+    p.set_defaults(func=cmd_import)
 
     p = sub.add_parser("balance", parents=[common], help="Show who owes whom")
     p.set_defaults(func=cmd_balance)
