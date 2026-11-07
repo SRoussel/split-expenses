@@ -102,6 +102,18 @@ def clean_vendor(desc):
     return desc
 
 
+def vendor_match_key(vendor):
+    """Normalize a vendor name for matching remembered choices.
+
+    Ignores trailing numbers and '#1234' style references, so
+    'STARBUCKS #1234' and 'STARBUCKS 5678' match the same rule.
+    """
+    v = vendor.lower()
+    v = re.sub(r"#\s?\d+", " ", v)                    # '#1234' anywhere
+    v = re.sub(r"(?:[\s*\-]+\d[\d\-]*)+\s*$", "", v)  # trailing number tokens
+    return re.sub(r"\s+", " ", v).strip() or vendor.lower()
+
+
 def parse_pdf(path):
     """Yield expense dicts {date, amount, vendor} from one statement PDF."""
     with pdfplumber.open(path) as pdf:
@@ -232,29 +244,26 @@ def review(txns_by_file, csv_path, state_path):
 
     split_count = 0
     for n, (k, source, t) in enumerate(pending, 1):
-        vendor_key = t["vendor"].lower()
+        vendor_key = vendor_match_key(t["vendor"])
         rule = rules.get(vendor_key)
 
-        print(f"[{n}/{len(pending)}] {t['date']}  ${t['amount']:>9}  {t['vendor']}   ({source})")
+        line = f"{t['date']}  ${t['amount']:>9}  {t['vendor']}"
 
+        # Remembered vendor: apply automatically, no prompt.
         if rule is not None:
-            label = "self" if rule == "self" else f"split/{rule['split']}"
-            ans = input(f"  Remembered: {label}. Enter to accept, or s/p/k/q to override: ").strip().lower()
-            if ans == "":
-                if rule == "self":
-                    done.add(k)
-                else:
-                    append_split(csv_path, t, rule["split"])
-                    split_count += 1
-                    done.add(k)
-                state["done"] = sorted(done)
-                save_state(state_path, state)
-                continue
-        else:
-            ans = ask_choice("  Self or split? [s/p/k/q]: ", {"s", "p", "k", "q"})
+            if rule == "self":
+                print(f"[{n}/{len(pending)}] {line}  -> self (remembered)")
+            else:
+                append_split(csv_path, t, rule["split"])
+                split_count += 1
+                print(f"[{n}/{len(pending)}] {line}  -> split/{rule['split']} (remembered)")
+            done.add(k)
+            state["done"] = sorted(done)
+            save_state(state_path, state)
+            continue
 
-        if ans not in {"s", "p", "k", "q"}:
-            ans = ask_choice("  Self or split? [s/p/k/q]: ", {"s", "p", "k", "q"})
+        print(f"[{n}/{len(pending)}] {line}   ({source})")
+        ans = ask_choice("  Self or split? [s/p/k/q]: ", {"s", "p", "k", "q"})
 
         if ans == "q":
             break
@@ -296,7 +305,15 @@ def main():
     ap.add_argument("--dump", action="store_true",
                     help="Only print parsed transactions; don't prompt (useful to check parsing)")
     ap.add_argument("--reset", action="store_true", help="Forget previously reviewed transactions")
+    ap.add_argument("--clear-rules", action="store_true",
+                    help="Forget remembered vendor choices (keeps reviewed-transaction history)")
     args = ap.parse_args()
+
+    if args.clear_rules and args.state.exists():
+        st = load_state(args.state)
+        st["vendor_rules"] = {}
+        save_state(args.state, st)
+        print("Cleared remembered vendor choices.")
 
     if not args.directory.is_dir():
         sys.exit(f"Not a directory: {args.directory}")
