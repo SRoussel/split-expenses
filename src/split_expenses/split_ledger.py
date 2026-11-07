@@ -8,17 +8,17 @@ derived from that file, so you can inspect or hand-edit it at any time.
 Balance convention: positive = partner owes you, negative = you owe partner.
 
 Examples:
-    python split_ledger.py init --i-owe 500            # starting deficit
-    python split_ledger.py init --partner-owes 600
-    python split_ledger.py add 84.20 me groceries      # you paid, split 50/50
-    python split_ledger.py add 120 partner power bill  # name can be several words
-    python split_ledger.py add 60 me dinner --my-share 70   # you owe 70% of this one
-    python split_ledger.py add                         # prompts for amount, payer, name
-    python split_ledger.py import split_transactions.csv    # total -> "Expenses mm/dd/yy-mm/dd/yy"
-    python split_ledger.py settle                      # settle the full balance
-    python split_ledger.py settle 100 me               # you paid partner $100
-    python split_ledger.py balance
-    python split_ledger.py history
+    uv run split_ledger.py init --i-owe 500                 # starting deficit
+    uv run split_ledger.py init --partner-owes 600
+    uv run split_ledger.py add 84.20 me groceries           # you paid, split 50/50
+    uv run split_ledger.py add 120 partner power bill       # name can be several words
+    uv run split_ledger.py add 60 me dinner --my-share 70   # you owe 70% of this one
+    uv run split_ledger.py add                              # prompts for amount, payer, name
+    uv run split_ledger.py import split_transactions.csv    # total -> "Expenses mm/dd/yy-mm/dd/yy"
+    uv run split_ledger.py settle                           # settle the full balance
+    uv run split_ledger.py settle 100 me                    # you paid partner $100
+    uv run split_ledger.py balance
+    uv run split_ledger.py history
 """
 
 import argparse

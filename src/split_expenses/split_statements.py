@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["pdfplumber"]
+# ///
 """
 Parse bank statement PDFs, prompt for each expense (self vs. split),
 and save split expenses to a CSV.
 
 Usage:
-    python split_statements.py /path/to/statements
-    python split_statements.py /path/to/statements -o splits.csv
-    python split_statements.py /path/to/statements --dump   # just show parsed transactions
+    uv run split_statements.py /path/to/statements
+    uv run split_statements.py /path/to/statements -o splits.csv
+    uv run split_statements.py /path/to/statements --dump        # just show parsed transactions
 
-Requires:  pip install pdfplumber
+Requires pdfplumber, which uv installs automatically (see the script header).
 """
 
 import argparse
@@ -25,7 +29,7 @@ from pathlib import Path
 try:
     import pdfplumber
 except ImportError:
-    sys.exit("Missing dependency. Install it with:  pip install pdfplumber")
+    sys.exit("Missing pdfplumber. Run this script with:  uv run split_statements.py ...")
 
 CATEGORIES = ["utilities", "groceries", "dining", "entertainment", "travel", "gift", "household"]
 CSV_FIELDS = ["date", "amount", "vendor", "category"]
