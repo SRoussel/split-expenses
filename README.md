@@ -1,9 +1,12 @@
 # Statement splitter
 
-Two small Python scripts for splitting expenses with a partner.
+Two small Python scripts for splitting expenses with a partner, plus a web app so you can both see the ledger and add to it from your phones.
 
 - `split_statements.py` reads bank statement PDFs and asks you, one expense at a time, whether it's yours or should be split.
 - `split_ledger.py` keeps a running balance of who owes who, and can take the total from the first script as a single entry.
+- `web/` is the shared version of the ledger, called Split (React, with a Cloudflare Worker and D1 database). See [web/README.md](web/README.md) for setup and deploying. The scripts and the app don't talk to each other directly: you import the statement script's CSV into the app, and the app can export a CSV in the ledger script's format.
+
+The scripts keep your data in plain files (`ledger.csv`, `split_transactions.csv`, `.split_state.json`, and your PDFs in `statements/`). The `.gitignore` leaves those out of the repo on purpose. This repo is public, so check `git status` before every commit.
 
 ## Setup
 

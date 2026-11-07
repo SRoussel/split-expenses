@@ -1,0 +1,167 @@
+# Ledger web app
+
+A small app for the two of you to see the ledger, add expenses and settle up from your phones. It's a React site plus one Cloudflare Worker that serves the site and a small JSON API, with the data in Cloudflare D1 (SQLite). Everything runs on your computer with no account and no deploy.
+
+It does the same math as `split_ledger.py`, and the ledger can be exported as a CSV in that script's format.
+
+The screen refreshes every 15 seconds while it's open, and whenever you switch back to it, so a change one of you makes shows up for the other within seconds.
+
+## 1. Run it locally
+
+You need **Node 20 or newer** (Node 22 is best; Wrangler refuses to run on 18).
+
+    cd web
+    npm install
+    npm run db:migrate:local     # creates the local database, once
+    npm run dev
+
+Open http://localhost:5173. `npm run dev` starts the Worker with a local D1 database (stored in `.wrangler/`, which is git-ignored) and the Vite dev server together. To wipe the local data, delete `.wrangler/` and run the migrate command again.
+
+To try the app exactly as it will be deployed (one server on port 8787):
+
+    npm start
+
+To check the ledger math on its own:
+
+    npm test
+
+To test the whole backend (sign-up and sign-in, the security guards, throttling, sessions, and the ledger rules):
+
+    npm run test:api
+
+It builds the app, starts the Worker against a brand-new throwaway database, runs about 15 checks over HTTP, then deletes everything. Your local and deployed data aren't touched. Run it after any change to `worker/`, `shared/` or `migrations/`, before you deploy.
+
+## 2. Deploy to Cloudflare
+
+You need a free Cloudflare account and Node 20 or newer. Run everything from the `web/` folder. Deploy from your computer with the commands below; don't connect the git repo in the Cloudflare dashboard (see "Things to avoid").
+
+**Step 1: log in to Cloudflare.**
+
+    npx wrangler login
+
+It opens a browser to approve access. In WSL, if no browser opens, copy the URL it prints into your Windows browser; the approval comes back to `localhost:8976`, which WSL forwards.
+
+**Step 2: create the database.**
+
+    npx wrangler d1 create ledger
+
+It prints a block with a `database_id`. Copy **only the ID** into `wrangler.jsonc`, replacing `00000000-0000-0000-0000-000000000000`. Don't paste the whole block it prints, and don't let it edit the file for you: its version names the binding `ledger`, but the code needs `"binding": "DB"`, and every sign-up and sign-in fails with a server error without it. The ID isn't a secret; it's useless without your Cloudflare login. (Local development stores its data by this ID, so your local database will start out empty after you change it. Run `npm run db:migrate:local` again.)
+
+**Step 3: create the tables in the real database.**
+
+    npm run db:migrate:remote
+
+**Step 4: deploy.**
+
+    npm run deploy
+
+This builds the app, type-checks it and uploads it. The first time, Cloudflare may ask you to pick a `workers.dev` subdomain for your account. When it finishes it prints your URL, like `https://ledger.<your-subdomain>.workers.dev`.
+
+**Step 5: create both accounts right away** (section 3), so nobody else can take a slot. Then check that the only accounts are yours:
+
+    npx wrangler d1 execute ledger --remote --command "SELECT email, created_at FROM users"
+
+If there's an email you don't recognize, tell me before doing anything else.
+
+**Step 6: check that sign-in fits in the Free plan.** In one terminal run `npx wrangler tail`, then sign in on your phone. If the tail shows "exceeded resource limits" (error 1102), lower `PBKDF2_ITERATIONS` to `15000` and run `npm run deploy` again.
+
+To update the app later, run `npm run deploy` again. If a future change adds a file in `migrations/`, run `npm run db:migrate:remote` first.
+
+**Sign-in and the Free plan.** Passwords are hashed with PBKDF2, which is deliberately slow. The Workers Free plan allows 10 ms of CPU per request, so `PBKDF2_ITERATIONS` in `wrangler.jsonc` is set to 20,000: about 4.6 ms per hash by my measurement, and changing a password (two hashes) still fits. That's lower than the 100,000+ usually recommended, which matters only if the database itself ever leaked, so use strong passwords. If you move to Workers Paid ($5/month), raise it to `100000`; each stored password is upgraded the next time that person signs in.
+
+There are no secrets to set. Passwords are hashed in the Worker and never stored in plain text, and the session cookie is HttpOnly.
+
+### Backups
+
+Cloudflare keeps a short point-in-time history of D1 databases ("Time Travel"), so you can roll back a mistake from the last several days. For your own copy:
+
+    npx wrangler d1 export ledger --remote --output backups/ledger.sql
+
+The `backups/` folder is git-ignored. The file contains your full ledger and the password hashes, so keep it private.
+
+### Things to avoid
+
+- **Don't connect the GitHub repo to Cloudflare's dashboard builds.** By default they also build every other branch you push and serve it at a public preview URL that uses the *real* database. Deploying from your computer avoids that, and `preview_urls` is turned off in `wrangler.jsonc`.
+- **Don't commit your data.** The repo on GitHub is public. `ledger.csv`, `split_transactions.csv`, `.split_state.json`, `statements/`, PDFs and `backups/` are git-ignored; keep it that way, and check `git status` before committing.
+- **Never put a Cloudflare API token** or anything secret in `wrangler.jsonc`, `.env` files that aren't ignored, or the code. The app doesn't need any.
+
+### How sign-in is protected
+
+- **Sign-up closes** once `MAX_USERS` accounts exist (2 by default, in `wrangler.jsonc`). Deploy and create both accounts right away, so nobody else can take a slot. Locally, if you want more test accounts, put `MAX_USERS="10"` in a `.dev.vars` file (git-ignored).
+- **Guessing is throttled:** 10 wrong passwords per email or 30 per network address every 15 minutes, 10 wrong invite codes per account, and 10 sign-ups per hour per address. The flip side is that someone who knows your email can lock you out for 15 minutes.
+- **Sessions last 60 days and renew** whenever you open the app, so regular use never signs you out. Changing your password (**More > Change password**) signs out every other device.
+- **Cross-site requests are refused,** and the pages are served with a strict Content-Security-Policy and can't be framed by other sites.
+
+### Forgot a password?
+
+There's no email, so reset it from your computer:
+
+    npm run reset-password -- someone@example.com            # local database
+    npm run reset-password -- someone@example.com --remote   # the deployed one
+
+It asks for the new password and signs that person out everywhere.
+
+Splitting rule: the person who didn't pay owes their share rounded half up to the cent, and the payer keeps the remainder. On an odd half-cent, the payer gets the one-cent discount. This matches `split_ledger.py` when your partner paid; when you paid, the script rounds the other way, so a half-cent amount can differ by a cent.
+
+## 3. Set up the two accounts
+
+Do this right after the first deploy.
+
+1. One of you opens the app, creates an account, enters a name and taps **Start ledger**.
+2. The app shows an invite code. Send it to your partner.
+3. Your partner creates an account, enters their name, and joins with the code.
+4. If someone already owes the other, open **More > Set starting balance**.
+
+A household holds two people, and you can't add a third.
+
+## 4. Put it on your iPhones
+
+Open the site in Safari, tap the share button, then **Add to Home Screen**. It opens full screen like a regular app. Do it from Safari itself, not from inside another app's browser.
+
+Sign in with email and password. I picked that over emailed links on purpose: on iPhone, a link in Mail opens Safari instead of the home screen app, and the two don't share a login.
+
+## Using it
+
+- **Add expense**: amount, name, who paid, your share (default 50%).
+- **Settle up**: records a payment between you. It defaults to the full balance, paid by whoever owes. It only updates the ledger and doesn't move any money.
+- **More > Import statement total**: pick the `split_transactions.csv` from `split_statements.py`. The app adds up the amounts and creates one entry called something like `Expenses 01/15/26-02/03/26`. Only the total goes into the app, not the individual transactions. It warns you if an entry with that name already exists. Delete or rename the CSV after importing, same as with the script.
+- **Void**: entries are never deleted. Voiding one keeps it in the history but stops it counting. Turn on "Show voided entries" in **More** to see them.
+- **More > Export ledger as CSV**: same columns as `ledger.csv` from `split_ledger.py` (`date,type,payer,amount,my_share,name`), written from your point of view.
+
+## Changing the icon
+
+The icon files live in `public/`: `apple-touch-icon.png` (180×180, iPhone), `icon-192.png` and `icon-512.png` (Android), and `icon.svg` (browser tab). They must be opaque PNGs, with no transparency. Safari ignores the manifest for the home-screen icon. It uses the `apple-touch-icon` links in `index.html`.
+
+Because some iOS versions show a letter tile instead of fetching the icon, the 180×180 iPhone icon is also embedded directly in `index.html` as a `data:` URI. After replacing `public/apple-touch-icon.png`, regenerate that line:
+
+    python3 - <<'PY'
+    import base64, re
+    uri = "data:image/png;base64," + base64.b64encode(open("public/apple-touch-icon.png", "rb").read()).decode()
+    s = open("index.html").read()
+    s = re.sub(r'(rel="apple-touch-icon" sizes="180x180" href=")[^"]*', lambda m: m.group(1) + uri, s)
+    open("index.html", "w").write(s)
+    PY
+
+Also bump the `?v=` numbers on the other icon links, deploy, and remove and re-add the app on each phone. iOS keeps the icon it saw when the app was added.
+
+## Layout
+
+    migrations/           D1 (SQLite) tables, applied in order
+    shared/owed.ts        the splitting rule, used by both the app and the Worker
+    public/_headers       security headers for the pages
+    scripts/              reset-password helper
+    tests/api.test.mjs    end-to-end backend tests (npm run test:api)
+    worker/index.ts       the backend: sign-in, sessions and the JSON API
+    src/ledger.ts         money parsing, balance math, CSV import and export
+    src/ledger.test.ts    tests for the above
+    src/api.ts            all the calls to the Worker
+    src/LedgerScreen.tsx  the main screen, including the refresh timer
+    src/forms.tsx         add expense, settle up, starting balance
+    src/ImportCsv.tsx     the CSV import
+    wrangler.jsonc        Cloudflare config
+
+## Not done yet
+
+- Push notifications when the other person adds something. They work on iPhone for apps added to the home screen, but need a service worker and a small push sender in the Worker.
+- Editing an entry. For now, void it and add a corrected one.
+- Offline use. It needs a connection.

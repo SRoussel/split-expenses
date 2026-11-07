@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#1f7a5a"/>
+  <!-- a receipt torn in two -->
+  <g transform="rotate(-8 256 256)">
+    <path d="M150 120 H250 L262 160 L242 200 L262 240 L242 280 L262 320 L242 360 L250 392 L229 378 L208 392 L187 378 L166 392 L150 380 Z" fill="#ffffff"/>
+    <rect x="176" y="168" width="52" height="18" rx="9" fill="#1f7a5a" opacity="0.35"/>
+    <rect x="176" y="212" width="40" height="18" rx="9" fill="#1f7a5a" opacity="0.35"/>
+    <rect x="176" y="256" width="52" height="18" rx="9" fill="#1f7a5a" opacity="0.35"/>
+  </g>
+  <g transform="rotate(8 256 256) translate(22 0)">
+    <path d="M362 120 H262 L274 160 L254 200 L274 240 L254 280 L274 320 L254 360 L262 392 L283 378 L304 392 L325 378 L346 392 L362 380 Z" fill="#9fe0c3"/>
+    <rect x="290" y="168" width="46" height="18" rx="9" fill="#1f7a5a" opacity="0.35"/>
+    <rect x="296" y="212" width="40" height="18" rx="9" fill="#1f7a5a" opacity="0.35"/>
+    <rect x="290" y="256" width="46" height="18" rx="9" fill="#1f7a5a" opacity="0.35"/>
+  </g>
+</svg>

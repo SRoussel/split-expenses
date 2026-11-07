@@ -16,3 +16,18 @@ statements/
 ledger.csv
 split_transactions.csv
 .split_state.json
+*.pdf
+
+# Web app (web/)
+node_modules/
+.wrangler/
+.env
+.env.*
+!.env.example
+.dev.vars
+backups/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

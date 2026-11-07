@@ -1,0 +1,35 @@
+{
+  "name": "ledger-web",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:web": "vite",
+    "dev:api": "mkdir -p dist && wrangler dev --port 8787",
+    "db:migrate:local": "wrangler d1 migrations apply ledger --local",
+    "db:migrate:remote": "wrangler d1 migrations apply ledger --remote",
+    "build": "tsc --noEmit && tsc --noEmit -p worker && vite build",
+    "start": "npm run build && mkdir -p dist && wrangler dev --port 8787",
+    "test": "node --import tsx --test src/ledger.test.ts",
+    "test:api": "npm run build && node --test tests/api.test.mjs",
+    "deploy": "npm run build && wrangler deploy",
+    "reset-password": "node scripts/reset-password.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250901.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^9.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.0",
+    "wrangler": "^4.40.0"
+  }
+}
