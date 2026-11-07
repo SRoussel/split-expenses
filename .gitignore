@@ -16,6 +16,7 @@ statements/
 ledger.csv
 split_transactions.csv
 .split_state.json
+split_summary*.json
 *.pdf
 
 # Web app (web/)

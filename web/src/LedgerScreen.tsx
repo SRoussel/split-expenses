@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { addEntry, editEntry, loadHousehold, signOut, unvoidEntry, voidEntry } from "./api";
+import { describeSchedule } from "../shared/recurring";
+import { addEntry, editEntry, loadHousehold, signOut, stopRecurring, unvoidEntry, voidEntry } from "./api";
 import {
   AddExpenseForm,
   ChangePasswordForm,
   DefaultSplitForm,
   OpeningForm,
   pctText,
+  RecurringForm,
   SettleForm,
 } from "./forms";
-import ImportCsv from "./ImportCsv";
+import ImportSummary from "./ImportSummary";
 import { balanceFor, effectFor, exportLedgerCsv, fmt } from "./ledger";
-import type { Entry, Member, NewEntry } from "./types";
+import type { Entry, Member, NewEntry, Recurring } from "./types";
 import { ConfirmDialog, ErrorText, Modal, Toast, type ToastState } from "./ui";
 
-type Panel = null | "add" | "settle" | "opening" | "import" | "more" | "password" | "split";
+type Panel = null | "add" | "settle" | "opening" | "import" | "more" | "password" | "split" | "recurring";
 
 // Entry dates are plain calendar days, so format them in UTC to avoid shifting a day.
 const monthFmt = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
@@ -36,6 +38,9 @@ export default function LedgerScreen({
 }) {
   const [members, setMembers] = useState<Member[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [recurring, setRecurring] = useState<Recurring[]>([]);
+  const [ruleEditing, setRuleEditing] = useState<Recurring | "new" | null>(null);
+  const [stopping, setStopping] = useState<Recurring | null>(null);
   const [inviteCode, setInviteCode] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +55,11 @@ export default function LedgerScreen({
   const closePanel = useCallback(() => setPanel(null), []);
   const closeDetails = useCallback(() => setSelectedId(null), []);
   const closeEdit = useCallback(() => setEditing(null), []);
+  // The rule sheet replaces the list (sheets never stack); closing it goes back to the list.
+  const backToRules = useCallback(() => {
+    setRuleEditing(null);
+    setPanel("recurring");
+  }, []);
 
   // Each refresh gets a number; only the newest one is allowed to update the screen,
   // so a slow older response can't overwrite a newer one.
@@ -62,6 +72,7 @@ export default function LedgerScreen({
       if (mine !== latestLoad.current) return;
       setMembers(data.members);
       setEntries(data.entries);
+      setRecurring(data.recurring ?? []);
       setInviteCode(data.inviteCode);
       setError(null);
     } catch (err) {
@@ -120,6 +131,7 @@ export default function LedgerScreen({
   function saved(message: string) {
     setPanel(null);
     setEditing(null);
+    setRuleEditing(null);
     setToast({ message });
     void load();
   }
@@ -255,6 +267,7 @@ export default function LedgerScreen({
         <Modal title={KIND_LABEL[selected.kind]} onClose={closeDetails}>
           <EntryDetails
             entry={selected}
+            rule={recurring.find((r) => r.id === selected.recurring_id)}
             userId={userId}
             nameOf={nameOf}
             partnerName={partnerName}
@@ -349,9 +362,99 @@ export default function LedgerScreen({
       )}
 
       {panel === "import" && me && partner && (
-        <Modal title="Import statement total" onClose={closePanel}>
-          <ImportCsv me={me} partner={partner} entries={entries} onSaved={() => saved("Statement imported")} />
+        <Modal title="Import statement" onClose={closePanel}>
+          <ImportSummary me={me} partner={partner} entries={entries} onSaved={() => saved("Statement imported")} />
         </Modal>
+      )}
+
+      {panel === "recurring" && (
+        <Modal title="Recurring expenses" onClose={closePanel}>
+          <div className="stack">
+            <p className="muted small">
+              Added to the ledger automatically when either of you opens the app on or after each date.
+            </p>
+            {recurring.length > 0 && (
+              <div className="menu">
+                {recurring.map((r) => (
+                  <button
+                    key={r.id}
+                    className="rule-row"
+                    onClick={() => {
+                      setPanel(null);
+                      setRuleEditing(r);
+                    }}
+                  >
+                    <span className="grow">
+                      <strong>{r.name}</strong>
+                      <span className="muted small">
+                        {describeSchedule(r.start_date, r.frequency)} · {nameOf(r.payer_id)} pays
+                      </span>
+                    </span>
+                    <span className="rule-side">
+                      <span className="amount">{fmt(r.amount_cents)}</span>
+                      <span className="muted small">
+                        {r.paused ? "Paused" : `next ${dayFmt.format(asDate(r.next_date))}`}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              className="primary"
+              disabled={!ready}
+              onClick={() => {
+                setPanel(null);
+                setRuleEditing("new");
+              }}
+            >
+              Add recurring expense
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {ruleEditing && me && partner && (
+        <Modal title={ruleEditing === "new" ? "New recurring expense" : "Recurring expense"} onClose={backToRules}>
+          <RecurringForm
+            me={me}
+            partner={partner}
+            initial={ruleEditing === "new" ? undefined : ruleEditing}
+            onSaved={() => {
+              const isNew = ruleEditing === "new";
+              backToRules();
+              setToast({ message: isNew ? "Recurring expense added" : "Changes saved" });
+              void load();
+            }}
+            onStop={ruleEditing === "new" ? undefined : () => {
+              setStopping(ruleEditing);
+              setRuleEditing(null);
+            }}
+          />
+        </Modal>
+      )}
+
+      {stopping && (
+        <ConfirmDialog
+          title="Stop this recurring expense?"
+          message={
+            <>
+              <strong>{stopping.name}</strong> won't be added again. The ones already in the ledger stay. To
+              take a break instead, edit it and turn on Paused.
+            </>
+          }
+          confirmLabel="Stop"
+          danger
+          onConfirm={async () => {
+            await stopRecurring(stopping.id);
+            setToast({ message: "Recurring expense stopped" });
+            void load();
+          }}
+          onClose={() => {
+            setStopping(null);
+            setPanel("recurring");
+          }}
+        />
       )}
 
       {panel === "split" && me && partner && (
@@ -378,8 +481,12 @@ export default function LedgerScreen({
                   </span>
                 )}
               </button>
+              <button onClick={() => setPanel("recurring")}>
+                Recurring expenses
+                {recurring.length > 0 && <span className="menu-value">{recurring.length}</span>}
+              </button>
               <button disabled={!ready} onClick={() => setPanel("import")}>
-                Import statement total (CSV)
+                Import statement summary
               </button>
               <button disabled={!ready || hasOpening} onClick={() => setPanel("opening")}>
                 {hasOpening ? "Starting balance already set" : "Set starting balance"}
@@ -475,7 +582,14 @@ function EntryRow({
       <button className="entry-btn" onClick={onOpen} aria-label={`${e.name}, details`}>
         <span className={`dot ${e.kind}`} aria-hidden="true" />
         <span className="grow">
-          <strong>{e.name}</strong>
+          <strong>
+            {e.recurring_id && (
+              <span className="repeat" aria-label="Recurring: ">
+                ↻{" "}
+              </span>
+            )}
+            {e.name}
+          </strong>
           <span className="muted small">{detail}</span>
         </span>
         <EffectAmount entry={e} userId={userId} />
@@ -489,6 +603,7 @@ function EntryRow({
 
 function EntryDetails({
   entry: e,
+  rule,
   userId,
   nameOf,
   partnerName,
@@ -498,6 +613,7 @@ function EntryDetails({
   onRestore,
 }: {
   entry: Entry;
+  rule: Recurring | undefined;
   userId: string;
   nameOf: (id: string | null) => string;
   partnerName: string;
@@ -516,7 +632,13 @@ function EntryDetails({
     const mine = myPctOf(e, userId);
     facts.push(["Split", `You ${pctText(mine)}% · ${partnerName} ${pctText(100 - mine)}%`]);
   }
-  facts.push(["Added", `${nameOf(e.created_by)}, ${momentFmt.format(new Date(e.created_at))}`]);
+  if (e.recurring_id) {
+    facts.push(["Repeats", rule ? describeSchedule(rule.start_date, rule.frequency) : "No longer (stopped)"]);
+  }
+  facts.push([
+    e.recurring_id ? "Added automatically" : "Added",
+    `${e.recurring_id ? "" : `${nameOf(e.created_by)}, `}${momentFmt.format(new Date(e.created_at))}`,
+  ]);
   if (e.voided_at) {
     facts.push([e.replaced_by ? "Edited" : "Voided", `${nameOf(e.voided_by)}, ${momentFmt.format(new Date(e.voided_at))}`]);
   }

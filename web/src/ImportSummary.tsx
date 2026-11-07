@@ -1,23 +1,30 @@
 import { useState, type ChangeEvent } from "react";
 import { addEntry } from "./api";
+import { pctText } from "./forms";
 import {
   fmt,
+  MAX_SUMMARY_BYTES,
   owedCents,
+  parseSummary,
   payerSharePct,
   SHARE_ERROR,
-  summarizeImport,
+  summaryToEntry,
   todayLocal,
-  type ImportSummary,
+  type ImportSummary as Summary,
 } from "./ledger";
-import { pctText } from "./forms";
 import type { Entry, Member } from "./types";
 import { ErrorText, Segmented } from "./ui";
 
+const shortDate = (iso: string) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+
 /**
- * Takes the split_transactions.csv from split_statements.py, totals it, and
- * adds it as one entry named "Expenses mm/dd/yy-mm/dd/yy".
+ * Imports a statement as one entry, from the split_summary.json made on your
+ * computer by `uv run split-ledger summarize`. The detailed transactions file
+ * is refused, so individual purchases never reach the app. Only the name and
+ * total are saved; the category totals are shown here and nowhere else.
  */
-export default function ImportCsv({
+export default function ImportSummary({
   me,
   partner,
   entries,
@@ -28,8 +35,7 @@ export default function ImportCsv({
   entries: Entry[];
   onSaved: () => void;
 }) {
-  const [summary, setSummary] = useState<ImportSummary | null>(null);
-  const [fileName, setFileName] = useState("");
+  const [summary, setSummary] = useState<Summary | null>(null);
   const [name, setName] = useState("");
   const [payer, setPayer] = useState<"me" | "partner">("me");
   const [myShare, setMyShare] = useState(pctText(me.share_pct));
@@ -38,22 +44,27 @@ export default function ImportCsv({
 
   async function onFile(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = ""; // so choosing the same file again still triggers
     if (!file) return;
     setError(null);
     setSummary(null);
     try {
-      const s = summarizeImport(await file.text());
+      // A summary is tiny; a big file is almost certainly the detailed one.
+      if (file.size > MAX_SUMMARY_BYTES) {
+        throw new Error(
+          "That file is too big to be a statement summary. Run `uv run split-ledger summarize split_transactions.csv` and choose the split_summary.json it makes.",
+        );
+      }
+      const s = parseSummary(await file.text());
       setSummary(s);
       setName(s.name);
-      setFileName(file.name);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't read that file.");
     }
   }
 
   const payerShare = payerSharePct(myShare, payer);
-  const duplicate =
-    summary !== null && entries.some((e) => !e.voided_at && e.name === name.trim());
+  const duplicate = summary !== null && entries.some((e) => !e.voided_at && e.name === name.trim());
 
   async function save() {
     if (!summary) return;
@@ -63,14 +74,8 @@ export default function ImportCsv({
     setBusy(true);
     setError(null);
     try {
-      await addEntry({
-        kind: "expense",
-        entry_date: todayLocal(),
-        name: name.trim(),
-        amount_cents: summary.totalCents,
-        payer_id: payer === "me" ? me.user_id : partner.user_id,
-        payer_share_pct: payerShare,
-      });
+      const payerId = payer === "me" ? me.user_id : partner.user_id;
+      await addEntry(summaryToEntry({ ...summary, name: name.trim() }, payerId, payerShare, todayLocal()));
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -84,34 +89,35 @@ export default function ImportCsv({
   return (
     <div className="stack">
       <p className="muted">
-        Choose the <code>split_transactions.csv</code> from the statement script. Only the total is
-        saved, not the individual transactions.
+        On your computer, run <code>uv run split-ledger summarize split_transactions.csv</code>, then choose the{" "}
+        <code>split_summary.json</code> it makes. Your individual transactions stay on your computer.
       </p>
-      <input type="file" accept=".csv,text/csv" onChange={onFile} />
+      <input type="file" accept=".json,application/json" onChange={onFile} />
       <ErrorText message={error} />
 
       {summary && (
         <>
           <div className="card stack">
-            <strong>{fileName}</strong>
+            <strong>{summary.name}</strong>
             <span className="muted">
-              {summary.count} transaction{summary.count === 1 ? "" : "s"}
-              {summary.skipped > 0 ? `, ${summary.skipped} skipped as invalid` : ""}
+              {summary.count} transaction{summary.count === 1 ? "" : "s"}, {shortDate(summary.start)} – {shortDate(summary.end)}
             </span>
             <ul className="plain">
-              {Object.entries(summary.byCategory)
-                .sort(([a], [b]) => a.localeCompare(b))
-                .map(([cat, cents]) => (
-                  <li key={cat} className="row">
-                    <span>{cat}</span>
-                    <span>{fmt(cents)}</span>
-                  </li>
-                ))}
+              {summary.byCategory &&
+                Object.entries(summary.byCategory)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([cat, cents]) => (
+                    <li key={cat} className="row">
+                      <span>{cat}</span>
+                      <span>{fmt(cents)}</span>
+                    </li>
+                  ))}
               <li className="row total">
                 <span>Total</span>
                 <span>{fmt(summary.totalCents)}</span>
               </li>
             </ul>
+            <span className="muted small">Only the name and total are saved to the ledger.</span>
           </div>
 
           <label>
@@ -121,6 +127,7 @@ export default function ImportCsv({
           <div>
             <span className="label">Who paid?</span>
             <Segmented
+              label="Who paid?"
               value={payer}
               onChange={setPayer}
               options={[
@@ -131,17 +138,13 @@ export default function ImportCsv({
           </div>
           <label>
             Your share (%)
-            <input
-              inputMode="decimal"
-              value={myShare}
-              onChange={(e) => setMyShare(e.target.value)}
-            />
+            <input inputMode="decimal" value={myShare} onChange={(e) => setMyShare(e.target.value)} />
           </label>
 
           {duplicate && (
             <p className="notice">
-              There's already an entry with this name, so this file may have been imported before.
-              Change the name to add it anyway.
+              There's already an entry with this name, so this statement may have been imported before. Change the
+              name to add it anyway.
             </p>
           )}
           {owed !== null && (

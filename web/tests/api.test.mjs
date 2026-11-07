@@ -298,6 +298,129 @@ describe("Split API", () => {
     assert.equal((await carol.post(`/api/entries/${target.id}/unvoid`)).status, 404);
   });
 
+  describe("recurring expenses", () => {
+    // The server's notion of "today" (no ?today= sent, so it uses UTC).
+    const today = new Date().toISOString().slice(0, 10);
+    const rule = (extra = {}) => ({
+      name: "Rent",
+      amount_cents: 240000,
+      payer_id: aliceId,
+      payer_share_pct: 50,
+      frequency: "monthly",
+      start_date: today,
+      today,
+      ...extra,
+    });
+    const household = async () => (await alice.get("/api/household")).data;
+    const occurrences = async (id) => (await household()).entries.filter((e) => e.recurring_id === id);
+    let ruleId;
+
+    test("creating: validation, and no dates in the past", async () => {
+      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const tooFar = new Date(Date.now() + 400 * 86400000).toISOString().slice(0, 10);
+      const bad = [
+        rule({ start_date: yesterday }),
+        rule({ start_date: tooFar }),
+        rule({ start_date: "2026-02-31" }),
+        rule({ frequency: "daily" }),
+        rule({ payer_share_pct: 33.333 }),
+        rule({ amount_cents: 0 }),
+        rule({ name: " " }),
+        rule({ payer_id: carolId }),
+      ];
+      for (const body of bad) assert.equal((await alice.post("/api/recurring", body)).status, 400, JSON.stringify(body));
+    });
+
+    test("the first occurrence appears when the app is opened, exactly once", async () => {
+      const res = await alice.post("/api/recurring", rule());
+      assert.equal(res.status, 201);
+      ruleId = res.data.id;
+
+      // Five phones opening the app at the same moment still create it once.
+      await Promise.all(Array.from({ length: 5 }, () => (Math.random() < 0.5 ? alice : bob).get("/api/household")));
+      const occ = await occurrences(ruleId);
+      assert.equal(occ.length, 1);
+      assert.equal(occ[0].entry_date, today);
+      assert.equal(occ[0].occurrence_date, today);
+      assert.equal(occ[0].owed_cents, 120000, "owed computed on the server");
+      assert.equal(occ[0].created_by, aliceId);
+
+      const listed = (await household()).recurring.find((r) => r.id === ruleId);
+      assert.ok(listed.next_date > today, "the rule moved on to the next month");
+      assert.equal(listed.paused, false);
+    });
+
+    test("a voided occurrence never comes back", async () => {
+      const [occ] = await occurrences(ruleId);
+      assert.equal((await alice.post(`/api/entries/${occ.id}/void`)).status, 200);
+      // Even if the rule were rewound (e.g. a lost race), the voided month isn't recreated.
+      sql(`UPDATE recurring SET next_index = 0, next_date = start_date WHERE id = '${ruleId}'`);
+      const after = await occurrences(ruleId);
+      assert.equal(after.length, 1);
+      assert.ok(after[0].voided_at);
+    });
+
+    test("catches up on every missed occurrence after a gap", async () => {
+      // Pretend the rule started on the 1st, two months ago, and nobody opened the app since.
+      const d = new Date();
+      const start = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 2, 1)).toISOString().slice(0, 10);
+      sql(`UPDATE recurring SET start_date = '${start}', next_index = 0, next_date = '${start}' WHERE id = '${ruleId}'`);
+      const occ = await occurrences(ruleId);
+      const firsts = occ.filter((e) => e.occurrence_date.endsWith("-01")).map((e) => e.occurrence_date).sort();
+      assert.equal(firsts.length, 3, "three 1sts: two months ago, last month, this month");
+      assert.equal(firsts[0], start);
+      assert.equal(occ.length, today.endsWith("-01") ? 3 : 4, "plus the voided one from today");
+      assert.ok((await household()).recurring.find((r) => r.id === ruleId).next_date > today);
+    });
+
+    test("pausing stops new occurrences; resuming doesn't fill in the paused months", async () => {
+      const base = rule();
+      delete base.start_date;
+      delete base.frequency;
+      assert.equal((await bob.post(`/api/recurring/${ruleId}/update`, { ...base, paused: true })).status, 200);
+      const before = (await occurrences(ruleId)).length;
+
+      sql(`UPDATE recurring SET next_index = 0, next_date = start_date WHERE id = '${ruleId}'`);
+      assert.equal((await occurrences(ruleId)).length, before, "nothing while paused");
+
+      sql(`UPDATE recurring SET start_date = '2025-01-01', next_index = 0, next_date = '2025-01-01' WHERE id = '${ruleId}'`);
+      assert.equal((await bob.post(`/api/recurring/${ruleId}/update`, { ...base, paused: false })).status, 200);
+      assert.equal((await occurrences(ruleId)).length, before, "resuming skips the paused period");
+      const listed = (await household()).recurring.find((r) => r.id === ruleId);
+      assert.equal(listed.paused, false);
+      assert.ok(listed.next_date >= today);
+    });
+
+    test("changes apply to future occurrences only", async () => {
+      const before = (await occurrences(ruleId)).map((e) => e.amount_cents);
+      const body = { ...rule({ name: "Rent (new lease)", amount_cents: 250000, payer_share_pct: 60 }), paused: false };
+      assert.equal((await alice.post(`/api/recurring/${ruleId}/update`, body)).status, 200);
+      const listed = (await household()).recurring.find((r) => r.id === ruleId);
+      assert.equal(listed.amount_cents, 250000);
+      assert.equal(listed.name, "Rent (new lease)");
+      assert.deepEqual((await occurrences(ruleId)).map((e) => e.amount_cents), before, "past entries untouched");
+      assert.equal((await alice.post(`/api/recurring/${ruleId}/update`, { ...body, paused: "no" })).status, 400);
+    });
+
+    test("another household can't change or stop it", async () => {
+      const body = { ...rule({ payer_id: carolId }), paused: false };
+      assert.equal((await carol.post(`/api/recurring/${ruleId}/update`, body)).status, 404);
+      assert.equal((await carol.post(`/api/recurring/${ruleId}/stop`)).status, 404);
+      assert.equal((await carol.get("/api/household")).data.recurring.length, 0);
+    });
+
+    test("stopping: no more occurrences, past ones stay", async () => {
+      const kept = (await occurrences(ruleId)).length;
+      assert.equal((await bob.post(`/api/recurring/${ruleId}/stop`)).status, 200);
+      assert.equal((await bob.post(`/api/recurring/${ruleId}/stop`)).status, 404);
+      assert.equal((await household()).recurring.length, 0);
+      sql(`UPDATE recurring SET next_index = 0, next_date = '2020-01-01', start_date = '2020-01-01' WHERE id = '${ruleId}'`);
+      assert.equal((await occurrences(ruleId)).length, kept);
+      const body = { ...rule(), paused: false };
+      assert.equal((await alice.post(`/api/recurring/${ruleId}/update`, body)).status, 404);
+    });
+  });
+
   test("sessions renew when the app is opened", async () => {
     sql("UPDATE sessions SET expires_at = datetime('now', '+5 days')");
     const res = await alice.get("/api/me");

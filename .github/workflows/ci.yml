@@ -49,3 +49,8 @@ jobs:
           ledger="$RUNNER_TEMP/ledger.csv"
           uv run split-ledger --ledger "$ledger" --no-color add 1.01 me coffee > /dev/null
           uv run split-ledger --ledger "$ledger" --no-color balance | tee /dev/stderr | grep -q 'Partner owes you \$0.51'
+      - name: Statement summary matches what the web app expects
+        run: |
+          # The web app's tests parse the same expected_summary.json, so both ends stay in step.
+          uv run split-ledger --no-color summarize web/tests/fixtures/sample_split_transactions.csv -o "$RUNNER_TEMP/summary.json"
+          diff "$RUNNER_TEMP/summary.json" web/tests/fixtures/expected_summary.json

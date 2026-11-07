@@ -15,6 +15,7 @@ Examples:
     uv run split-ledger add 60 me dinner --my-share 70   # you owe 70% of this one
     uv run split-ledger add                              # prompts for amount, payer, name
     uv run split-ledger import split_transactions.csv    # total -> "Expenses mm/dd/yy-mm/dd/yy"
+    uv run split-ledger summarize split_transactions.csv # -> split_summary.json for the web app
     uv run split-ledger settle                           # settle the full balance
     uv run split-ledger settle 100 me                    # you paid partner $100
     uv run split-ledger balance
@@ -23,6 +24,7 @@ Examples:
 
 import argparse
 import csv
+import json
 import os
 import sys
 from datetime import date, datetime
@@ -258,19 +260,8 @@ def cmd_settle(args, path):
     print(describe(current_balance(load_ledger(path))))
 
 
-def cmd_import(args, path):
-    """Total a split_transactions.csv from the statement script into one entry."""
-    src = Path(args.csv)
-    if not src.is_file():
-        sys.exit(f"File not found: {src}")
-
-    try:
-        payer = parse_payer(args.payer)
-        share = parse_percent(args.my_share)
-        when = parse_date(args.date) if args.date else date.today().isoformat()
-    except ValueError as e:
-        sys.exit(f"Error: {e}")
-
+def read_split_csv(src):
+    """Total a split_transactions.csv: (total, dates, totals by category, rows skipped)."""
     total = Decimal("0.00")
     dates, by_category, skipped = [], {}, 0
     with open(src, newline="") as f:
@@ -288,12 +279,69 @@ def cmd_import(args, path):
             dates.append(d)
             cat = (r.get("category") or "uncategorized").strip() or "uncategorized"
             by_category[cat] = by_category.get(cat, Decimal("0.00")) + amt
-
     if not dates:
         sys.exit("No valid transactions found in that CSV.")
+    return total, dates, by_category, skipped
 
+
+def default_name(dates):
     start, end = min(dates), max(dates)
-    name = args.name or f"Expenses {start:%m/%d/%y}-{end:%m/%d/%y}"
+    return f"Expenses {start:%m/%d/%y}-{end:%m/%d/%y}"
+
+
+def cents(amount):
+    return int(money(amount) * 100)
+
+
+def cmd_summarize(args, _path):
+    """Write split_summary.json: the only thing the web app's import accepts.
+
+    It holds the name, date range, number of transactions, total and (unless
+    --no-categories) the total per category. No dates of individual purchases,
+    no merchants, no amounts per transaction: those stay on this computer.
+    """
+    src = Path(args.csv)
+    if not src.is_file():
+        sys.exit(f"File not found: {src}")
+    total, dates, by_category, skipped = read_split_csv(src)
+
+    summary = {
+        "format": "split-summary",
+        "version": 1,
+        "name": args.name or default_name(dates),
+        "start": min(dates).isoformat(),
+        "end": max(dates).isoformat(),
+        "count": len(dates),
+        "total_cents": cents(total),
+    }
+    if not args.no_categories:
+        summary["categories"] = {cat: cents(by_category[cat]) for cat in sorted(by_category)}
+
+    out = Path(args.output)
+    out.write_text(json.dumps(summary, indent=2) + "\n")
+    print(f"Summarized {len(dates)} transaction(s) from {src.name}"
+          + (f" ({skipped} skipped as invalid)" if skipped else "") + f" into {out}:")
+    print(f"  {summary['name']}: {fmt(total)}")
+    for cat, c in summary.get("categories", {}).items():
+        print(f"  {cat:<15}{paint(f'{fmt(Decimal(c) / 100):>12}', 'cyan')}")
+    print(f"That file is everything the web app will receive. Open it to check: {out}")
+
+
+def cmd_import(args, path):
+    """Total a split_transactions.csv from the statement script into one entry."""
+    src = Path(args.csv)
+    if not src.is_file():
+        sys.exit(f"File not found: {src}")
+
+    try:
+        payer = parse_payer(args.payer)
+        share = parse_percent(args.my_share)
+        when = parse_date(args.date) if args.date else date.today().isoformat()
+    except ValueError as e:
+        sys.exit(f"Error: {e}")
+
+    total, dates, by_category, skipped = read_split_csv(src)
+    name = args.name or default_name(dates)
 
     rows = load_ledger(path)
     if any(r["name"] == name for r in rows) and not args.force:
@@ -422,6 +470,16 @@ def main():
     p.add_argument("--force", action="store_true",
                    help="Allow importing even if an entry with the same name exists")
     p.set_defaults(func=cmd_import)
+
+    p = sub.add_parser("summarize", parents=[common],
+                       help="Write split_summary.json (totals only) for the web app's import")
+    p.add_argument("csv", help="CSV from split-statements")
+    p.add_argument("-o", "--output", default="split_summary.json",
+                   help="Where to write the summary (default: split_summary.json)")
+    p.add_argument("--name", help="Override the entry name (default: Expenses mm/dd/yy-mm/dd/yy)")
+    p.add_argument("--no-categories", action="store_true",
+                   help="Leave out the per-category totals; only the overall total is kept")
+    p.set_defaults(func=cmd_summarize)
 
     p = sub.add_parser("balance", parents=[common], help="Show who owes whom")
     p.set_defaults(func=cmd_balance)

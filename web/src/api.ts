@@ -1,4 +1,6 @@
-import type { Entry, Member, NewEntry } from "./types";
+import type { Frequency } from "../shared/recurring";
+import { todayLocal } from "./ledger";
+import type { Entry, Member, NewEntry, Recurring, RecurringInput } from "./types";
 
 export interface User {
   id: string;
@@ -45,8 +47,12 @@ export const createHousehold = (displayName: string) => call("POST", "/api/house
 export const joinHousehold = (code: string, displayName: string) =>
   call("POST", "/api/household/join", { code, displayName });
 
+// Sends the phone's local date, so recurring expenses appear on the right day where you are.
 export const loadHousehold = () =>
-  call<{ members: Member[]; inviteCode: string; entries: Entry[] }>("GET", "/api/household");
+  call<{ members: Member[]; inviteCode: string; entries: Entry[]; recurring: Recurring[] }>(
+    "GET",
+    `/api/household?today=${todayLocal()}`,
+  );
 
 export const setDefaultSplit = (myShare: number) => call("POST", "/api/household/split", { myShare });
 
@@ -54,3 +60,9 @@ export const addEntry = (entry: NewEntry) => call("POST", "/api/entries", entry)
 export const editEntry = (id: string, entry: NewEntry) => call("POST", `/api/entries/${id}/edit`, entry);
 export const voidEntry = (id: string) => call("POST", `/api/entries/${id}/void`, {});
 export const unvoidEntry = (id: string) => call("POST", `/api/entries/${id}/unvoid`, {});
+
+export const createRecurring = (rule: RecurringInput & { frequency: Frequency; start_date: string }) =>
+  call("POST", "/api/recurring", { ...rule, today: todayLocal() });
+export const updateRecurring = (id: string, rule: RecurringInput & { paused: boolean }) =>
+  call("POST", `/api/recurring/${id}/update`, { ...rule, today: todayLocal() });
+export const stopRecurring = (id: string) => call("POST", `/api/recurring/${id}/stop`, {});

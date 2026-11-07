@@ -1,15 +1,16 @@
 // Run with:  npm test   (needs Node 22.6 or newer)
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   balanceFor,
   describeBalance,
   exportLedgerCsv,
   fmt,
   owedCents,
-  parseCsv,
   parseDollars,
-  summarizeImport,
+  parseSummary,
+  summaryToEntry,
 } from "./ledger.ts";
 import type { Entry } from "./types.ts";
 
@@ -30,6 +31,8 @@ function entry(p: Partial<Entry> & Pick<Entry, "kind" | "payer_id" | "amount_cen
     voided_at: null,
     voided_by: null,
     replaced_by: null,
+    recurring_id: null,
+    occurrence_date: null,
     ...p,
   };
 }
@@ -98,31 +101,64 @@ test("describeBalance", () => {
   assert.equal(fmt(-1234), "$12.34");
 });
 
-test("parseCsv handles quotes, commas and CRLF", () => {
-  const rows = parseCsv('a,b\r\n1,"x, ""y"""\r\n\r\n2,z\n');
-  assert.deepEqual(rows, [
-    ["a", "b"],
-    ["1", 'x, "y"'],
-    ["2", "z"],
-  ]);
+// The same files the Python tests use (CI checks `split-ledger summarize` produces exactly
+// expected_summary.json from the sample CSV), so both ends of the import agree.
+const fixture = (name: string) => readFileSync(new URL(`../tests/fixtures/${name}`, import.meta.url), "utf8");
+
+test("parseSummary reads what `split-ledger summarize` writes", () => {
+  const s = parseSummary(fixture("expected_summary.json"));
+  assert.deepEqual(s, {
+    name: "Expenses 01/15/26-02/03/26",
+    start: "2026-01-15",
+    end: "2026-02-03",
+    count: 4,
+    totalCents: 136205,
+    byCategory: { dining: 4510, groceries: 11695, household: 120000 },
+  });
+  // --no-categories
+  const bare = JSON.parse(fixture("expected_summary.json"));
+  delete bare.categories;
+  assert.equal(parseSummary(JSON.stringify(bare)).byCategory, null);
 });
 
-test("summarizeImport totals the statement script's CSV", () => {
-  const csv = [
-    "date,amount,vendor,category",
-    "2026-01-15,52.10,WHOLE FOODS,groceries",
-    "2026-02-03,120.55,CON EDISON,utilities",
-    '2026-01-28,18.40,"CHIPOTLE, INC",dining',
-    "bad,5.00,X,dining",
-  ].join("\n");
-  const s = summarizeImport(csv);
-  assert.equal(s.count, 3);
-  assert.equal(s.skipped, 1);
-  assert.equal(s.totalCents, 19105);
-  assert.equal(s.name, "Expenses 01/15/26-02/03/26");
-  assert.deepEqual(s.byCategory, { groceries: 5210, utilities: 12055, dining: 1840 });
-  assert.throws(() => summarizeImport("date,vendor\n2026-01-01,x"), /date' and 'amount/);
-  assert.throws(() => summarizeImport("date,amount\nnope,1"), /No valid/);
+test("parseSummary refuses the detailed CSV and anything unexpected", () => {
+  assert.throws(() => parseSummary(fixture("sample_split_transactions.csv")), /detailed transactions file/);
+  const good = () => JSON.parse(fixture("expected_summary.json"));
+  const bad: [string, (d: Record<string, unknown>) => void, RegExp][] = [
+    ["extra field (e.g. transactions)", (d) => (d.transactions = [{ vendor: "X", amount: 1 }]), /unexpected fields \(transactions\)/],
+    ["wrong format", (d) => (d.format = "something-else"), /isn't a statement summary/],
+    ["newer version", (d) => (d.version = 2), /newer version/],
+    ["categories don't add up", (d) => ((d.categories as Record<string, number>).dining += 1), /don't add up/],
+    ["total in dollars, not cents", (d) => (d.total_cents = 1362.05), /total isn't valid/],
+    ["impossible date", (d) => (d.start = "2026-02-31"), /dates aren't valid/],
+    ["start after end", (d) => (d.start = "2026-03-01"), /dates aren't valid/],
+    ["empty name", (d) => (d.name = "  "), /name is missing/],
+    ["zero transactions", (d) => (d.count = 0), /count isn't valid/],
+    ["negative category", (d) => ((d.categories as Record<string, number>).dining = -1), /categories aren't valid/],
+  ];
+  for (const [label, mutate, message] of bad) {
+    const d = good();
+    mutate(d);
+    assert.throws(() => parseSummary(JSON.stringify(d)), message, label);
+  }
+  assert.throws(() => parseSummary("[1, 2]"), /isn't a statement summary/);
+  assert.throws(() => parseSummary("hello"), /isn't a statement summary/);
+});
+
+test("an import sends only the name, total, payer, split and date", () => {
+  const s = parseSummary(fixture("expected_summary.json"));
+  const entry = summaryToEntry(s, "payer-id", 50, "2026-11-07");
+  assert.deepEqual(Object.keys(entry).sort(), ["amount_cents", "entry_date", "kind", "name", "payer_id", "payer_share_pct"]);
+  assert.deepEqual(entry, {
+    kind: "expense",
+    entry_date: "2026-11-07",
+    name: "Expenses 01/15/26-02/03/26",
+    amount_cents: 136205,
+    payer_id: "payer-id",
+    payer_share_pct: 50,
+  });
+  // Nothing from the categories or the count tags along.
+  assert.doesNotMatch(JSON.stringify(entry), /groceries|dining|household|"count"/);
 });
 
 test("export uses the CLI ledger.csv format", () => {
@@ -145,4 +181,51 @@ test("export uses the CLI ledger.csv format", () => {
   const theirs = exportLedgerCsv(entries, PARTNER).trim().split("\n");
   assert.equal(theirs[1], "2026-01-01,opening_partner_owes,,500.00,,Starting balance");
   assert.equal(theirs[2], "2026-01-01,expense,partner,60.00,30,dinner");
+});
+
+// ---------------------------------------------------------------------------
+// Recurring expense dates (shared/recurring.ts)
+// ---------------------------------------------------------------------------
+
+import { describeSchedule, dueOccurrences, firstIndexOnOrAfter, occurrenceDate } from "../shared/recurring";
+
+test("monthly on the 31st clamps to short months without drifting", () => {
+  assert.equal(occurrenceDate("2027-01-31", "monthly", 0), "2027-01-31");
+  assert.equal(occurrenceDate("2027-01-31", "monthly", 1), "2027-02-28");
+  assert.equal(occurrenceDate("2027-01-31", "monthly", 2), "2027-03-31"); // back to the 31st
+  assert.equal(occurrenceDate("2027-01-31", "monthly", 3), "2027-04-30");
+  assert.equal(occurrenceDate("2028-01-31", "monthly", 1), "2028-02-29"); // leap year
+  assert.equal(occurrenceDate("2026-11-15", "monthly", 2), "2027-01-15"); // across the year
+  assert.equal(occurrenceDate("2026-11-15", "monthly", 14), "2028-01-15");
+});
+
+test("weekly and yearly", () => {
+  assert.equal(occurrenceDate("2026-12-29", "weekly", 1), "2027-01-05");
+  assert.equal(occurrenceDate("2026-11-07", "weekly", 52), "2027-11-06");
+  assert.equal(occurrenceDate("2028-02-29", "yearly", 1), "2029-02-28");
+  assert.equal(occurrenceDate("2028-02-29", "yearly", 4), "2032-02-29");
+});
+
+test("due occurrences catch up in order and stop at today", () => {
+  assert.deepEqual(dueOccurrences("2027-01-31", "monthly", 0, "2027-04-15"), [
+    { index: 0, date: "2027-01-31" },
+    { index: 1, date: "2027-02-28" },
+    { index: 2, date: "2027-03-31" },
+  ]);
+  assert.deepEqual(dueOccurrences("2027-01-31", "monthly", 3, "2027-04-15"), []);
+  assert.equal(dueOccurrences("2027-01-01", "monthly", 0, "2027-01-01").length, 1, "due on the day itself");
+  assert.equal(dueOccurrences("2000-01-01", "weekly", 0, "2027-01-01").length, 60, "capped");
+});
+
+test("resuming skips the paused period", () => {
+  assert.equal(firstIndexOnOrAfter("2027-01-01", "monthly", 0, "2027-04-02"), 4); // May 1
+  assert.equal(firstIndexOnOrAfter("2027-01-01", "monthly", 0, "2027-04-01"), 3); // Apr 1 itself
+});
+
+test("schedule descriptions", () => {
+  assert.equal(describeSchedule("2026-11-01", "monthly"), "Monthly on the 1st");
+  assert.equal(describeSchedule("2026-11-22", "monthly"), "Monthly on the 22nd");
+  assert.equal(describeSchedule("2026-11-30", "monthly"), "Monthly on the 30th (or the last day)");
+  assert.equal(describeSchedule("2026-11-09", "weekly"), "Weekly on Mondays");
+  assert.equal(describeSchedule("2026-03-05", "yearly"), "Yearly on Mar 5");
 });

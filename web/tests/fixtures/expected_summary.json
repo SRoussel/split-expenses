@@ -1,0 +1,14 @@
+{
+  "format": "split-summary",
+  "version": 1,
+  "name": "Expenses 01/15/26-02/03/26",
+  "start": "2026-01-15",
+  "end": "2026-02-03",
+  "count": 4,
+  "total_cents": 136205,
+  "categories": {
+    "dining": 4510,
+    "groceries": 11695,
+    "household": 120000
+  }
+}

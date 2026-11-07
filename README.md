@@ -6,7 +6,7 @@ Two small Python scripts for splitting expenses with a partner, plus a web app s
 - `split_ledger.py` keeps a running balance of who owes who, and can take the total from the first script as a single entry.
 - `web/` is the shared version of the ledger, called Split (React, with a Cloudflare Worker and D1 database). See [web/README.md](web/README.md) for setup and deploying. The scripts and the app don't talk to each other directly: you import the statement script's CSV into the app, and the app can export a CSV in the ledger script's format.
 
-The scripts keep your data in plain files (`ledger.csv`, `split_transactions.csv`, `.split_state.json`, and your PDFs in `statements/`). The `.gitignore` leaves those out of the repo on purpose. This repo is public, so check `git status` before every commit.
+The scripts keep your data in plain files (`ledger.csv`, `split_transactions.csv`, `split_summary.json`, `.split_state.json`, and your PDFs in `statements/`). The `.gitignore` leaves those out of the repo on purpose. This repo is public, so check `git status` before every commit.
 
 ## Setup
 
@@ -58,6 +58,12 @@ Add the total from the statement script:
 
 This adds one entry named after the date range, like `Expenses 01/15/26-02/03/26`. It assumes you paid and it's split 50/50. Use `--payer partner` or `--my-share 60` to change that, and `--name` to call it something else. It won't add an entry with the same name twice unless you use `--force`.
 
+For the web app, make a summary instead of importing:
+
+    uv run split-ledger summarize split_transactions.csv
+
+It writes `split_summary.json` with just the name, date range, number of transactions, total and per-category totals (`--no-categories` leaves those out; `-o FILE` writes it elsewhere). That small file is the only thing the app's import accepts, so your individual transactions never leave your computer.
+
 One thing to watch: importing doesn't clear `split_transactions.csv`. If you review more statements and import again, the old transactions get counted again. Either delete the CSV after you import it, or use `-o` to start a new file next time.
 
 Pay each other back:
@@ -77,6 +83,6 @@ Use `--ledger FILE` to keep a different ledger file, and `--no-color` to turn of
 ## Typical flow
 
 1. Run `uv run split-statements` on a folder of statements and go through the expenses.
-2. Run `uv run split-ledger import split_transactions.csv`.
-3. Delete `split_transactions.csv` so the next batch starts clean.
+2. Run `uv run split-ledger summarize split_transactions.csv` and import the `split_summary.json` in the web app (or, for the Python ledger, `uv run split-ledger import split_transactions.csv`).
+3. Delete `split_transactions.csv` and `split_summary.json` so the next batch starts clean.
 4. Run `uv run split-ledger settle` whenever one of you pays the other back.

@@ -1,5 +1,6 @@
 export type { EntryKind } from "../shared/owed";
 import type { EntryKind } from "../shared/owed";
+import type { Frequency } from "../shared/recurring";
 
 export interface Entry {
   id: string;
@@ -17,6 +18,31 @@ export interface Entry {
   voided_by: string | null;
   /** Set when the entry was edited: the id of the entry that replaced it. */
   replaced_by: string | null;
+  /** Set when a recurring expense added this entry. */
+  recurring_id: string | null;
+  occurrence_date: string | null;
+}
+
+/** A recurring expense rule. Its entries are added when the app is opened on or after each date. */
+export interface Recurring {
+  id: string;
+  name: string;
+  amount_cents: number;
+  payer_id: string;
+  payer_share_pct: number;
+  frequency: Frequency;
+  start_date: string;
+  next_date: string;
+  paused: boolean;
+  created_by: string;
+}
+
+/** What the app sends to create or change a recurring expense. */
+export interface RecurringInput {
+  name: string;
+  amount_cents: number;
+  payer_id: string;
+  payer_share_pct: number;
 }
 
 /** What the app sends to add or edit an entry. The server works out what's owed. */

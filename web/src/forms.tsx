@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
-import { changePassword, setDefaultSplit } from "./api";
+import { describeSchedule, occurrenceDate, type Frequency } from "../shared/recurring";
+import { changePassword, createRecurring, setDefaultSplit, updateRecurring } from "./api";
 import { fmt, owedCents, parseDollars, payerSharePct, SHARE_ERROR, todayLocal } from "./ledger";
-import type { Entry, Member, NewEntry } from "./types";
+import type { Entry, Member, NewEntry, Recurring } from "./types";
 import { ErrorText, MoneyInput, PasswordInput, Segmented } from "./ui";
 
 /** Shared by the entry forms: `save` adds a new entry or edits `initial`, depending on the caller. */
@@ -62,6 +63,42 @@ function PayerToggle({
   );
 }
 
+/** "Your share (%)" with quick picks: your usual split first (if it isn't 50/50), then the common ones. */
+function ShareField({ me, value, onChange }: { me: Member; value: string; onChange: (v: string) => void }) {
+  const usual = pctText(me.share_pct);
+  const chips: [string, string][] = [
+    ...(usual !== "50" ? ([[usual, `Usual (${usual}%)`]] as [string, string][]) : []),
+    ["50", "Split evenly"],
+    ["0", "All theirs"],
+    ["100", "All mine"],
+  ];
+  return (
+    <label>
+      Your share (%)
+      <input inputMode="decimal" value={value} onChange={(e) => onChange(e.target.value)} />
+      <span className="chips">
+        {chips.map(([v, label]) => (
+          <button key={v} type="button" className={value.trim() === v ? "chip on" : "chip"} onClick={() => onChange(v)}>
+            {label}
+          </button>
+        ))}
+      </span>
+    </label>
+  );
+}
+
+/** "Sam will owe you $42.10" / "You will owe Sam $42.10" */
+function OwedPreview({ owed, payer, partner, suffix = "" }: { owed: number | null; payer: "me" | "partner"; partner: Member; suffix?: string }) {
+  if (owed === null) return null;
+  return (
+    <p className="preview">
+      {payer === "me"
+        ? `${partner.display_name} will owe you ${fmt(owed)}${suffix}`
+        : `You will owe ${partner.display_name} ${fmt(owed)}${suffix}`}
+    </p>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Expense
 // ---------------------------------------------------------------------------
@@ -83,15 +120,6 @@ export function AddExpenseForm({ me, partner, save, onSaved, initial }: EntryFor
   const cents = parseDollars(amount);
   const payerShare = payerSharePct(myShare, payer);
   const owed = cents !== null && payerShare !== null ? owedCents("expense", cents, payerShare) : null;
-
-  // Quick picks: your usual split first (if it isn't 50/50), then the common ones.
-  const usual = pctText(me.share_pct);
-  const chips: [string, string][] = [
-    ...(usual !== "50" ? ([[usual, `Usual (${usual}%)`]] as [string, string][]) : []),
-    ["50", "Split evenly"],
-    ["0", "All theirs"],
-    ["100", "All mine"],
-  ];
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -127,34 +155,13 @@ export function AddExpenseForm({ me, partner, save, onSaved, initial }: EntryFor
         />
       </label>
       <PayerToggle value={payer} onChange={setPayer} partner={partner} />
-      <label>
-        Your share (%)
-        <input inputMode="decimal" value={myShare} onChange={(e) => setMyShare(e.target.value)} />
-        <span className="chips">
-          {chips.map(([v, label]) => (
-            <button
-              key={v}
-              type="button"
-              className={myShare.trim() === v ? "chip on" : "chip"}
-              onClick={() => setMyShare(v)}
-            >
-              {label}
-            </button>
-          ))}
-        </span>
-      </label>
+      <ShareField me={me} value={myShare} onChange={setMyShare} />
       <label>
         Date
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       </label>
 
-      {owed !== null && (
-        <p className="preview">
-          {payer === "me"
-            ? `${partner.display_name} will owe you ${fmt(owed)}`
-            : `You will owe ${partner.display_name} ${fmt(owed)}`}
-        </p>
-      )}
+      <OwedPreview owed={owed} payer={payer} partner={partner} />
       <ErrorText message={error} />
       <button className="primary" disabled={busy}>
         {busy ? "Saving…" : initial ? "Save changes" : "Add expense"}
@@ -268,6 +275,134 @@ export function OpeningForm({ me, partner, save, onSaved, initial }: EntryFormPr
       <button className="primary" disabled={busy}>
         {busy ? "Saving…" : initial ? "Save changes" : "Save starting balance"}
       </button>
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Recurring expense
+// ---------------------------------------------------------------------------
+
+const EVERY = { weekly: "week", monthly: "month", yearly: "year" } as const;
+const shortDate = (iso: string) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+/** Create a recurring expense, or change one (`initial`). The schedule is fixed once created. */
+export function RecurringForm({
+  me,
+  partner,
+  initial,
+  onSaved,
+  onStop,
+}: {
+  me: Member;
+  partner: Member;
+  initial?: Recurring;
+  onSaved: () => void;
+  onStop?: () => void;
+}) {
+  const initialPayer = initial ? (initial.payer_id === me.user_id ? "me" : "partner") : "me";
+  const [amount, setAmount] = useState(initial ? dollarsText(initial.amount_cents) : "");
+  const [name, setName] = useState(initial?.name ?? "");
+  const [payer, setPayer] = useState<"me" | "partner">(initialPayer);
+  const [myShare, setMyShare] = useState(
+    initial
+      ? pctText(initialPayer === "me" ? initial.payer_share_pct : 100 - initial.payer_share_pct)
+      : pctText(me.share_pct),
+  );
+  const [frequency, setFrequency] = useState<Frequency>(initial?.frequency ?? "monthly");
+  const [start, setStart] = useState(initial?.start_date ?? todayLocal());
+  const [paused, setPaused] = useState(initial?.paused ?? false);
+  const { busy, error, setError, run } = useSubmit(onSaved);
+
+  const cents = parseDollars(amount);
+  const payerShare = payerSharePct(myShare, payer);
+  const owed = cents !== null && payerShare !== null ? owedCents("expense", cents, payerShare) : null;
+  const today = todayLocal();
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (cents === null) return setError("Enter an amount greater than zero.");
+    if (!name.trim()) return setError("Give it a name, like rent.");
+    if (payerShare === null) return setError(SHARE_ERROR);
+    if (!initial && start < today) return setError("The first date can't be in the past.");
+    const fields = {
+      name: name.trim(),
+      amount_cents: cents,
+      payer_id: payer === "me" ? me.user_id : partner.user_id,
+      payer_share_pct: payerShare,
+    };
+    void run(() =>
+      initial ? updateRecurring(initial.id, { ...fields, paused }) : createRecurring({ ...fields, frequency, start_date: start }),
+    );
+  }
+
+  return (
+    <form onSubmit={submit} className="stack">
+      <label>
+        Amount
+        <MoneyInput value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus={!initial} />
+      </label>
+      <label>
+        What for?
+        <input placeholder="Rent" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} />
+      </label>
+      <PayerToggle value={payer} onChange={setPayer} partner={partner} />
+      <ShareField me={me} value={myShare} onChange={setMyShare} />
+
+      {initial ? (
+        <>
+          <p className="preview">
+            {describeSchedule(initial.start_date, initial.frequency)}
+            {paused ? " · paused" : ` · next on ${shortDate(initial.next_date)}`}
+          </p>
+          <label className="check">
+            <input type="checkbox" checked={paused} onChange={(e) => setPaused(e.target.checked)} />
+            Paused (resuming starts again from the next date, without filling in the gap)
+          </label>
+        </>
+      ) : (
+        <>
+          <div>
+            <span className="label">Repeats</span>
+            <Segmented
+              label="Repeats"
+              value={frequency}
+              onChange={setFrequency}
+              options={[
+                { value: "weekly", label: "Weekly" },
+                { value: "monthly", label: "Monthly" },
+                { value: "yearly", label: "Yearly" },
+              ]}
+            />
+          </div>
+          <label>
+            First date
+            <input type="date" value={start} min={today} onChange={(e) => setStart(e.target.value)} />
+          </label>
+          {start >= today && (
+            <p className="preview">
+              {describeSchedule(start, frequency)}: {shortDate(start)}, then {shortDate(occurrenceDate(start, frequency, 1))}, and
+              so on.
+            </p>
+          )}
+        </>
+      )}
+
+      <OwedPreview owed={owed} payer={payer} partner={partner} suffix={` each ${EVERY[initial?.frequency ?? frequency]}`} />
+      <p className="muted small">
+        Each one is added to the ledger automatically when either of you opens the app on or after its date.
+        {initial && " Changes apply from the next one; ones already added stay as they are."}
+      </p>
+      <ErrorText message={error} />
+      <button className="primary" disabled={busy}>
+        {busy ? "Saving…" : initial ? "Save changes" : "Add recurring expense"}
+      </button>
+      {initial && onStop && (
+        <button type="button" className="danger-link" onClick={onStop} disabled={busy}>
+          Stop this recurring expense
+        </button>
+      )}
     </form>
   );
 }

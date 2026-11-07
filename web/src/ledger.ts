@@ -1,7 +1,7 @@
 // Pure ledger logic: money parsing, balance math, CSV import/export.
 // No browser or server code in here so it can be tested with plain Node.
 
-import type { Entry } from "./types";
+import type { Entry, NewEntry } from "./types";
 
 // ---------------------------------------------------------------------------
 // Money
@@ -76,113 +76,114 @@ export function describeBalance(balanceCents: number, partnerName: string): stri
 // CSV
 // ---------------------------------------------------------------------------
 
-/** Minimal CSV parser: handles quoted fields, escaped quotes and CRLF. */
-export function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        field += ch;
-      }
-    } else if (ch === '"') {
-      inQuotes = true;
-    } else if (ch === ",") {
-      row.push(field);
-      field = "";
-    } else if (ch === "\n" || ch === "\r") {
-      if (ch === "\r" && text[i + 1] === "\n") i++;
-      row.push(field);
-      field = "";
-      if (row.some((f) => f.trim() !== "")) rows.push(row);
-      row = [];
-    } else {
-      field += ch;
-    }
-  }
-  row.push(field);
-  if (row.some((f) => f.trim() !== "")) rows.push(row);
-  return rows;
-}
-
 function csvField(value: string): string {
   return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
+// ---------------------------------------------------------------------------
+// Statement import: the summary file from `uv run split-ledger summarize`
+// ---------------------------------------------------------------------------
+
+/**
+ * What the app accepts from a statement. Made on your computer by
+ * `uv run split-ledger summarize split_transactions.csv`; individual
+ * transactions and merchants never reach the app.
+ */
 export interface ImportSummary {
-  count: number;
-  skipped: number;
-  totalCents: number;
+  name: string; // "Expenses mm/dd/yy-mm/dd/yy"
   start: string; // YYYY-MM-DD
   end: string; // YYYY-MM-DD
-  name: string; // "Expenses mm/dd/yy-mm/dd/yy"
-  byCategory: Record<string, number>;
+  count: number;
+  totalCents: number;
+  byCategory: Record<string, number> | null; // null when made with --no-categories
 }
 
-function mmddyy(iso: string): string {
-  const [y, m, d] = iso.split("-");
-  return `${m}/${d}/${y.slice(2)}`;
+/** Biggest summary file the app will read (they're well under 1 KB). */
+export const MAX_SUMMARY_BYTES = 16 * 1024;
+
+const SUMMARY_KEYS = new Set(["format", "version", "name", "start", "end", "count", "total_cents", "categories"]);
+const MAX_CENTS = 100_000_000_00;
+
+const isDay = (v: unknown): v is string =>
+  typeof v === "string" &&
+  /^\d{4}-\d{2}-\d{2}$/.test(v) &&
+  new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+const isCents = (v: unknown, min: number) => Number.isInteger(v) && (v as number) >= min && (v as number) <= MAX_CENTS;
+
+const SUMMARIZE_HINT =
+  "Run `uv run split-ledger summarize split_transactions.csv` on your computer and choose the split_summary.json it makes.";
+
+/**
+ * Read a split_summary.json, strictly. Anything unexpected is refused, in
+ * particular the detailed split_transactions.csv and any extra fields, so the
+ * only things the app can learn from a statement are the ones listed in
+ * ImportSummary.
+ */
+export function parseSummary(text: string): ImportSummary {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    if (/^\s*"?date"?\s*,/i.test(text) || /\bamount\b.*\bvendor\b/i.test(text.slice(0, 200))) {
+      throw new Error(
+        "That's the detailed transactions file. To keep your purchases private, the app only takes the summary. " +
+          SUMMARIZE_HINT,
+      );
+    }
+    throw new Error(`That isn't a statement summary. ${SUMMARIZE_HINT}`);
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error(`That isn't a statement summary. ${SUMMARIZE_HINT}`);
+  const d = data as Record<string, unknown>;
+  if (d.format !== "split-summary") throw new Error(`That isn't a statement summary. ${SUMMARIZE_HINT}`);
+  if (d.version !== 1) throw new Error("This summary was made by a newer version of split-ledger. Update the app.");
+
+  const extra = Object.keys(d).filter((k) => !SUMMARY_KEYS.has(k));
+  if (extra.length) throw new Error(`The summary has unexpected fields (${extra.join(", ")}), so it wasn't imported.`);
+
+  const name = typeof d.name === "string" ? d.name.trim() : "";
+  if (!name || name.length > 200) throw new Error("The summary's name is missing or too long.");
+  if (!isDay(d.start) || !isDay(d.end) || d.start > d.end) throw new Error("The summary's dates aren't valid.");
+  if (!Number.isInteger(d.count) || (d.count as number) < 1 || (d.count as number) > 100_000) {
+    throw new Error("The summary's transaction count isn't valid.");
+  }
+  if (!isCents(d.total_cents, 1)) throw new Error("The summary's total isn't valid.");
+
+  let byCategory: Record<string, number> | null = null;
+  if (d.categories !== undefined) {
+    const c = d.categories;
+    if (!c || typeof c !== "object" || Array.isArray(c)) throw new Error("The summary's categories aren't valid.");
+    const entries = Object.entries(c as Record<string, unknown>);
+    if (entries.length > 50) throw new Error("The summary has too many categories.");
+    let sum = 0;
+    byCategory = {};
+    for (const [k, v] of entries) {
+      if (!k.trim() || k.length > 50 || !isCents(v, 0)) throw new Error("The summary's categories aren't valid.");
+      byCategory[k] = v as number;
+      sum += v as number;
+    }
+    if (sum !== d.total_cents) throw new Error("The summary's categories don't add up to its total, so it wasn't imported.");
+  }
+
+  return { name, start: d.start, end: d.end, count: d.count as number, totalCents: d.total_cents as number, byCategory };
 }
 
 /**
- * Total up a split_transactions.csv from split_statements.py.
- * Expects columns date (YYYY-MM-DD), amount, and optionally category.
+ * The entry an import sends to the server: the summary's name and total, plus
+ * who paid and the split. The categories and counts are only shown on screen.
  */
-export function summarizeImport(text: string): ImportSummary {
-  const rows = parseCsv(text);
-  if (rows.length === 0) throw new Error("That file is empty.");
-
-  const header = rows[0].map((h) => h.trim().toLowerCase());
-  const dateIdx = header.indexOf("date");
-  const amountIdx = header.indexOf("amount");
-  const categoryIdx = header.indexOf("category");
-  if (dateIdx < 0 || amountIdx < 0) {
-    throw new Error("The CSV needs 'date' and 'amount' columns.");
-  }
-
-  let count = 0;
-  let skipped = 0;
-  let totalCents = 0;
-  let start = "";
-  let end = "";
-  const byCategory: Record<string, number> = {};
-
-  for (const r of rows.slice(1)) {
-    const date = (r[dateIdx] ?? "").trim();
-    const cents = parseDollars(r[amountIdx] ?? "");
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || cents === null) {
-      skipped++;
-      continue;
-    }
-    count++;
-    totalCents += cents;
-    if (!start || date < start) start = date;
-    if (!end || date > end) end = date;
-    const cat = (categoryIdx >= 0 ? (r[categoryIdx] ?? "").trim() : "") || "uncategorized";
-    byCategory[cat] = (byCategory[cat] ?? 0) + cents;
-  }
-
-  if (count === 0) throw new Error("No valid transactions found in that file.");
-
+export function summaryToEntry(
+  summary: ImportSummary,
+  payerId: string,
+  payerSharePct: number,
+  entryDate: string,
+): NewEntry {
   return {
-    count,
-    skipped,
-    totalCents,
-    start,
-    end,
-    name: `Expenses ${mmddyy(start)}-${mmddyy(end)}`,
-    byCategory,
+    kind: "expense",
+    entry_date: entryDate,
+    name: summary.name,
+    amount_cents: summary.totalCents,
+    payer_id: payerId,
+    payer_share_pct: payerSharePct,
   };
 }
 
