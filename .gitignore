@@ -8,3 +8,11 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Local Inputs
+statements/
+
+# Local Outputs
+ledger.csv
+split_transactions.csv
+.split_stat.json
