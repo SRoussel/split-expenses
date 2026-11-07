@@ -1,6 +1,7 @@
 // The whole backend: a small JSON API on top of D1. Static files are served by
 // Cloudflare before this runs; only /api/* reaches this Worker.
 
+import { INCOME_CATEGORY, isPersonalCategory, isSpendingCategory } from "../shared/categories";
 import { owedCents, pctToBasisPoints } from "../shared/owed";
 import { dueOccurrences, firstIndexOnOrAfter, FREQUENCIES, occurrenceDate, type Frequency } from "../shared/recurring";
 
@@ -504,7 +505,8 @@ async function getHousehold(request: Request, env: Env): Promise<Response> {
       "SELECT * FROM entries WHERE household_id = ? ORDER BY entry_date DESC, created_at DESC",
     ).bind(household_id),
     env.DB.prepare(
-      `SELECT id, name, amount_cents, payer_id, payer_share_pct, frequency, start_date, next_date, paused, created_by
+      `SELECT id, name, amount_cents, payer_id, payer_share_pct, frequency, start_date, next_date, paused, created_by,
+              category
        FROM recurring WHERE household_id = ? AND stopped_at IS NULL ORDER BY next_date, name`,
     ).bind(household_id),
   ]);
@@ -518,6 +520,7 @@ async function getHousehold(request: Request, env: Env): Promise<Response> {
 
 interface ValidEntry {
   kind: "expense" | "settlement" | "opening";
+  category: string | null;
   entryDate: string;
   name: string;
   amount: number;
@@ -555,7 +558,11 @@ async function validateEntry(env: Env, householdId: string, body: Record<string,
     .bind(householdId, payerId)
     .first();
   if (!payer) throw new HttpError(400, "The payer isn't in this household.");
-  return { kind, entryDate, name, amount: amount as number, pct, owed, payerId };
+  const category = body.category ?? null;
+  if (category !== null && (kind !== "expense" || !isSpendingCategory(category))) {
+    throw new HttpError(400, "Invalid category.");
+  }
+  return { kind, category, entryDate, name, amount: amount as number, pct, owed, payerId };
 }
 
 const OPENING_EXISTS = "There's already a starting balance. Void it first to change it.";
@@ -567,10 +574,13 @@ async function addEntry(request: Request, env: Env): Promise<Response> {
   try {
     await env.DB.prepare(
       `INSERT INTO entries
-         (id, household_id, kind, entry_date, name, amount_cents, payer_id, payer_share_pct, owed_cents, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, household_id, kind, entry_date, name, amount_cents, payer_id, payer_share_pct, owed_cents, created_by, category)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-      .bind(crypto.randomUUID(), household_id, e.kind, e.entryDate, e.name, e.amount, e.payerId, e.pct, e.owed, user.id)
+      .bind(
+        crypto.randomUUID(), household_id, e.kind, e.entryDate, e.name, e.amount, e.payerId, e.pct, e.owed, user.id,
+        e.category,
+      )
       .run();
   } catch (err) {
     // The unique index allows only one active starting balance per household.
@@ -599,10 +609,22 @@ async function editEntry(request: Request, env: Env, id: string): Promise<Respon
     // 2. Add the replacement, but only if step 1 actually voided the original.
     env.DB.prepare(
       `INSERT INTO entries
-         (id, household_id, kind, entry_date, name, amount_cents, payer_id, payer_share_pct, owed_cents, created_by)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         (id, household_id, kind, entry_date, name, amount_cents, payer_id, payer_share_pct, owed_cents, created_by,
+          category)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        WHERE EXISTS (SELECT 1 FROM entries WHERE id = ? AND replaced_by = ?)`,
-    ).bind(newId, household_id, e.kind, e.entryDate, e.name, e.amount, e.payerId, e.pct, e.owed, user.id, id, newId),
+    ).bind(
+      newId, household_id, e.kind, e.entryDate, e.name, e.amount, e.payerId, e.pct, e.owed, user.id, e.category,
+      id, newId,
+    ),
+    // 3. An imported statement's month/category breakdown carries over if the total didn't change.
+    env.DB.prepare(
+      `INSERT INTO entry_breakdown (entry_id, month, category, cents)
+       SELECT ?, b.month, b.category, b.cents FROM entry_breakdown b
+       WHERE b.entry_id = ?
+         AND EXISTS (SELECT 1 FROM entries WHERE id = ? AND amount_cents = ?)
+         AND (SELECT amount_cents FROM entries WHERE id = ?) = ?`,
+    ).bind(newId, id, id, e.amount, newId, e.amount),
   ]);
   if (!voided.meta.changes) throw new HttpError(404, "Entry not found, already voided, or a different type.");
   return json({ ok: true, id: newId });
@@ -683,6 +705,7 @@ interface RecurringRow {
   next_index: number;
   paused: number;
   created_by: string;
+  category: string | null;
 }
 
 /**
@@ -693,7 +716,8 @@ interface RecurringRow {
  */
 async function addDueRecurring(env: Env, householdId: string, today: string) {
   const { results } = await env.DB.prepare(
-    `SELECT id, name, amount_cents, payer_id, payer_share_pct, frequency, start_date, next_index, paused, created_by
+    `SELECT id, name, amount_cents, payer_id, payer_share_pct, frequency, start_date, next_index, paused, created_by,
+            category
      FROM recurring WHERE household_id = ? AND stopped_at IS NULL AND paused = 0 AND next_date <= ?`,
   )
     .bind(householdId, today)
@@ -709,12 +733,12 @@ async function addDueRecurring(env: Env, householdId: string, today: string) {
         env.DB.prepare(
           `INSERT INTO entries
              (id, household_id, kind, entry_date, name, amount_cents, payer_id, payer_share_pct, owed_cents,
-              created_by, recurring_id, occurrence_date)
-           VALUES (?, ?, 'expense', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              created_by, recurring_id, occurrence_date, category)
+           VALUES (?, ?, 'expense', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (recurring_id, occurrence_date) WHERE recurring_id IS NOT NULL DO NOTHING`,
         ).bind(
           crypto.randomUUID(), householdId, o.date, r.name, r.amount_cents, r.payer_id, r.payer_share_pct, owed,
-          r.created_by, r.id, o.date,
+          r.created_by, r.id, o.date, r.category,
         ),
       );
     }
@@ -743,7 +767,9 @@ async function validateRuleFields(env: Env, householdId: string, body: Record<st
     .bind(householdId, payerId)
     .first();
   if (!payer) throw new HttpError(400, "The payer isn't in this household.");
-  return { name, amount: amount as number, pct: bp / 100, payerId };
+  const category = body.category ?? null;
+  if (category !== null && !isSpendingCategory(category)) throw new HttpError(400, "Invalid category.");
+  return { name, amount: amount as number, pct: bp / 100, payerId, category };
 }
 
 async function createRecurring(request: Request, env: Env): Promise<Response> {
@@ -771,10 +797,11 @@ async function createRecurring(request: Request, env: Env): Promise<Response> {
   const id = crypto.randomUUID();
   await env.DB.prepare(
     `INSERT INTO recurring
-       (id, household_id, name, amount_cents, payer_id, payer_share_pct, frequency, start_date, next_index, next_date, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+       (id, household_id, name, amount_cents, payer_id, payer_share_pct, frequency, start_date, next_index, next_date,
+        created_by, category)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
   )
-    .bind(id, household_id, f.name, f.amount, f.payerId, f.pct, frequency, start, start, user.id)
+    .bind(id, household_id, f.name, f.amount, f.payerId, f.pct, frequency, start, start, user.id, f.category)
     .run();
   return json({ ok: true, id }, 201);
 }
@@ -804,10 +831,10 @@ async function updateRecurring(request: Request, env: Env, id: string): Promise<
 
   await env.DB.prepare(
     `UPDATE recurring SET name = ?, amount_cents = ?, payer_id = ?, payer_share_pct = ?, paused = ?,
-       next_index = ?, next_date = ?
+       next_index = ?, next_date = ?, category = ?
      WHERE id = ? AND household_id = ? AND stopped_at IS NULL`,
   )
-    .bind(f.name, f.amount, f.payerId, f.pct, body.paused ? 1 : 0, nextIndex, nextDate, id, household_id)
+    .bind(f.name, f.amount, f.payerId, f.pct, body.paused ? 1 : 0, nextIndex, nextDate, f.category, id, household_id)
     .run();
   return json({ ok: true });
 }
@@ -827,6 +854,216 @@ async function stopRecurring(request: Request, env: Env, id: string): Promise<Re
 }
 
 // ---------------------------------------------------------------------------
+// Statement imports: totals per (month, category) only
+// ---------------------------------------------------------------------------
+
+const MAX_MONTHS = 13;
+const MAX_CATEGORIES_PER_MONTH = 13;
+const ROWS_PER_INSERT = 20; // 4 values per row; D1 allows about 100 values per statement
+
+interface TotalRow {
+  month: string;
+  category: string;
+  cents: number;
+}
+
+/** Checks a { "YYYY-MM": { category: cents } } block from a statement summary. */
+function validateMonths(
+  raw: unknown,
+  start: string,
+  end: string,
+  allowed: (c: unknown) => boolean,
+  label: string,
+): TotalRow[] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new HttpError(400, `${label}: invalid months.`);
+  const months = Object.entries(raw as Record<string, unknown>);
+  if (months.length === 0 || months.length > MAX_MONTHS) throw new HttpError(400, `${label}: invalid number of months.`);
+  const rows: TotalRow[] = [];
+  for (const [month, cats] of months) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || month < start.slice(0, 7) || month > end.slice(0, 7)) {
+      throw new HttpError(400, `${label}: month ${month} is outside the statement's dates.`);
+    }
+    if (!cats || typeof cats !== "object" || Array.isArray(cats)) throw new HttpError(400, `${label}: invalid month ${month}.`);
+    const entries = Object.entries(cats as Record<string, unknown>);
+    if (entries.length === 0 || entries.length > MAX_CATEGORIES_PER_MONTH) {
+      throw new HttpError(400, `${label}: invalid categories in ${month}.`);
+    }
+    for (const [category, cents] of entries) {
+      if (!allowed(category)) throw new HttpError(400, `${label}: unknown category "${category}".`);
+      if (!Number.isInteger(cents) || Math.abs(cents as number) > MAX_AMOUNT_CENTS) {
+        throw new HttpError(400, `${label}: invalid amount for ${category} in ${month}.`);
+      }
+      if (category === INCOME_CATEGORY && (cents as number) < 0) throw new HttpError(400, `${label}: income can't be negative.`);
+      rows.push({ month, category, cents: cents as number });
+    }
+  }
+  return rows;
+}
+
+/** INSERT ... VALUES (...), (...) in chunks small enough for D1. */
+function insertTotals(env: Env, table: "entry_breakdown" | "spending_totals", ownerColumn: string, ownerId: string, rows: TotalRow[]) {
+  const statements: D1PreparedStatement[] = [];
+  for (let i = 0; i < rows.length; i += ROWS_PER_INSERT) {
+    const chunk = rows.slice(i, i + ROWS_PER_INSERT);
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO ${table} (${ownerColumn}, month, category, cents) VALUES ${chunk.map(() => "(?, ?, ?, ?)").join(", ")}`,
+      ).bind(...chunk.flatMap((r) => [ownerId, r.month, r.category, r.cents])),
+    );
+  }
+  return statements;
+}
+
+/**
+ * Import a statement summary in one transaction: the shared part becomes one
+ * ledger entry (with its month/category breakdown), the personal part becomes
+ * a spending upload for the person whose statement it is.
+ */
+async function importStatement(request: Request, env: Env): Promise<Response> {
+  const user = await requireUser(request, env);
+  const { household_id } = await requireMembership(env, user.id);
+  const body = await readBody(request);
+
+  const name = str(body, "name", 200);
+  const start = str(body, "start", 10);
+  const end = str(body, "end", 10);
+  if (!validDate(start) || !validDate(end) || start > end) throw new HttpError(400, "Invalid statement dates.");
+  if (!body.shared && !body.personal) throw new HttpError(400, "Nothing to import.");
+
+  const isMember = async (id: unknown) =>
+    typeof id === "string" &&
+    Boolean(
+      await env.DB.prepare("SELECT 1 FROM members WHERE household_id = ? AND user_id = ?").bind(household_id, id).first(),
+    );
+
+  const statements: D1PreparedStatement[] = [];
+  const entryId = body.shared ? crypto.randomUUID() : null;
+  const batchId = body.personal ? crypto.randomUUID() : null;
+
+  if (body.shared) {
+    const shared = body.shared as Record<string, unknown>;
+    const rows = validateMonths(shared.months, start, end, isSpendingCategory, "Shared");
+    const total = rows.reduce((sum, r) => sum + r.cents, 0);
+    if (!Number.isInteger(shared.total_cents) || shared.total_cents !== total || total <= 0 || total > MAX_AMOUNT_CENTS) {
+      throw new HttpError(400, "Shared: the categories don't add up to the total.");
+    }
+    const bp = typeof shared.payer_share_pct === "number" ? pctToBasisPoints(shared.payer_share_pct) : null;
+    if (bp === null) throw new HttpError(400, "Invalid share.");
+    if (!(await isMember(shared.payer_id))) throw new HttpError(400, "The payer isn't in this household.");
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO entries
+           (id, household_id, kind, entry_date, name, amount_cents, payer_id, payer_share_pct, owed_cents, created_by)
+         VALUES (?, ?, 'expense', ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(entryId, household_id, todayFor(request, body), name, total, shared.payer_id, bp / 100,
+        owedCents("expense", total, bp / 100), user.id),
+      ...insertTotals(env, "entry_breakdown", "entry_id", entryId!, rows),
+    );
+  }
+
+  if (body.personal) {
+    const personal = body.personal as Record<string, unknown>;
+    const rows = validateMonths(personal.months, start, end, isPersonalCategory, "Personal");
+    if (!(await isMember(personal.person_id))) throw new HttpError(400, "That person isn't in this household.");
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO spending_batches (id, household_id, person_id, name, start_date, end_date, entry_id, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(batchId, household_id, personal.person_id, name, start, end, entryId, user.id),
+      ...insertTotals(env, "spending_totals", "batch_id", batchId!, rows),
+    );
+  }
+
+  try {
+    await env.DB.batch(statements); // all or nothing
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      throw new HttpError(409, "This statement was already uploaded for that person. Delete the old upload first.");
+    }
+    throw err;
+  }
+  return json({ ok: true, entryId, batchId }, 201);
+}
+
+/** Everything the spending and cash-flow views need: totals only. */
+async function getSpending(request: Request, env: Env): Promise<Response> {
+  const user = await requireUser(request, env);
+  const { household_id } = await requireMembership(env, user.id);
+  const [batches, totals, breakdown] = await env.DB.batch([
+    env.DB.prepare(
+      `SELECT id, person_id, name, start_date, end_date, entry_id, created_by, created_at
+       FROM spending_batches WHERE household_id = ? ORDER BY start_date DESC, created_at DESC`,
+    ).bind(household_id),
+    env.DB.prepare(
+      `SELECT t.batch_id, t.month, t.category, t.cents FROM spending_totals t
+       JOIN spending_batches b ON b.id = t.batch_id WHERE b.household_id = ?`,
+    ).bind(household_id),
+    env.DB.prepare(
+      `SELECT d.entry_id, d.month, d.category, d.cents FROM entry_breakdown d
+       JOIN entries e ON e.id = d.entry_id WHERE e.household_id = ? AND e.voided_at IS NULL`,
+    ).bind(household_id),
+  ]);
+  return json({ batches: batches.results, totals: totals.results, breakdown: breakdown.results });
+}
+
+/** Undo a personal upload. (The shared entry from the same import, if any, is voided separately.) */
+async function deleteBatch(request: Request, env: Env, id: string): Promise<Response> {
+  const user = await requireUser(request, env);
+  const { household_id } = await requireMembership(env, user.id);
+  const res = await env.DB.prepare("DELETE FROM spending_batches WHERE id = ? AND household_id = ?")
+    .bind(id, household_id)
+    .run();
+  if (!res.meta.changes) throw new HttpError(404, "Upload not found.");
+  return json({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
+// Reset: permanent deletes, for either member
+// ---------------------------------------------------------------------------
+
+/**
+ * Permanently delete voided entries and the old versions of edited entries.
+ * Active entries are untouched. Recurring rules have already moved past any
+ * occurrence that was voided, so a purged occurrence isn't created again.
+ */
+async function purgeVoided(request: Request, env: Env): Promise<Response> {
+  const user = await requireUser(request, env);
+  const { household_id } = await requireMembership(env, user.id);
+  await readBody(request); // JSON only, like every other write
+  // Count the entries themselves: D1's "changes" also counts breakdown rows deleted along with them.
+  const res = await env.DB.prepare("DELETE FROM entries WHERE household_id = ? AND voided_at IS NOT NULL RETURNING id")
+    .bind(household_id)
+    .all();
+  return json({ ok: true, deleted: res.results.length });
+}
+
+/**
+ * Delete every entry and recurring expense in the household. Accounts, the
+ * household, its invite code and the default split stay. Needs the word DELETE
+ * in the request itself, so nothing can trigger it by accident.
+ */
+async function resetHousehold(request: Request, env: Env): Promise<Response> {
+  const user = await requireUser(request, env);
+  const { household_id } = await requireMembership(env, user.id);
+  if ((await readBody(request)).confirm !== "DELETE") {
+    throw new HttpError(400, 'Type DELETE to confirm.');
+  }
+  // Uploads and entries first: they point at entries and recurring rules.
+  // RETURNING id counts the rows themselves, not the rows deleted along with them.
+  const [batches, entries, rules] = await env.DB.batch([
+    env.DB.prepare("DELETE FROM spending_batches WHERE household_id = ? RETURNING id").bind(household_id),
+    env.DB.prepare("DELETE FROM entries WHERE household_id = ? RETURNING id").bind(household_id),
+    env.DB.prepare("DELETE FROM recurring WHERE household_id = ? RETURNING id").bind(household_id),
+  ]);
+  return json({
+    ok: true,
+    deletedEntries: entries.results.length,
+    deletedRecurring: rules.results.length,
+    deletedUploads: batches.results.length,
+  });
+}
+
+// ---------------------------------------------------------------------------
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -835,6 +1072,7 @@ export default {
     try {
       if (method === "GET" && pathname === "/api/me") return await me(request, env);
       if (method === "GET" && pathname === "/api/household") return await getHousehold(request, env);
+      if (method === "GET" && pathname === "/api/spending") return await getSpending(request, env);
       if (method === "POST") {
         assertSameOrigin(request);
         if (pathname === "/api/password") return await changePassword(request, env);
@@ -844,6 +1082,11 @@ export default {
         if (pathname === "/api/household") return await createHousehold(request, env);
         if (pathname === "/api/household/join") return await joinHousehold(request, env);
         if (pathname === "/api/household/split") return await setSplit(request, env);
+        if (pathname === "/api/household/purge-voided") return await purgeVoided(request, env);
+        if (pathname === "/api/household/reset") return await resetHousehold(request, env);
+        if (pathname === "/api/statements/import") return await importStatement(request, env);
+        const b = pathname.match(/^\/api\/statements\/([\w-]+)\/delete$/);
+        if (b) return await deleteBatch(request, env, b[1]);
         if (pathname === "/api/recurring") return await createRecurring(request, env);
         const r = pathname.match(/^\/api\/recurring\/([\w-]+)\/(update|stop)$/);
         if (r?.[2] === "update") return await updateRecurring(request, env, r[1]);

@@ -1,0 +1,36 @@
+{
+  "format": "split-summary",
+  "version": 2,
+  "name": "Expenses 01/15/26-02/03/26",
+  "start": "2026-01-15",
+  "end": "2026-02-03",
+  "shared": {
+    "count": 5,
+    "total_cents": 134955,
+    "months": {
+      "2026-01": {
+        "dining": 4510,
+        "groceries": 8420,
+        "household": 120000
+      },
+      "2026-02": {
+        "groceries": 2025
+      }
+    }
+  },
+  "personal": {
+    "count": 8,
+    "months": {
+      "2026-01": {
+        "dining": 1840,
+        "entertainment": 4499,
+        "fees": 3500,
+        "income": 325042
+      },
+      "2026-02": {
+        "income": 325000,
+        "transport": 5230
+      }
+    }
+  }
+}

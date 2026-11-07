@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { categoryLabel, SPENDING_CATEGORIES } from "../shared/categories";
 import { describeSchedule, occurrenceDate, type Frequency } from "../shared/recurring";
 import { changePassword, createRecurring, setDefaultSplit, updateRecurring } from "./api";
 import { fmt, owedCents, parseDollars, payerSharePct, SHARE_ERROR, todayLocal } from "./ledger";
@@ -87,6 +88,23 @@ function ShareField({ me, value, onChange }: { me: Member; value: string; onChan
   );
 }
 
+/** Optional spending category, used by the spending reports. */
+function CategoryField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <label>
+      Category
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">No category</option>
+        {SPENDING_CATEGORIES.map((c) => (
+          <option key={c} value={c}>
+            {categoryLabel(c)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 /** "Sam will owe you $42.10" / "You will owe Sam $42.10" */
 function OwedPreview({ owed, payer, partner, suffix = "" }: { owed: number | null; payer: "me" | "partner"; partner: Member; suffix?: string }) {
   if (owed === null) return null;
@@ -115,6 +133,7 @@ export function AddExpenseForm({ me, partner, save, onSaved, initial }: EntryFor
   const [payer, setPayer] = useState<"me" | "partner">(initialPayer);
   const [myShare, setMyShare] = useState(initialMyShare);
   const [date, setDate] = useState(initial?.entry_date ?? todayLocal());
+  const [category, setCategory] = useState(initial?.category ?? "");
   const { busy, error, setError, run } = useSubmit(onSaved);
 
   const cents = parseDollars(amount);
@@ -134,6 +153,7 @@ export function AddExpenseForm({ me, partner, save, onSaved, initial }: EntryFor
         amount_cents: cents,
         payer_id: payer === "me" ? me.user_id : partner.user_id,
         payer_share_pct: payerShare,
+        category: category || null,
       }),
     );
   }
@@ -156,6 +176,7 @@ export function AddExpenseForm({ me, partner, save, onSaved, initial }: EntryFor
       </label>
       <PayerToggle value={payer} onChange={setPayer} partner={partner} />
       <ShareField me={me} value={myShare} onChange={setMyShare} />
+      <CategoryField value={category} onChange={setCategory} />
       <label>
         Date
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -313,6 +334,7 @@ export function RecurringForm({
   const [frequency, setFrequency] = useState<Frequency>(initial?.frequency ?? "monthly");
   const [start, setStart] = useState(initial?.start_date ?? todayLocal());
   const [paused, setPaused] = useState(initial?.paused ?? false);
+  const [category, setCategory] = useState(initial?.category ?? "");
   const { busy, error, setError, run } = useSubmit(onSaved);
 
   const cents = parseDollars(amount);
@@ -331,6 +353,7 @@ export function RecurringForm({
       amount_cents: cents,
       payer_id: payer === "me" ? me.user_id : partner.user_id,
       payer_share_pct: payerShare,
+      category: category || null,
     };
     void run(() =>
       initial ? updateRecurring(initial.id, { ...fields, paused }) : createRecurring({ ...fields, frequency, start_date: start }),
@@ -349,6 +372,7 @@ export function RecurringForm({
       </label>
       <PayerToggle value={payer} onChange={setPayer} partner={partner} />
       <ShareField me={me} value={myShare} onChange={setMyShare} />
+      <CategoryField value={category} onChange={setCategory} />
 
       {initial ? (
         <>

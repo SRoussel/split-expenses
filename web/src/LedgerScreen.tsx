@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { categoryLabel } from "../shared/categories";
 import { describeSchedule } from "../shared/recurring";
-import { addEntry, editEntry, loadHousehold, signOut, stopRecurring, unvoidEntry, voidEntry } from "./api";
+import {
+  addEntry,
+  editEntry,
+  loadHousehold,
+  purgeVoided,
+  resetHousehold,
+  signOut,
+  stopRecurring,
+  unvoidEntry,
+  voidEntry,
+} from "./api";
 import {
   AddExpenseForm,
   ChangePasswordForm,
@@ -15,7 +26,18 @@ import { balanceFor, effectFor, exportLedgerCsv, fmt } from "./ledger";
 import type { Entry, Member, NewEntry, Recurring } from "./types";
 import { ConfirmDialog, ErrorText, Modal, Toast, type ToastState } from "./ui";
 
-type Panel = null | "add" | "settle" | "opening" | "import" | "more" | "password" | "split" | "recurring";
+type Panel =
+  | null
+  | "add"
+  | "settle"
+  | "opening"
+  | "import"
+  | "more"
+  | "password"
+  | "split"
+  | "recurring"
+  | "purge"
+  | "reset";
 
 // Entry dates are plain calendar days, so format them in UTC to avoid shifting a day.
 const monthFmt = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
@@ -112,6 +134,7 @@ export default function LedgerScreen({
 
   const balance = balanceFor(entries, userId);
   const hasOpening = entries.some((e) => e.kind === "opening" && !e.voided_at);
+  const voidedCount = entries.filter((e) => e.voided_at).length;
   const ready = Boolean(me && partner);
   // Look the selected entry up fresh, so the sheet reflects the latest refresh.
   const selected = entries.find((e) => e.id === selectedId) ?? null;
@@ -457,6 +480,42 @@ export default function LedgerScreen({
         />
       )}
 
+      {panel === "purge" && (
+        <ConfirmDialog
+          title="Delete voided and edited history?"
+          message={
+            <>
+              This permanently deletes {voidedCount} voided {voidedCount === 1 ? "entry" : "entries"} and old
+              versions of edited entries. Active entries and the balance don't change, but these can't be restored
+              afterwards.
+            </>
+          }
+          confirmLabel={`Delete ${voidedCount}`}
+          danger
+          onConfirm={async () => {
+            const { deleted } = await purgeVoided();
+            setShowVoided(false);
+            setToast({ message: `Deleted ${deleted} ${deleted === 1 ? "entry" : "entries"}` });
+            void load();
+          }}
+          onClose={closePanel}
+        />
+      )}
+
+      {panel === "reset" && (
+        <ResetDialog
+          entryCount={entries.length}
+          ruleCount={recurring.length}
+          onExport={() => void exportCsv()}
+          onReset={async (confirm) => {
+            await resetHousehold(confirm);
+            setToast({ message: "Everything deleted" });
+            void load();
+          }}
+          onClose={closePanel}
+        />
+      )}
+
       {panel === "split" && me && partner && (
         <Modal title="Default split" onClose={closePanel}>
           <DefaultSplitForm me={me} partner={partner} onSaved={() => saved("Default split saved")} />
@@ -503,6 +562,21 @@ export default function LedgerScreen({
               />
               Show voided and edited entries
             </label>
+
+            <h2 className="section-label">Reset</h2>
+            <div className="menu">
+              <button className="danger-item" disabled={voidedCount === 0} onClick={() => setPanel("purge")}>
+                Delete voided and edited history
+                <span className="menu-value">{voidedCount}</span>
+              </button>
+              <button
+                className="danger-item"
+                disabled={entries.length === 0 && recurring.length === 0}
+                onClick={() => setPanel("reset")}
+              >
+                Delete everything…
+              </button>
+            </div>
 
             <h2 className="section-label">Account</h2>
             <p className="muted small">
@@ -632,6 +706,7 @@ function EntryDetails({
     const mine = myPctOf(e, userId);
     facts.push(["Split", `You ${pctText(mine)}% · ${partnerName} ${pctText(100 - mine)}%`]);
   }
+  if (e.category) facts.push(["Category", categoryLabel(e.category)]);
   if (e.recurring_id) {
     facts.push(["Repeats", rule ? describeSchedule(rule.start_date, rule.frequency) : "No longer (stopped)"]);
   }
@@ -678,5 +753,71 @@ function EntryDetails({
         </button>
       )}
     </div>
+  );
+}
+
+/** "Delete everything": the user has to type DELETE, and can export a copy first. */
+function ResetDialog({
+  entryCount,
+  ruleCount,
+  onExport,
+  onReset,
+  onClose,
+}: {
+  entryCount: number;
+  ruleCount: number;
+  onExport: () => void;
+  onReset: (confirm: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function reset() {
+    setBusy(true);
+    setError(null);
+    try {
+      await onReset(typed.trim());
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Delete everything?" onClose={onClose}>
+      <div className="stack">
+        <p>
+          This permanently deletes all {entryCount} {entryCount === 1 ? "entry" : "entries"} and {ruleCount} recurring{" "}
+          {ruleCount === 1 ? "expense" : "expenses"} for both of you, and the balance goes back to zero. Your accounts,
+          the household and the default split stay.
+        </p>
+        <p className="notice">It can't be undone in the app. Export a copy first if you might want it back.</p>
+        <button onClick={onExport} disabled={entryCount === 0}>
+          Export ledger as CSV first
+        </button>
+        <label>
+          Type DELETE to confirm
+          <input
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+        </label>
+        <ErrorText message={error} />
+        <div className="actions-row">
+          <button onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button className="danger" onClick={() => void reset()} disabled={busy || typed.trim() !== "DELETE"}>
+            {busy ? "Deleting…" : "Delete everything"}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }

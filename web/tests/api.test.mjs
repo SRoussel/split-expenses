@@ -7,7 +7,7 @@
 // Your normal local database (.wrangler/) and the deployed one are never touched.
 
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -418,6 +418,213 @@ describe("Split API", () => {
       assert.equal((await occurrences(ruleId)).length, kept);
       const body = { ...rule(), paused: false };
       assert.equal((await alice.post(`/api/recurring/${ruleId}/update`, body)).status, 404);
+    });
+  });
+
+  describe("statement imports and spending", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const summary = JSON.parse(readFileSync(new URL("./fixtures/expected_summary_v2.json", import.meta.url), "utf8"));
+    const body = (extra = {}) => ({
+      name: summary.name,
+      start: summary.start,
+      end: summary.end,
+      today,
+      shared: { total_cents: summary.shared.total_cents, months: summary.shared.months, payer_id: bobId, payer_share_pct: 50 },
+      personal: { person_id: bobId, months: summary.personal.months },
+      ...extra,
+    });
+    const spending = async (c = alice) => (await c.get("/api/spending")).data;
+    const entries = async () => (await alice.get("/api/household")).data.entries;
+    let entryId, batchId;
+
+    test("Alex imports Sam's statement: one shared entry plus Sam's personal totals, together", async () => {
+      const res = await alice.post("/api/statements/import", body());
+      assert.equal(res.status, 201);
+      ({ entryId, batchId } = res.data);
+
+      const entry = (await entries()).find((e) => e.id === entryId);
+      assert.equal(entry.amount_cents, 134955);
+      assert.equal(entry.payer_id, bobId);
+      assert.equal(entry.owed_cents, 67478, "half of $1,349.55, rounded half up for the non-payer");
+      assert.equal(entry.created_by, aliceId);
+
+      const sp = await spending(bob);
+      const batch = sp.batches.find((b) => b.id === batchId);
+      assert.equal(batch.person_id, bobId, "Sam's spending, uploaded by Alex");
+      assert.equal(batch.created_by, aliceId);
+      assert.equal(batch.entry_id, entryId);
+      const totals = sp.totals.filter((t) => t.batch_id === batchId);
+      assert.equal(totals.length, 6);
+      assert.deepEqual(totals.find((t) => t.month === "2026-01" && t.category === "income"),
+        { batch_id: batchId, month: "2026-01", category: "income", cents: 325042 });
+      assert.equal(totals.find((t) => t.category === "entertainment").cents, 4499, "the return reduced it");
+      const breakdown = sp.breakdown.filter((b) => b.entry_id === entryId);
+      assert.equal(breakdown.reduce((n, b) => n + b.cents, 0), 134955);
+      assert.equal(breakdown.find((b) => b.month === "2026-02").cents, 2025, "the shared return reduced groceries");
+    });
+
+    test("the same statement can't be uploaded twice for the same person", async () => {
+      const before = (await entries()).length;
+      const res = await alice.post("/api/statements/import", body());
+      assert.equal(res.status, 409);
+      assert.equal((await entries()).length, before, "no shared entry from the refused import");
+      // Alex's own statement with the same name is fine.
+      const mine = await alice.post("/api/statements/import", body({ shared: undefined, personal: { person_id: aliceId, months: summary.personal.months } }));
+      assert.equal(mine.status, 201);
+    });
+
+    test("all or nothing: a bad personal part leaves no shared entry behind", async () => {
+      const before = (await entries()).length;
+      const bad = body({ name: "Another statement", personal: { person_id: aliceId, months: { "2026-01": { shopping: 100 } } } });
+      assert.equal((await alice.post("/api/statements/import", bad)).status, 400);
+      assert.equal((await entries()).length, before);
+    });
+
+    test("validation", async () => {
+      const m = summary.shared.months;
+      const cases = [
+        ["nothing to import", body({ name: "x", shared: undefined, personal: undefined })],
+        ["total doesn't match", body({ name: "x", personal: undefined, shared: { ...body().shared, total_cents: 1 } })],
+        ["month outside the dates", body({ name: "x", personal: undefined, shared: { ...body().shared, months: { ...m, "2026-03": { groceries: 1 } }, total_cents: 134956 } })],
+        ["income in the shared part", body({ name: "x", personal: undefined, shared: { ...body().shared, months: { "2026-01": { income: 100 } }, total_cents: 100 } })],
+        ["negative income", body({ name: "x", shared: undefined, personal: { person_id: aliceId, months: { "2026-01": { income: -5 } } } })],
+        ["amount in dollars", body({ name: "x", shared: undefined, personal: { person_id: aliceId, months: { "2026-01": { dining: 12.5 } } } })],
+        ["person outside the household", body({ name: "x", shared: undefined, personal: { person_id: carolId, months: summary.personal.months } })],
+        ["payer outside the household", body({ name: "x", personal: undefined, shared: { ...body().shared, payer_id: carolId } })],
+        ["bad dates", body({ name: "x", start: "2026-02-31" })],
+        ["too many months", body({ name: "x", shared: undefined, start: "2025-01-01", end: "2026-12-31", personal: { person_id: aliceId, months: Object.fromEntries(Array.from({ length: 14 }, (_, i) => [`2025-${String((i % 12) + 1).padStart(2, "0")}${i >= 12 ? "x" : ""}`, { dining: 1 }])) } })],
+      ];
+      for (const [label, b] of cases) assert.equal((await alice.post("/api/statements/import", b)).status, 400, label);
+    });
+
+    test("another household sees none of it and can't delete it", async () => {
+      const theirs = await spending(carol);
+      assert.equal(theirs.batches.length, 0);
+      assert.equal(theirs.totals.length, 0);
+      assert.equal(theirs.breakdown.length, 0);
+      assert.equal((await carol.post(`/api/statements/${batchId}/delete`)).status, 404);
+      assert.equal((await new Client().get("/api/spending")).status, 401);
+    });
+
+    test("editing the imported entry keeps its breakdown only if the total is unchanged", async () => {
+      const entry = (await entries()).find((e) => e.id === entryId);
+      const same = { kind: "expense", entry_date: entry.entry_date, name: "Renamed statement", amount_cents: entry.amount_cents, payer_id: bobId, payer_share_pct: 50 };
+      const r1 = await alice.post(`/api/entries/${entryId}/edit`, same);
+      assert.equal(r1.status, 200);
+      let sp = await spending();
+      assert.equal(sp.breakdown.filter((b) => b.entry_id === r1.data.id).length, 4, "breakdown carried over");
+      assert.equal(sp.breakdown.filter((b) => b.entry_id === entryId).length, 0, "voided original no longer counts");
+
+      const r2 = await alice.post(`/api/entries/${r1.data.id}/edit`, { ...same, amount_cents: 100000 });
+      sp = await spending();
+      assert.equal(sp.breakdown.filter((b) => b.entry_id === r2.data.id).length, 0, "a changed total drops the breakdown");
+      entryId = r2.data.id;
+    });
+
+    test("deleting an upload removes its totals; the shared entry stays", async () => {
+      assert.equal((await bob.post(`/api/statements/${batchId}/delete`)).status, 200);
+      const sp = await spending();
+      assert.ok(!sp.batches.some((b) => b.id === batchId));
+      assert.ok(!sp.totals.some((t) => t.batch_id === batchId));
+      assert.ok((await entries()).some((e) => e.id === entryId && !e.voided_at));
+      assert.equal((await bob.post(`/api/statements/${batchId}/delete`)).status, 404);
+    });
+
+    test("categories on manual and recurring expenses", async () => {
+      assert.equal((await alice.post("/api/entries", expense(aliceId, { name: "Tagged", category: "dining" }))).status, 201);
+      const tagged = (await entries()).find((e) => e.name === "Tagged");
+      assert.equal(tagged.category, "dining");
+      assert.equal((await alice.post("/api/entries", expense(aliceId, { category: "income" }))).status, 400, "income isn't an expense category");
+      assert.equal((await alice.post("/api/entries", expense(aliceId, { category: "shopping" }))).status, 400);
+      const settle = { kind: "settlement", entry_date: day, name: "S", amount_cents: 100, payer_id: aliceId, category: "dining" };
+      assert.equal((await alice.post("/api/entries", settle)).status, 400, "payments don't have categories");
+
+      const rule = await alice.post("/api/recurring", {
+        name: "Internet", amount_cents: 6000, payer_id: aliceId, payer_share_pct: 50, frequency: "monthly",
+        start_date: today, today, category: "utilities",
+      });
+      assert.equal(rule.status, 201);
+      const gen = (await entries()).find((e) => e.recurring_id === rule.data.id);
+      assert.equal(gen.category, "utilities");
+      assert.equal((await alice.get("/api/household")).data.recurring.find((r) => r.id === rule.data.id).category, "utilities");
+      await alice.post(`/api/recurring/${rule.data.id}/stop`);
+    });
+  });
+
+  describe("reset", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const ours = async () => (await alice.get("/api/household")).data;
+    const carolsEntries = async () => (await carol.get("/api/household")).data.entries;
+
+    test("delete voided and edited history: removes only those, only in this household", async () => {
+      // Carol (another household) has a voided entry that must survive.
+      await carol.post("/api/entries", expense(carolId, { name: "Carol's" }));
+      const carolEntry = (await carolsEntries()).find((e) => e.name === "Carol's");
+      await carol.post(`/api/entries/${carolEntry.id}/void`);
+
+      // A recurring entry that gets voided and then purged must not come back.
+      const rule = await alice.post("/api/recurring", {
+        name: "Gym", amount_cents: 5000, payer_id: aliceId, payer_share_pct: 50,
+        frequency: "monthly", start_date: today, today,
+      });
+      const gym = (await ours()).entries.find((e) => e.recurring_id === rule.data.id);
+      await alice.post(`/api/entries/${gym.id}/void`);
+
+      const before = (await ours()).entries;
+      const voided = before.filter((e) => e.voided_at).length;
+      const active = before.filter((e) => !e.voided_at).map((e) => e.id).sort();
+      assert.ok(voided >= 3, "there is voided and edited history to purge");
+
+      const res = await bob.post("/api/household/purge-voided");
+      assert.equal(res.status, 200);
+      assert.equal(res.data.deleted, voided);
+
+      const after = (await ours()).entries;
+      assert.equal(after.filter((e) => e.voided_at).length, 0);
+      assert.deepEqual(after.map((e) => e.id).sort(), active, "active entries untouched");
+      assert.ok(!after.some((e) => e.recurring_id === rule.data.id), "purged recurring entry not recreated");
+      assert.ok((await carolsEntries()).some((e) => e.id === carolEntry.id && e.voided_at), "other household untouched");
+      await alice.post(`/api/recurring/${rule.data.id}/stop`);
+    });
+
+    test("delete everything: needs the word DELETE, keeps accounts and settings", async () => {
+      assert.equal((await alice.post("/api/household/reset", {})).status, 400);
+      assert.equal((await alice.post("/api/household/reset", { confirm: "delete" })).status, 400);
+      assert.ok((await ours()).entries.length > 0, "nothing deleted by refused requests");
+
+      await alice.post("/api/household/split", { myShare: 60 });
+      await alice.post("/api/recurring", {
+        name: "Internet", amount_cents: 6000, payer_id: aliceId, payer_share_pct: 50,
+        frequency: "monthly", start_date: today, today,
+      });
+      const carolCount = (await carolsEntries()).length;
+
+      const res = await bob.post("/api/household/reset", { confirm: "DELETE" });
+      assert.equal(res.status, 200);
+      assert.ok(res.data.deletedEntries > 0);
+      assert.ok(res.data.deletedRecurring > 0);
+      assert.ok(res.data.deletedUploads > 0, "statement uploads are deleted too");
+      const sp = (await alice.get("/api/spending")).data;
+      assert.equal(sp.batches.length + sp.totals.length + sp.breakdown.length, 0);
+
+      const h = await ours();
+      assert.equal(h.entries.length, 0);
+      assert.equal(h.recurring.length, 0);
+      assert.equal(h.members.length, 2, "both still in the household");
+      assert.equal(h.members.find((m) => m.user_id === aliceId).share_pct, 60, "default split kept");
+      assert.match(h.inviteCode, /^[0-9a-f]{16}$/);
+      assert.equal((await carolsEntries()).length, carolCount, "other household untouched");
+      // Still usable afterwards.
+      assert.equal((await alice.post("/api/entries", expense(aliceId))).status, 201);
+      await alice.post("/api/household/split", { myShare: 50 });
+    });
+
+    test("outsiders can't reset or purge anyone else's household", async () => {
+      const outsider = new Client();
+      assert.equal((await outsider.post("/api/household/reset", { confirm: "DELETE" })).status, 401);
+      assert.equal((await outsider.post("/api/household/purge-voided")).status, 401);
+      assert.equal((await alice.post("/api/household/reset", { confirm: "DELETE" }, { origin: "https://evil.example" })).status, 403);
+      assert.equal((await ours()).entries.length, 1, "the entry from the previous test is still there");
     });
   });
 

@@ -1,0 +1,17 @@
+{
+  "spending": [
+    "groceries",
+    "dining",
+    "household",
+    "utilities",
+    "transport",
+    "health",
+    "subscriptions",
+    "entertainment",
+    "travel",
+    "gift",
+    "fees",
+    "other"
+  ],
+  "income": "income"
+}

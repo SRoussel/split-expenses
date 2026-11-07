@@ -1,7 +1,8 @@
 // Pure ledger logic: money parsing, balance math, CSV import/export.
 // No browser or server code in here so it can be tested with plain Node.
 
-import type { Entry, NewEntry } from "./types";
+import { INCOME_CATEGORY, isPersonalCategory, isSpendingCategory } from "../shared/categories";
+import type { Entry } from "./types";
 
 // ---------------------------------------------------------------------------
 // Money
@@ -84,40 +85,73 @@ function csvField(value: string): string {
 // Statement import: the summary file from `uv run split-ledger summarize`
 // ---------------------------------------------------------------------------
 
+/** { "2026-01": { groceries: 8420, income: 325000 } }: totals per month and category, in cents. */
+export type MonthTotals = Record<string, Record<string, number>>;
+
 /**
  * What the app accepts from a statement. Made on your computer by
- * `uv run split-ledger summarize split_transactions.csv`; individual
- * transactions and merchants never reach the app.
+ * `uv run split-ledger summarize`; individual transactions, merchants and
+ * purchase dates never reach the app.
  */
 export interface ImportSummary {
   name: string; // "Expenses mm/dd/yy-mm/dd/yy"
   start: string; // YYYY-MM-DD
   end: string; // YYYY-MM-DD
-  count: number;
-  totalCents: number;
-  byCategory: Record<string, number> | null; // null when made with --no-categories
+  shared: { count: number; totalCents: number; months: MonthTotals } | null;
+  personal: { count: number; months: MonthTotals } | null;
 }
 
-/** Biggest summary file the app will read (they're well under 1 KB). */
-export const MAX_SUMMARY_BYTES = 16 * 1024;
+/** Biggest summary file the app will read (they're a few KB at most). */
+export const MAX_SUMMARY_BYTES = 32 * 1024;
 
-const SUMMARY_KEYS = new Set(["format", "version", "name", "start", "end", "count", "total_cents", "categories"]);
 const MAX_CENTS = 100_000_000_00;
+const SUMMARIZE_HINT =
+  "Run `uv run split-ledger summarize` on your computer and choose the split_summary.json it makes.";
 
 const isDay = (v: unknown): v is string =>
   typeof v === "string" &&
   /^\d{4}-\d{2}-\d{2}$/.test(v) &&
   new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
-const isCents = (v: unknown, min: number) => Number.isInteger(v) && (v as number) >= min && (v as number) <= MAX_CENTS;
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
-const SUMMARIZE_HINT =
-  "Run `uv run split-ledger summarize split_transactions.csv` on your computer and choose the split_summary.json it makes.";
+function onlyKeys(o: Record<string, unknown>, allowed: string[], where: string) {
+  const extra = Object.keys(o).filter((k) => !allowed.includes(k));
+  if (extra.length) throw new Error(`The summary has unexpected fields${where} (${extra.join(", ")}), so it wasn't imported.`);
+}
+
+function checkMonths(raw: unknown, start: string, end: string, allowed: (c: string) => boolean, label: string): MonthTotals {
+  if (!isObject(raw)) throw new Error(`The summary's ${label} totals aren't valid.`);
+  const months = Object.entries(raw);
+  if (months.length === 0 || months.length > 13) throw new Error(`The summary's ${label} totals aren't valid.`);
+  const out: MonthTotals = {};
+  for (const [month, cats] of months) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || month < start.slice(0, 7) || month > end.slice(0, 7)) {
+      throw new Error(`The summary's ${label} totals include ${month}, outside its dates.`);
+    }
+    if (!isObject(cats) || Object.keys(cats).length === 0 || Object.keys(cats).length > 13) {
+      throw new Error(`The summary's ${label} totals for ${month} aren't valid.`);
+    }
+    out[month] = {};
+    for (const [cat, cents] of Object.entries(cats)) {
+      if (!allowed(cat)) throw new Error(`The summary has an unknown ${label} category: "${cat}".`);
+      if (!Number.isInteger(cents) || Math.abs(cents as number) > MAX_CENTS) {
+        throw new Error(`The summary's ${label} amount for ${cat} in ${month} isn't valid.`);
+      }
+      if (cat === INCOME_CATEGORY && (cents as number) < 0) throw new Error("The summary has negative income.");
+      out[month][cat] = cents as number;
+    }
+  }
+  return out;
+}
+
+const sumMonths = (m: MonthTotals) =>
+  Object.values(m).reduce((n, cats) => n + Object.values(cats).reduce((a, b) => a + b, 0), 0);
 
 /**
  * Read a split_summary.json, strictly. Anything unexpected is refused, in
- * particular the detailed split_transactions.csv and any extra fields, so the
- * only things the app can learn from a statement are the ones listed in
- * ImportSummary.
+ * particular the detailed transaction CSVs and any extra fields, so the only
+ * things the app can learn from a statement are the ones in ImportSummary.
+ * Version 1 files (shared totals only, from before cash flow) still work.
  */
 export function parseSummary(text: string): ImportSummary {
   let data: unknown;
@@ -126,65 +160,102 @@ export function parseSummary(text: string): ImportSummary {
   } catch {
     if (/^\s*"?date"?\s*,/i.test(text) || /\bamount\b.*\bvendor\b/i.test(text.slice(0, 200))) {
       throw new Error(
-        "That's the detailed transactions file. To keep your purchases private, the app only takes the summary. " +
+        "That's a detailed transactions file. To keep your purchases private, the app only takes the summary. " +
           SUMMARIZE_HINT,
       );
     }
     throw new Error(`That isn't a statement summary. ${SUMMARIZE_HINT}`);
   }
-  if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error(`That isn't a statement summary. ${SUMMARIZE_HINT}`);
-  const d = data as Record<string, unknown>;
-  if (d.format !== "split-summary") throw new Error(`That isn't a statement summary. ${SUMMARIZE_HINT}`);
-  if (d.version !== 1) throw new Error("This summary was made by a newer version of split-ledger. Update the app.");
+  if (!isObject(data) || data.format !== "split-summary") throw new Error(`That isn't a statement summary. ${SUMMARIZE_HINT}`);
+  if (data.version !== 1 && data.version !== 2) {
+    throw new Error("This summary was made by a newer version of split-ledger. Update the app.");
+  }
 
-  const extra = Object.keys(d).filter((k) => !SUMMARY_KEYS.has(k));
-  if (extra.length) throw new Error(`The summary has unexpected fields (${extra.join(", ")}), so it wasn't imported.`);
-
-  const name = typeof d.name === "string" ? d.name.trim() : "";
+  const name = typeof data.name === "string" ? data.name.trim() : "";
   if (!name || name.length > 200) throw new Error("The summary's name is missing or too long.");
-  if (!isDay(d.start) || !isDay(d.end) || d.start > d.end) throw new Error("The summary's dates aren't valid.");
-  if (!Number.isInteger(d.count) || (d.count as number) < 1 || (d.count as number) > 100_000) {
-    throw new Error("The summary's transaction count isn't valid.");
-  }
-  if (!isCents(d.total_cents, 1)) throw new Error("The summary's total isn't valid.");
+  if (!isDay(data.start) || !isDay(data.end) || data.start > data.end) throw new Error("The summary's dates aren't valid.");
+  const { start, end } = data;
+  const isCount = (v: unknown) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 100_000;
 
-  let byCategory: Record<string, number> | null = null;
-  if (d.categories !== undefined) {
-    const c = d.categories;
-    if (!c || typeof c !== "object" || Array.isArray(c)) throw new Error("The summary's categories aren't valid.");
-    const entries = Object.entries(c as Record<string, unknown>);
-    if (entries.length > 50) throw new Error("The summary has too many categories.");
-    let sum = 0;
-    byCategory = {};
-    for (const [k, v] of entries) {
-      if (!k.trim() || k.length > 50 || !isCents(v, 0)) throw new Error("The summary's categories aren't valid.");
-      byCategory[k] = v as number;
-      sum += v as number;
+  if (data.version === 1) {
+    // Shared totals only, by category for the whole period: file it under the first month.
+    onlyKeys(data, ["format", "version", "name", "start", "end", "count", "total_cents", "categories"], "");
+    if (!isCount(data.count)) throw new Error("The summary's transaction count isn't valid.");
+    const total = data.total_cents;
+    if (!Number.isInteger(total) || (total as number) < 1 || (total as number) > MAX_CENTS) {
+      throw new Error("The summary's total isn't valid.");
     }
-    if (sum !== d.total_cents) throw new Error("The summary's categories don't add up to its total, so it wasn't imported.");
+    const cats = isObject(data.categories)
+      ? Object.fromEntries(Object.entries(data.categories).map(([c, v]) => [c === "uncategorized" ? "other" : c, v]))
+      : { other: total };
+    const months = checkMonths({ [start.slice(0, 7)]: cats }, start, end, isSpendingCategory, "shared");
+    if (sumMonths(months) !== total) throw new Error("The summary's categories don't add up to its total, so it wasn't imported.");
+    return { name, start, end, shared: { count: data.count as number, totalCents: total as number, months }, personal: null };
   }
 
-  return { name, start: d.start, end: d.end, count: d.count as number, totalCents: d.total_cents as number, byCategory };
+  onlyKeys(data, ["format", "version", "name", "start", "end", "shared", "personal"], "");
+  let shared: ImportSummary["shared"] = null;
+  let personal: ImportSummary["personal"] = null;
+  if (data.shared !== undefined) {
+    if (!isObject(data.shared)) throw new Error("The summary's shared part isn't valid.");
+    onlyKeys(data.shared, ["count", "total_cents", "months"], " in its shared part");
+    if (!isCount(data.shared.count)) throw new Error("The summary's transaction count isn't valid.");
+    const months = checkMonths(data.shared.months, start, end, isSpendingCategory, "shared");
+    const total = data.shared.total_cents;
+    if (!Number.isInteger(total) || total !== sumMonths(months) || (total as number) < 1) {
+      throw new Error("The summary's categories don't add up to its total, so it wasn't imported.");
+    }
+    shared = { count: data.shared.count as number, totalCents: total as number, months };
+  }
+  if (data.personal !== undefined) {
+    if (!isObject(data.personal)) throw new Error("The summary's personal part isn't valid.");
+    onlyKeys(data.personal, ["count", "months"], " in its personal part");
+    if (!isCount(data.personal.count)) throw new Error("The summary's transaction count isn't valid.");
+    personal = { count: data.personal.count as number, months: checkMonths(data.personal.months, start, end, isPersonalCategory, "personal") };
+  }
+  if (!shared && !personal) throw new Error("The summary is empty.");
+  return { name, start, end, shared, personal };
+}
+
+/** Totals per category across all months. */
+export function totalsByCategory(months: MonthTotals): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const cats of Object.values(months)) {
+    for (const [c, v] of Object.entries(cats)) out[c] = (out[c] ?? 0) + v;
+  }
+  return out;
+}
+
+export interface StatementImport {
+  name: string;
+  start: string;
+  end: string;
+  shared?: { total_cents: number; months: MonthTotals; payer_id: string; payer_share_pct: number };
+  personal?: { person_id: string; months: MonthTotals };
 }
 
 /**
- * The entry an import sends to the server: the summary's name and total, plus
- * who paid and the split. The categories and counts are only shown on screen.
+ * The request an import sends: the name, the period, and month/category totals,
+ * plus who paid, the split, and whose statement it is. Counts and anything else
+ * stay on screen.
  */
-export function summaryToEntry(
+export function summaryToImport(
   summary: ImportSummary,
-  payerId: string,
-  payerSharePct: number,
-  entryDate: string,
-): NewEntry {
-  return {
-    kind: "expense",
-    entry_date: entryDate,
-    name: summary.name,
-    amount_cents: summary.totalCents,
-    payer_id: payerId,
-    payer_share_pct: payerSharePct,
-  };
+  choices: { name: string; shared: { payerId: string; payerSharePct: number } | null; personId: string | null },
+): StatementImport {
+  const body: StatementImport = { name: choices.name, start: summary.start, end: summary.end };
+  if (summary.shared && choices.shared) {
+    body.shared = {
+      total_cents: summary.shared.totalCents,
+      months: summary.shared.months,
+      payer_id: choices.shared.payerId,
+      payer_share_pct: choices.shared.payerSharePct,
+    };
+  }
+  if (summary.personal && choices.personId) {
+    body.personal = { person_id: choices.personId, months: summary.personal.months };
+  }
+  return body;
 }
 
 /**

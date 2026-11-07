@@ -10,7 +10,8 @@ import {
   owedCents,
   parseDollars,
   parseSummary,
-  summaryToEntry,
+  summaryToImport,
+  totalsByCategory,
 } from "./ledger.ts";
 import type { Entry } from "./types.ts";
 
@@ -33,6 +34,7 @@ function entry(p: Partial<Entry> & Pick<Entry, "kind" | "payer_id" | "amount_cen
     replaced_by: null,
     recurring_id: null,
     occurrence_date: null,
+    category: null,
     ...p,
   };
 }
@@ -101,64 +103,70 @@ test("describeBalance", () => {
   assert.equal(fmt(-1234), "$12.34");
 });
 
-// The same files the Python tests use (CI checks `split-ledger summarize` produces exactly
-// expected_summary.json from the sample CSV), so both ends of the import agree.
+// The same files the Python tests use (they check `split-ledger summarize` produces exactly
+// expected_summary_v2.json from the sample CSVs), so both ends of the import agree.
 const fixture = (name: string) => readFileSync(new URL(`../tests/fixtures/${name}`, import.meta.url), "utf8");
 
-test("parseSummary reads what `split-ledger summarize` writes", () => {
-  const s = parseSummary(fixture("expected_summary.json"));
-  assert.deepEqual(s, {
-    name: "Expenses 01/15/26-02/03/26",
-    start: "2026-01-15",
-    end: "2026-02-03",
-    count: 4,
-    totalCents: 136205,
-    byCategory: { dining: 4510, groceries: 11695, household: 120000 },
+test("parseSummary reads what `split-ledger summarize` writes (v2)", () => {
+  const s = parseSummary(fixture("expected_summary_v2.json"));
+  assert.equal(s.name, "Expenses 01/15/26-02/03/26");
+  assert.equal(s.shared?.totalCents, 134955);
+  assert.deepEqual(s.shared?.months["2026-02"], { groceries: 2025 }, "the shared return reduced groceries");
+  assert.equal(s.personal?.months["2026-01"].income, 325042);
+  assert.deepEqual(totalsByCategory(s.personal!.months), {
+    dining: 1840, entertainment: 4499, fees: 3500, income: 650042, transport: 5230,
   });
-  // --no-categories
-  const bare = JSON.parse(fixture("expected_summary.json"));
-  delete bare.categories;
-  assert.equal(parseSummary(JSON.stringify(bare)).byCategory, null);
 });
 
-test("parseSummary refuses the detailed CSV and anything unexpected", () => {
+test("parseSummary still reads version 1 files (shared totals only)", () => {
+  const s = parseSummary(fixture("expected_summary_v1.json"));
+  assert.equal(s.personal, null);
+  assert.equal(s.shared?.totalCents, 136205);
+  assert.deepEqual(s.shared?.months, { "2026-01": { dining: 4510, groceries: 11695, household: 120000 } });
+});
+
+test("parseSummary refuses the detailed CSVs and anything unexpected", () => {
   assert.throws(() => parseSummary(fixture("sample_split_transactions.csv")), /detailed transactions file/);
-  const good = () => JSON.parse(fixture("expected_summary.json"));
-  const bad: [string, (d: Record<string, unknown>) => void, RegExp][] = [
-    ["extra field (e.g. transactions)", (d) => (d.transactions = [{ vendor: "X", amount: 1 }]), /unexpected fields \(transactions\)/],
-    ["wrong format", (d) => (d.format = "something-else"), /isn't a statement summary/],
-    ["newer version", (d) => (d.version = 2), /newer version/],
-    ["categories don't add up", (d) => ((d.categories as Record<string, number>).dining += 1), /don't add up/],
-    ["total in dollars, not cents", (d) => (d.total_cents = 1362.05), /total isn't valid/],
+  assert.throws(() => parseSummary(fixture("sample_personal_transactions.csv")), /detailed transactions file/);
+  const good = () => JSON.parse(fixture("expected_summary_v2.json"));
+  type D = Record<string, any>;
+  const bad: [string, (d: D) => void, RegExp][] = [
+    ["extra field (e.g. transactions)", (d) => (d.transactions = [{ vendor: "X" }]), /unexpected fields \(transactions\)/],
+    ["extra field inside personal", (d) => (d.personal.vendors = ["X"]), /unexpected fields in its personal part/],
+    ["wrong format", (d) => (d.format = "x"), /isn't a statement summary/],
+    ["newer version", (d) => (d.version = 3), /newer version/],
+    ["shared doesn't add up", (d) => (d.shared.months["2026-01"].dining += 1), /don't add up/],
+    ["income in the shared part", (d) => (d.shared.months["2026-01"].income = 1), /unknown shared category/],
+    ["unknown personal category", (d) => (d.personal.months["2026-01"].shopping = 1), /unknown personal category/],
+    ["negative income", (d) => (d.personal.months["2026-01"].income = -1), /negative income/],
+    ["dollars, not cents", (d) => (d.personal.months["2026-01"].dining = 18.4), /isn't valid/],
+    ["month outside the dates", (d) => (d.personal.months["2026-05"] = { dining: 1 }), /outside its dates/],
     ["impossible date", (d) => (d.start = "2026-02-31"), /dates aren't valid/],
-    ["start after end", (d) => (d.start = "2026-03-01"), /dates aren't valid/],
-    ["empty name", (d) => (d.name = "  "), /name is missing/],
-    ["zero transactions", (d) => (d.count = 0), /count isn't valid/],
-    ["negative category", (d) => ((d.categories as Record<string, number>).dining = -1), /categories aren't valid/],
+    ["empty", (d) => { delete d.shared; delete d.personal; }, /empty/],
   ];
   for (const [label, mutate, message] of bad) {
     const d = good();
     mutate(d);
     assert.throws(() => parseSummary(JSON.stringify(d)), message, label);
   }
-  assert.throws(() => parseSummary("[1, 2]"), /isn't a statement summary/);
-  assert.throws(() => parseSummary("hello"), /isn't a statement summary/);
 });
 
-test("an import sends only the name, total, payer, split and date", () => {
-  const s = parseSummary(fixture("expected_summary.json"));
-  const entry = summaryToEntry(s, "payer-id", 50, "2026-11-07");
-  assert.deepEqual(Object.keys(entry).sort(), ["amount_cents", "entry_date", "kind", "name", "payer_id", "payer_share_pct"]);
-  assert.deepEqual(entry, {
-    kind: "expense",
-    entry_date: "2026-11-07",
-    name: "Expenses 01/15/26-02/03/26",
-    amount_cents: 136205,
-    payer_id: "payer-id",
-    payer_share_pct: 50,
+test("an import sends only names, the period and month/category totals", () => {
+  const s = parseSummary(fixture("expected_summary_v2.json"));
+  const body = summaryToImport(s, {
+    name: s.name,
+    shared: { payerId: "sam-id", payerSharePct: 50 },
+    personId: "sam-id",
   });
-  // Nothing from the categories or the count tags along.
-  assert.doesNotMatch(JSON.stringify(entry), /groceries|dining|household|"count"/);
+  assert.deepEqual(Object.keys(body).sort(), ["end", "name", "personal", "shared", "start"]);
+  assert.deepEqual(Object.keys(body.shared!).sort(), ["months", "payer_id", "payer_share_pct", "total_cents"]);
+  assert.deepEqual(Object.keys(body.personal!).sort(), ["months", "person_id"]);
+  assert.doesNotMatch(JSON.stringify(body), /FAKE|"count"|vendor/, "no merchants, no counts");
+  // Leaving parts out.
+  const sharedOnly = summaryToImport(s, { name: "x", shared: { payerId: "a", payerSharePct: 50 }, personId: null });
+  assert.equal(sharedOnly.personal, undefined);
+  const personalOnly = summaryToImport(s, { name: "x", shared: null, personId: "a" });
+  assert.equal(personalOnly.shared, undefined);
 });
 
 test("export uses the CLI ledger.csv format", () => {

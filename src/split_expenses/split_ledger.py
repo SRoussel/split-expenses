@@ -15,7 +15,8 @@ Examples:
     uv run split-ledger add 60 me dinner --my-share 70   # you owe 70% of this one
     uv run split-ledger add                              # prompts for amount, payer, name
     uv run split-ledger import split_transactions.csv    # total -> "Expenses mm/dd/yy-mm/dd/yy"
-    uv run split-ledger summarize split_transactions.csv # -> split_summary.json for the web app
+    uv run split-ledger summarize                        # -> split_summary.json (totals only) for the web app
+    uv run split-ledger summarize --person sam           # same, from data/sam/
     uv run split-ledger settle                           # settle the full balance
     uv run split-ledger settle 100 me                    # you paid partner $100
     uv run split-ledger balance
@@ -30,6 +31,13 @@ import sys
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
+
+try:
+    from .categories import INCOME, SPENDING
+    from .people import person_dir
+except ImportError:  # run as a plain script
+    from categories import INCOME, SPENDING
+    from people import person_dir
 
 FIELDS = ["date", "type", "payer", "amount", "my_share", "name"]
 CENT = Decimal("0.01")
@@ -260,28 +268,50 @@ def cmd_settle(args, path):
     print(describe(current_balance(load_ledger(path))))
 
 
-def read_split_csv(src):
-    """Total a split_transactions.csv: (total, dates, totals by category, rows skipped)."""
+def parse_signed_amount(s):
+    """An amount from a transactions CSV. Negative = a return. Zero isn't allowed."""
+    try:
+        d = Decimal(str(s).replace("$", "").replace(",", "").strip())
+    except InvalidOperation:
+        raise ValueError(f"Not a valid amount: {s!r}")
+    if d == 0:
+        raise ValueError("Amount can't be zero.")
+    return money(d)
+
+
+def read_txn_csv(src, allowed):
+    """Read a transactions CSV from split-statements (date, amount, vendor, category).
+
+    Returns totals only: overall, per category, and per month per category.
+    Rows with a bad date or amount are skipped and counted. An unknown
+    category stops with an error, so nothing gets silently mislabelled.
+    """
     total = Decimal("0.00")
-    dates, by_category, skipped = [], {}, 0
+    dates, by_category, by_month, skipped = [], {}, {}, 0
     with open(src, newline="") as f:
         reader = csv.DictReader(f)
         if not reader.fieldnames or not {"date", "amount"} <= set(reader.fieldnames):
-            sys.exit("CSV must have 'date' and 'amount' columns.")
-        for r in reader:
+            sys.exit(f"{src}: needs 'date' and 'amount' columns.")
+        for line_no, r in enumerate(reader, 2):
             try:
-                amt = parse_amount(r["amount"])
+                amt = parse_signed_amount(r["amount"])
                 d = datetime.strptime(r["date"].strip(), "%Y-%m-%d").date()
             except (ValueError, AttributeError):
                 skipped += 1
                 continue
+            cat = (r.get("category") or "").strip().lower()
+            if cat in ("", "uncategorized"):
+                cat = "other"
+            if cat not in allowed:
+                sys.exit(f"{src}, line {line_no}: unknown category {cat!r}. "
+                         f"Use one of: {', '.join(allowed)}.")
             total += amt
             dates.append(d)
-            cat = (r.get("category") or "uncategorized").strip() or "uncategorized"
             by_category[cat] = by_category.get(cat, Decimal("0.00")) + amt
-    if not dates:
-        sys.exit("No valid transactions found in that CSV.")
-    return total, dates, by_category, skipped
+            month = by_month.setdefault(f"{d:%Y-%m}", {})
+            month[cat] = month.get(cat, Decimal("0.00")) + amt
+    return {"total": total, "dates": dates, "by_category": by_category,
+            "by_month": by_month, "skipped": skipped}
 
 
 def default_name(dates):
@@ -293,38 +323,74 @@ def cents(amount):
     return int(money(amount) * 100)
 
 
+def months_in_cents(by_month):
+    return {m: {c: cents(v) for c, v in sorted(cats.items())} for m, cats in sorted(by_month.items())}
+
+
 def cmd_summarize(args, _path):
     """Write split_summary.json: the only thing the web app's import accepts.
 
-    It holds the name, date range, number of transactions, total and (unless
-    --no-categories) the total per category. No dates of individual purchases,
-    no merchants, no amounts per transaction: those stay on this computer.
+    Totals per month and category, for the shared transactions and (unless
+    --no-personal) your own spending and income. No individual purchases,
+    merchants or dates of purchases: those stay on this computer.
     """
-    src = Path(args.csv)
-    if not src.is_file():
-        sys.exit(f"File not found: {src}")
-    total, dates, by_category, skipped = read_split_csv(src)
+    base = person_dir(args.person) if args.person else Path(".")
+    split_src = Path(args.csv) if args.csv else base / "split_transactions.csv"
+    personal_src = Path(args.personal) if args.personal else base / "personal_transactions.csv"
+    out = Path(args.output) if args.output else base / "split_summary.json"
+    if args.csv and not split_src.is_file():
+        sys.exit(f"File not found: {split_src}")
+    if args.personal and not personal_src.is_file():
+        sys.exit(f"File not found: {personal_src}")
 
+    shared = read_txn_csv(split_src, SPENDING) if split_src.is_file() else None
+    personal = None
+    if not args.no_personal and personal_src.is_file():
+        personal = read_txn_csv(personal_src, SPENDING + [INCOME])
+    if shared and not shared["dates"]:
+        shared = None
+    if personal and not personal["dates"]:
+        personal = None
+    if shared and shared["total"] <= 0:
+        print(paint("The shared transactions add up to $0 or less (returns only?), so they're left out.", "yellow"))
+        shared = None
+    if personal and personal["by_category"].get(INCOME, Decimal(0)) < 0:
+        sys.exit(f"{personal_src}: income can't be negative.")
+    if not shared and not personal:
+        sys.exit(f"Nothing to summarize: no transactions in {split_src} or {personal_src}.")
+
+    dates = (shared["dates"] if shared else []) + (personal["dates"] if personal else [])
     summary = {
         "format": "split-summary",
-        "version": 1,
+        "version": 2,
         "name": args.name or default_name(dates),
         "start": min(dates).isoformat(),
         "end": max(dates).isoformat(),
-        "count": len(dates),
-        "total_cents": cents(total),
     }
-    if not args.no_categories:
-        summary["categories"] = {cat: cents(by_category[cat]) for cat in sorted(by_category)}
+    if shared:
+        summary["shared"] = {
+            "count": len(shared["dates"]),
+            "total_cents": cents(shared["total"]),
+            "months": months_in_cents(shared["by_month"]),
+        }
+    if personal:
+        summary["personal"] = {
+            "count": len(personal["dates"]),
+            "months": months_in_cents(personal["by_month"]),
+        }
 
-    out = Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(summary, indent=2) + "\n")
-    print(f"Summarized {len(dates)} transaction(s) from {src.name}"
-          + (f" ({skipped} skipped as invalid)" if skipped else "") + f" into {out}:")
-    print(f"  {summary['name']}: {fmt(total)}")
-    for cat, c in summary.get("categories", {}).items():
-        print(f"  {cat:<15}{paint(f'{fmt(Decimal(c) / 100):>12}', 'cyan')}")
-    print(f"That file is everything the web app will receive. Open it to check: {out}")
+
+    print(f"{paint(summary['name'], 'bold')}  ({summary['start']} to {summary['end']})")
+    for label, part in (("Shared", shared), ("Personal", personal)):
+        if not part:
+            continue
+        skipped = f", {part['skipped']} skipped as invalid" if part["skipped"] else ""
+        print(f"  {label}: {len(part['dates'])} transaction(s){skipped}")
+        for cat, amount in sorted(part["by_category"].items()):
+            print(f"    {cat:<15}{paint(f'{fmt(amount):>12}', 'cyan')}" + (" (money in)" if cat == INCOME else ""))
+    print(f"Wrote {out}. That file is everything the web app will receive; open it to check.")
 
 
 def cmd_import(args, path):
@@ -340,7 +406,12 @@ def cmd_import(args, path):
     except ValueError as e:
         sys.exit(f"Error: {e}")
 
-    total, dates, by_category, skipped = read_split_csv(src)
+    data = read_txn_csv(src, SPENDING)
+    total, dates, by_category, skipped = data["total"], data["dates"], data["by_category"], data["skipped"]
+    if not dates:
+        sys.exit("No valid transactions found in that CSV.")
+    if total <= 0:
+        sys.exit("Those transactions add up to $0 or less (returns only?), so there's nothing to import.")
     name = args.name or default_name(dates)
 
     rows = load_ledger(path)
@@ -473,12 +544,13 @@ def main():
 
     p = sub.add_parser("summarize", parents=[common],
                        help="Write split_summary.json (totals only) for the web app's import")
-    p.add_argument("csv", help="CSV from split-statements")
-    p.add_argument("-o", "--output", default="split_summary.json",
-                   help="Where to write the summary (default: split_summary.json)")
+    p.add_argument("csv", nargs="?",
+                   help="Shared transactions CSV (default: split_transactions.csv, or data/<person>/...)")
+    p.add_argument("--personal", help="Personal transactions CSV (default: personal_transactions.csv)")
+    p.add_argument("--person", help="Use the files in data/<person>/ (as written by split-statements --person)")
+    p.add_argument("--no-personal", action="store_true", help="Leave out personal spending and income")
+    p.add_argument("-o", "--output", help="Where to write the summary (default: split_summary.json)")
     p.add_argument("--name", help="Override the entry name (default: Expenses mm/dd/yy-mm/dd/yy)")
-    p.add_argument("--no-categories", action="store_true",
-                   help="Leave out the per-category totals; only the overall total is kept")
     p.set_defaults(func=cmd_summarize)
 
     p = sub.add_parser("balance", parents=[common], help="Show who owes whom")

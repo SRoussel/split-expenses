@@ -195,6 +195,18 @@ input:not([type="checkbox"]):not([type="file"]) {
   min-height: 46px;
 }
 
+select {
+  font: inherit;
+  font-size: 16px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  width: 100%;
+  min-height: 46px;
+}
+
 input[type="date"] {
   -webkit-appearance: none;
   appearance: none;
@@ -806,6 +818,10 @@ button.toast-action {
   flex-direction: column;
   align-items: flex-end;
   flex: none;
+}
+
+.menu button.danger-item {
+  color: var(--neg);
 }
 
 button.danger-link {

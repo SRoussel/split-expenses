@@ -3,4 +3,5 @@ date,amount,vendor,category
 2026-01-20,"1,200.00",FAKE LANDLORD LLC,household
 2026-01-22,45.10,FAKE CAFE,dining
 not-a-date,10.00,BROKEN ROW,dining
+2026-02-01,-12.50,FAKE GROCER 123,groceries
 2026-02-03,32.75,FAKE GROCER 123,groceries

@@ -1,6 +1,7 @@
 import type { Frequency } from "../shared/recurring";
 import { todayLocal } from "./ledger";
-import type { Entry, Member, NewEntry, Recurring, RecurringInput } from "./types";
+import type { StatementImport } from "./ledger";
+import type { Entry, Member, NewEntry, Recurring, RecurringInput, SpendingData } from "./types";
 
 export interface User {
   id: string;
@@ -55,6 +56,9 @@ export const loadHousehold = () =>
   );
 
 export const setDefaultSplit = (myShare: number) => call("POST", "/api/household/split", { myShare });
+export const purgeVoided = () => call<{ deleted: number }>("POST", "/api/household/purge-voided", {});
+export const resetHousehold = (confirm: string) =>
+  call<{ deletedEntries: number; deletedRecurring: number }>("POST", "/api/household/reset", { confirm });
 
 export const addEntry = (entry: NewEntry) => call("POST", "/api/entries", entry);
 export const editEntry = (id: string, entry: NewEntry) => call("POST", `/api/entries/${id}/edit`, entry);
@@ -66,3 +70,11 @@ export const createRecurring = (rule: RecurringInput & { frequency: Frequency; s
 export const updateRecurring = (id: string, rule: RecurringInput & { paused: boolean }) =>
   call("POST", `/api/recurring/${id}/update`, { ...rule, today: todayLocal() });
 export const stopRecurring = (id: string) => call("POST", `/api/recurring/${id}/stop`, {});
+
+export const importStatement = (body: StatementImport) =>
+  call<{ entryId: string | null; batchId: string | null }>("POST", "/api/statements/import", {
+    ...body,
+    today: todayLocal(),
+  });
+export const getSpending = () => call<SpendingData>("GET", "/api/spending");
+export const deleteUpload = (id: string) => call("POST", `/api/statements/${id}/delete`, {});
