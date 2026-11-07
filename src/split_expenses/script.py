@@ -17,7 +17,8 @@ import hashlib
 import json
 import re
 import sys
-from datetime import datetime
+from collections import Counter
+from datetime import datetime, timedelta
 from pathlib import Path
 
 try:
@@ -74,12 +75,34 @@ def parse_amount(raw):
     return value, neg
 
 
+MONTHS = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?"
+
+
+def plausible_years(s):
+    """4-digit years in s that are within a sane range (last 10 years to next year)."""
+    cur = datetime.now().year
+    found = re.findall(r"(?<!\d)(20\d{2})(?!\d)(?!\.\d)(?!,\d)", s)
+    return [int(y) for y in found if cur - 10 <= int(y) <= cur + 1]
+
+
 def guess_year(text, filename):
-    """Find a plausible statement year from the text or the file name."""
-    for source in (filename, text):
-        m = re.search(r"\b(20\d{2})\b", source)
-        if m:
-            return int(m.group(1))
+    """Find a plausible statement year from the file name or the text.
+
+    Only years in a sane range are considered, so stray numbers (street
+    addresses, IDs, etc.) like 2050 are ignored.
+    """
+    ys = plausible_years(filename)
+    if ys:
+        return ys[0]
+
+    # Prefer years that appear inside dates: 01/15/2026 or "January 15, 2026".
+    dated = re.findall(r"\d{1,2}/\d{1,2}/(20\d{2})", text)
+    dated += re.findall(MONTHS + r"\s+\d{1,2},?\s+(20\d{2})", text, re.I)
+    ys = plausible_years(" ".join(dated))
+    if not ys:
+        ys = plausible_years(text)
+    if ys:
+        return Counter(ys).most_common(1)[0][0]
     return datetime.now().year
 
 
@@ -90,7 +113,12 @@ def normalize_date(raw, year):
         y = int(parts[2])
         year = y + 2000 if y < 100 else y
     try:
-        return datetime(year, month, day).strftime("%Y-%m-%d")
+        d = datetime(year, month, day)
+        # A year-less date that lands in the future belongs to the prior year
+        # (e.g. a December transaction on a January statement).
+        if len(parts) < 3 and d > datetime.now() + timedelta(days=7):
+            d = datetime(year - 1, month, day)
+        return d.strftime("%Y-%m-%d")
     except ValueError:
         return raw
 
@@ -102,6 +130,15 @@ def clean_vendor(desc):
     return desc
 
 
+_ID_WORDS = (r"pmt|payment|pymt|bill|ref|reference|conf|confirmation|trace|trn|txn|trans|"
+             r"acct|account|inv|invoice|auth|cust|customer|id|no|num|number")
+LABELED_ID_RE = re.compile(
+    rf"\b(?:{_ID_WORDS})\b\s*(?:id|no|num|number)?\s*[:#.\-]?\s*[\w\-*]*\d[\w\-*]*",
+    re.I,
+)
+DANGLING_LABEL_RE = re.compile(rf"(?:\s+(?:{_ID_WORDS}))+\s*[:#]?$", re.I)
+
+
 def vendor_match_key(vendor):
     """Normalize a vendor name for matching remembered choices.
 
@@ -109,8 +146,14 @@ def vendor_match_key(vendor):
     'STARBUCKS #1234' and 'STARBUCKS 5678' match the same rule.
     """
     v = vendor.lower()
+    # Labeled IDs: 'PMT ID: 123456', 'BILL ID 98765', 'REF# A123', 'CONF 4567' ...
+    v = LABELED_ID_RE.sub(" ", v)
     v = re.sub(r"#\s?\d+", " ", v)                    # '#1234' anywhere
+    # Any remaining token with 3+ digits (long IDs, masked account numbers).
+    v = " ".join(tok for tok in v.split() if len(re.findall(r"\d", tok)) < 3)
     v = re.sub(r"(?:[\s*\-]+\d[\d\-]*)+\s*$", "", v)  # trailing number tokens
+    v = DANGLING_LABEL_RE.sub("", v)                  # leftover 'pmt id' etc.
+    v = re.sub(r"[\s:#*\-.,]+$", "", v)
     return re.sub(r"\s+", " ", v).strip() or vendor.lower()
 
 
