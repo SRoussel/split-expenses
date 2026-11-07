@@ -15,6 +15,7 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import re
 import sys
 from collections import Counter
@@ -28,6 +29,24 @@ except ImportError:
 
 CATEGORIES = ["utilities", "groceries", "dining", "entertainment", "travel", "gift", "household"]
 CSV_FIELDS = ["date", "amount", "vendor", "category"]
+
+# ---------------------------------------------------------------------------
+# Terminal colors (auto-disabled when piped, if NO_COLOR is set, or --no-color)
+# ---------------------------------------------------------------------------
+
+USE_COLOR = sys.stdout.isatty() and "NO_COLOR" not in os.environ
+if USE_COLOR and os.name == "nt":
+    os.system("")  # enables ANSI escape handling in the Windows console
+
+_CODES = {"bold": "1", "dim": "2", "red": "31", "green": "32",
+          "yellow": "33", "blue": "34", "magenta": "35", "cyan": "36"}
+
+
+def paint(text, *styles):
+    if not USE_COLOR:
+        return str(text)
+    return "\033[" + ";".join(_CODES[s] for s in styles) + "m" + str(text) + "\033[0m"
+
 
 # ---------------------------------------------------------------------------
 # Parsing
@@ -241,20 +260,20 @@ def ask_choice(prompt, valid):
         ans = input(prompt).strip().lower()
         if ans in valid:
             return ans
-        print(f"  Please enter one of: {', '.join(sorted(valid))}")
+        print(paint(f"  Please enter one of: {', '.join(sorted(valid))}", "red"))
 
 
 def ask_category():
-    print("  Category:")
-    for i, c in enumerate(CATEGORIES, 1):
-        print(f"    {i}. {c}")
+    print(paint("  Category:", "bold"))
+    for i, cat in enumerate(CATEGORIES, 1):
+        print(f"    {paint(i, 'cyan')}. {cat}")
     while True:
         ans = input("  Choose category (number or name): ").strip().lower()
         if ans.isdigit() and 1 <= int(ans) <= len(CATEGORIES):
             return CATEGORIES[int(ans) - 1]
         if ans in CATEGORIES:
             return ans
-        print("  Invalid choice.")
+        print(paint("  Invalid choice.", "red"))
 
 
 def append_split(csv_path, txn, category):
@@ -279,33 +298,41 @@ def review(txns_by_file, csv_path, state_path):
                 pending.append((k, source, t))
 
     if not pending:
-        print("No new transactions to review.")
+        print(paint("No new transactions to review.", "green"))
         return
 
-    print(f"\n{len(pending)} transaction(s) to review.")
-    print("Keys:  [s] self   [p] split   [k] skip for now   [q] quit\n")
+    print(f"\n{paint(len(pending), 'bold')} transaction(s) to review.")
+    print(f"Keys:  {paint('[s]', 'green')} self   {paint('[p]', 'yellow')} split   "
+          f"{paint('[k]', 'dim')} skip for now   {paint('[q]', 'dim')} quit\n")
 
     split_count = 0
     for n, (k, source, t) in enumerate(pending, 1):
         vendor_key = vendor_match_key(t["vendor"])
         rule = rules.get(vendor_key)
 
-        line = f"{t['date']}  ${t['amount']:>9}  {t['vendor']}"
+        progress = paint(f"[{n}/{len(pending)}]", "dim")
+        amount_txt = "${:>9}".format(t["amount"])
+        line = "{}  {}  {}".format(
+            paint(t["date"], "dim"),
+            paint(amount_txt, "bold", "cyan"),
+            paint(t["vendor"], "bold"),
+        )
 
         # Remembered vendor: apply automatically, no prompt.
         if rule is not None:
             if rule == "self":
-                print(f"[{n}/{len(pending)}] {line}  -> self (remembered)")
+                print(f"{progress} {line}  {paint('-> self (remembered)', 'green')}")
             else:
                 append_split(csv_path, t, rule["split"])
                 split_count += 1
-                print(f"[{n}/{len(pending)}] {line}  -> split/{rule['split']} (remembered)")
+                note = "-> split/{} (remembered)".format(rule["split"])
+                print(f"{progress} {line}  {paint(note, 'yellow')}")
             done.add(k)
             state["done"] = sorted(done)
             save_state(state_path, state)
             continue
 
-        print(f"[{n}/{len(pending)}] {line}   ({source})")
+        print(f"{progress} {line}   {paint(f'({source})', 'dim')}")
         ans = ask_choice("  Self or split? [s/p/k/q]: ", {"s", "p", "k", "q"})
 
         if ans == "q":
@@ -331,7 +358,8 @@ def review(txns_by_file, csv_path, state_path):
         save_state(state_path, state)
         print()
 
-    print(f"\nSaved {split_count} split transaction(s) to {csv_path}")
+    summary = "Saved {} split transaction(s) to {}".format(split_count, csv_path)
+    print("\n" + paint(summary, "green", "bold"))
 
 
 # ---------------------------------------------------------------------------
@@ -350,13 +378,18 @@ def main():
     ap.add_argument("--reset", action="store_true", help="Forget previously reviewed transactions")
     ap.add_argument("--clear-rules", action="store_true",
                     help="Forget remembered vendor choices (keeps reviewed-transaction history)")
+    ap.add_argument("--no-color", action="store_true", help="Disable colored output")
     args = ap.parse_args()
+
+    if args.no_color:
+        global USE_COLOR
+        USE_COLOR = False
 
     if args.clear_rules and args.state.exists():
         st = load_state(args.state)
         st["vendor_rules"] = {}
         save_state(args.state, st)
-        print("Cleared remembered vendor choices.")
+        print(paint("Cleared remembered vendor choices.", "green"))
 
     if not args.directory.is_dir():
         sys.exit(f"Not a directory: {args.directory}")
@@ -375,14 +408,15 @@ def main():
         except Exception as e:  # corrupt/encrypted PDFs shouldn't kill the run
             print(f"Could not read {pdf.name}: {e}", file=sys.stderr)
             continue
-        print(f"{pdf.name}: found {len(txns)} expense(s)")
+        print("{}: found {} expense(s)".format(paint(pdf.name, "bold"), paint(len(txns), "cyan")))
         txns_by_file.append((pdf.name, txns))
 
     if args.dump:
         for source, txns in txns_by_file:
-            print(f"\n== {source} ==")
+            print("\n" + paint("== {} ==".format(source), "bold"))
             for t in txns:
-                print(f"{t['date']}  {t['amount']:>10}  {t['vendor']}")
+                amount_txt = "{:>10}".format(t["amount"])
+                print("{}  {}  {}".format(paint(t["date"], "dim"), paint(amount_txt, "cyan"), t["vendor"]))
         return
 
     try:

@@ -23,6 +23,7 @@ Examples:
 
 import argparse
 import csv
+import os
 import sys
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -35,6 +36,20 @@ EXPENSE = "expense"
 SETTLEMENT = "settlement"
 OPENING_ME = "opening_me_owes"
 OPENING_PARTNER = "opening_partner_owes"
+
+# Terminal colors (auto-disabled when piped, if NO_COLOR is set, or --no-color).
+USE_COLOR = sys.stdout.isatty() and "NO_COLOR" not in os.environ
+if USE_COLOR and os.name == "nt":
+    os.system("")  # enables ANSI escape handling in the Windows console
+
+_CODES = {"bold": "1", "dim": "2", "red": "31", "green": "32",
+          "yellow": "33", "blue": "34", "magenta": "35", "cyan": "36"}
+
+
+def paint(text, *styles):
+    if not USE_COLOR:
+        return str(text)
+    return "\033[" + ";".join(_CODES[s] for s in styles) + "m" + str(text) + "\033[0m"
 
 
 # ---------------------------------------------------------------------------
@@ -94,10 +109,10 @@ def fmt(d):
 
 def describe(balance):
     if balance > 0:
-        return f"Partner owes you {fmt(balance)}"
+        return paint(f"Partner owes you {fmt(balance)}", "bold", "green")
     if balance < 0:
-        return f"You owe partner {fmt(balance)}"
-    return "All settled up."
+        return paint(f"You owe partner {fmt(balance)}", "bold", "red")
+    return paint("All settled up.", "bold", "green")
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +196,8 @@ def cmd_add(args, path):
     append_row(path, row)
 
     who = "You" if payer == "me" else "Partner"
-    print(f"Recorded: {who} paid {fmt(amount)} for {name} (your share {row['my_share']}%).")
+    print(f"{paint('Recorded:', 'green')} {who} paid {fmt(amount)} for {name} "
+          f"(your share {row['my_share']}%).")
     print(describe(current_balance(load_ledger(path))))
 
 
@@ -209,7 +225,7 @@ def cmd_init(args, path):
         "date": when, "type": kind, "payer": "", "amount": f"{amount:.2f}",
         "my_share": "", "name": "Starting balance",
     })
-    print("Starting balance recorded.")
+    print(paint("Starting balance recorded.", "green"))
     print(describe(current_balance(load_ledger(path))))
 
 
@@ -236,7 +252,7 @@ def cmd_settle(args, path):
         "my_share": "", "name": args.name or "Settlement",
     })
     who = "You paid partner" if payer == "me" else "Partner paid you"
-    print(f"Recorded: {who} {fmt(amount)}.")
+    print(f"{paint('Recorded:', 'green')} {who} {fmt(amount)}.")
     print(describe(current_balance(load_ledger(path))))
 
 
@@ -295,9 +311,10 @@ def cmd_import(args, path):
     print(f"Imported {len(dates)} transaction(s) from {src.name}"
           + (f" ({skipped} skipped as invalid)" if skipped else "") + ":")
     for cat in sorted(by_category):
-        print(f"  {cat:<15}{fmt(by_category[cat]):>12}")
+        print(f"  {cat:<15}{paint(f'{fmt(by_category[cat]):>12}', 'cyan')}")
     who = "You" if payer == "me" else "Partner"
-    print(f"Recorded: {who} paid {fmt(total)} for {name} (your share {row['my_share']}%).")
+    print(f"{paint('Recorded:', 'green')} {who} paid {fmt(total)} for {name} "
+          f"(your share {row['my_share']}%).")
     print(describe(current_balance(load_ledger(path))))
 
 
@@ -320,8 +337,8 @@ def cmd_history(args, path):
     else:
         shown, running = rows, Decimal("0.00")
 
-    print(f"{'Date':<11}{'Entry':<22}{'Amount':>11}  {'Balance':>14}  Name")
-    print("-" * 78)
+    print(paint(f"{'Date':<11}{'Entry':<22}{'Amount':>11}  {'Balance':>14}  Name", "bold"))
+    print(paint("-" * 78, "dim"))
     for r in shown:
         running += effect(r)
         kind = r["type"]
@@ -336,11 +353,18 @@ def cmd_history(args, path):
         else:
             label = "Start: partner owes"
         sign = "+" if running > 0 else "-" if running < 0 else " "
-        print(f"{r['date']:<11}{label:<22}{fmt(Decimal(r['amount'])):>11}  "
-              f"{sign + fmt(running):>14}  {r['name']}")
-    print("-" * 78)
+        bal_txt = f"{sign + fmt(running):>14}"
+        bal_color = "green" if running > 0 else "red" if running < 0 else "dim"
+        label_color = "cyan" if kind == SETTLEMENT else "magenta" if kind.startswith("opening") else None
+        label_txt = f"{label:<22}"
+        date_txt = f"{r['date']:<11}"
+        print(f"{paint(date_txt, 'dim')}"
+              f"{paint(label_txt, label_color) if label_color else label_txt}"
+              f"{fmt(Decimal(r['amount'])):>11}  "
+              f"{paint(bal_txt, bal_color)}  {r['name']}")
+    print(paint("-" * 78, "dim"))
     print(describe(running))
-    print("(+ = partner owes you, - = you owe partner)")
+    print(paint("(+ = partner owes you, - = you owe partner)", "dim"))
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +375,8 @@ def main():
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--ledger", default=argparse.SUPPRESS,
                         help="Ledger CSV file (default: ledger.csv)")
+    common.add_argument("--no-color", action="store_true", default=argparse.SUPPRESS,
+                        help="Disable colored output")
 
     ap = argparse.ArgumentParser(description="Track shared expenses and who owes whom.",
                                  parents=[common])
@@ -403,6 +429,9 @@ def main():
     p.set_defaults(func=cmd_history)
 
     args = ap.parse_args()
+    if getattr(args, "no_color", False):
+        global USE_COLOR
+        USE_COLOR = False
     try:
         args.func(args, Path(getattr(args, "ledger", "ledger.csv")))
     except (KeyboardInterrupt, EOFError):
