@@ -61,13 +61,17 @@ This builds the app, type-checks it and uploads it. The first time, Cloudflare m
 
     npx wrangler d1 execute ledger --remote --command "SELECT email, created_at FROM users"
 
-If there's an email you don't recognize, tell me before doing anything else.
+If there's an email you don't recognize, someone signed up before you both did, and since sign-up stops at two accounts, one of you can't register. Remove the stranger's account, along with their sessions, household and any entries they made (put their email in all three places):
+
+    npx wrangler d1 execute ledger --remote --command "DELETE FROM entries WHERE household_id IN (SELECT household_id FROM members WHERE user_id = (SELECT id FROM users WHERE email = 'stranger@example.com')); DELETE FROM households WHERE id IN (SELECT household_id FROM members WHERE user_id = (SELECT id FROM users WHERE email = 'stranger@example.com')); DELETE FROM users WHERE email = 'stranger@example.com';"
+
+Then create the missing account right away and run the check again. A plain `DELETE FROM users` fails if they created anything, which is why the command has three parts.
 
 **Step 6: check that sign-in fits in the Free plan.** In one terminal run `npx wrangler tail`, then sign in on your phone. If the tail shows "exceeded resource limits" (error 1102), lower `PBKDF2_ITERATIONS` to `15000` and run `npm run deploy` again.
 
 To update the app later, run `npm run deploy` again. If a future change adds a file in `migrations/`, run `npm run db:migrate:remote` first.
 
-**Sign-in and the Free plan.** Passwords are hashed with PBKDF2, which is deliberately slow. The Workers Free plan allows 10 ms of CPU per request, so `PBKDF2_ITERATIONS` in `wrangler.jsonc` is set to 20,000: about 4.6 ms per hash by my measurement, and changing a password (two hashes) still fits. That's lower than the 100,000+ usually recommended, which matters only if the database itself ever leaked, so use strong passwords. If you move to Workers Paid ($5/month), raise it to `100000`; each stored password is upgraded the next time that person signs in.
+**Sign-in and the Free plan.** Passwords are hashed with PBKDF2, which is deliberately slow. The Workers Free plan allows 10 ms of CPU per request, so `PBKDF2_ITERATIONS` in `wrangler.jsonc` is set to 20,000: about 4.6 ms per hash in local testing, and changing a password (two hashes) still fits. That's lower than the 100,000+ usually recommended, which matters only if the database itself ever leaked, so use strong passwords. If you move to Workers Paid ($5/month), raise it to `100000`; each stored password is upgraded the next time that person signs in.
 
 There are no secrets to set. Passwords are hashed in the Worker and never stored in plain text, and the session cookie is HttpOnly.
 
@@ -118,7 +122,7 @@ A household holds two people, and you can't add a third.
 
 Open the site in Safari, tap the share button, then **Add to Home Screen**. It opens full screen like a regular app. Do it from Safari itself, not from inside another app's browser.
 
-Sign in with email and password. I picked that over emailed links on purpose: on iPhone, a link in Mail opens Safari instead of the home screen app, and the two don't share a login.
+Sign in with email and password. That's deliberate, rather than emailed sign-in links: on iPhone, a link in Mail opens Safari instead of the home screen app, and the two don't share a login.
 
 ## Using it
 
