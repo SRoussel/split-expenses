@@ -218,6 +218,86 @@ describe("Split API", () => {
     assert.equal((await carol.get("/api/household")).data.entries.length, 0);
   });
 
+  test("default split: both shares are set together, only once both have joined", async () => {
+    // Carol is alone in her household right now.
+    assert.equal((await carol.post("/api/household/split", { myShare: 60 })).status, 409);
+    assert.equal((await alice.post("/api/household/split", { myShare: 33.333 })).status, 400);
+    assert.equal((await alice.post("/api/household/split", { myShare: "60" })).status, 400);
+
+    assert.equal((await alice.post("/api/household/split", { myShare: 60 })).status, 200);
+    let members = (await bob.get("/api/household")).data.members;
+    const share = (id) => members.find((m) => m.user_id === id).share_pct;
+    assert.equal(share(aliceId), 60);
+    assert.equal(share(bobId), 40);
+
+    assert.equal((await bob.post("/api/household/split", { myShare: 50 })).status, 200);
+    members = (await alice.get("/api/household")).data.members;
+    assert.equal(share(aliceId), 50);
+    assert.equal(share(bobId), 50);
+  });
+
+  test("edit: replaces the entry, recomputes what's owed, keeps the old one in history", async () => {
+    await alice.post("/api/entries", expense(aliceId, { name: "Edit me" }));
+    const find = async (pred) => (await alice.get("/api/household")).data.entries.find(pred);
+    const original = await find((e) => e.name === "Edit me");
+
+    const res = await bob.post(`/api/entries/${original.id}/edit`, expense(aliceId, { name: "Edited", amount_cents: 3000, owed_cents: 1 }));
+    assert.equal(res.status, 200);
+    const old = await find((e) => e.id === original.id);
+    const fresh = await find((e) => e.id === res.data.id);
+    assert.ok(old.voided_at, "original is voided");
+    assert.equal(old.replaced_by, fresh.id, "original points at its replacement");
+    assert.equal(old.voided_by, bobId);
+    assert.equal(fresh.voided_at, null);
+    assert.equal(fresh.owed_cents, 1500, "server recomputed, ignoring the client's owed_cents");
+    assert.equal(fresh.created_by, bobId);
+
+    // The old version can't be edited again, and an edit can't change the entry type.
+    assert.equal((await alice.post(`/api/entries/${original.id}/edit`, expense(aliceId))).status, 404);
+    const asSettlement = { ...expense(aliceId), kind: "settlement" };
+    assert.equal((await alice.post(`/api/entries/${fresh.id}/edit`, asSettlement)).status, 404);
+    assert.equal((await find((e) => e.id === fresh.id)).voided_at, null, "a refused edit changes nothing");
+    // Bad input is refused before anything is touched.
+    assert.equal((await alice.post(`/api/entries/${fresh.id}/edit`, expense(aliceId, { amount_cents: -5 }))).status, 400);
+    assert.equal((await find((e) => e.id === fresh.id)).voided_at, null);
+    // Someone from another household can't edit it (Carol is a valid payer in her own household,
+    // so this reaches the update, which must not match an entry outside her household).
+    assert.equal((await carol.post(`/api/entries/${fresh.id}/edit`, expense(carolId))).status, 404);
+    assert.equal((await find((e) => e.id === fresh.id)).voided_at, null, "untouched by the other household");
+  });
+
+  test("edit: a starting balance can be edited despite the one-at-a-time rule", async () => {
+    const active = (await alice.get("/api/household")).data.entries.find((e) => e.kind === "opening" && !e.voided_at);
+    const body = { kind: "opening", entry_date: day, name: "Starting balance", amount_cents: 7000, payer_id: bobId };
+    assert.equal((await alice.post(`/api/entries/${active.id}/edit`, body)).status, 200);
+    const openings = (await alice.get("/api/household")).data.entries.filter((e) => e.kind === "opening" && !e.voided_at);
+    assert.equal(openings.length, 1);
+    assert.equal(openings[0].amount_cents, 7000);
+    assert.equal(openings[0].payer_id, bobId);
+  });
+
+  test("restore (undo void): works for voided entries, not for edited ones or a second opening", async () => {
+    const entries = async () => (await alice.get("/api/household")).data.entries;
+    const target = (await entries()).find((e) => e.name === "Edited" && !e.voided_at);
+    assert.equal((await alice.post(`/api/entries/${target.id}/void`)).status, 200);
+    assert.equal((await bob.post(`/api/entries/${target.id}/unvoid`)).status, 200);
+    const back = (await entries()).find((e) => e.id === target.id);
+    assert.equal(back.voided_at, null);
+    assert.equal(back.voided_by, null);
+    assert.equal((await bob.post(`/api/entries/${target.id}/unvoid`)).status, 404, "not voided any more");
+
+    const editedOld = (await entries()).find((e) => e.name === "Edit me");
+    assert.equal((await alice.post(`/api/entries/${editedOld.id}/unvoid`)).status, 404, "edited entries stay replaced");
+
+    // An old, plainly voided starting balance can't come back while another is active.
+    const oldOpening = (await entries()).find((e) => e.kind === "opening" && e.voided_at && !e.replaced_by);
+    assert.equal((await alice.post(`/api/entries/${oldOpening.id}/unvoid`)).status, 409);
+
+    // Another household can't restore our entries.
+    await alice.post(`/api/entries/${target.id}/void`);
+    assert.equal((await carol.post(`/api/entries/${target.id}/unvoid`)).status, 404);
+  });
+
   test("sessions renew when the app is opened", async () => {
     sql("UPDATE sessions SET expires_at = datetime('now', '+5 days')");
     const res = await alice.get("/api/me");

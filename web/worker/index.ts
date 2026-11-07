@@ -71,16 +71,14 @@ function safeEqual(a: string, b: string): boolean {
 // Request helpers
 // ---------------------------------------------------------------------------
 
-function json(data: unknown, status = 200, headers: HeadersInit = {}): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "content-type": "application/json",
-      "cache-control": "no-store",
-      "x-content-type-options": "nosniff",
-      ...headers,
-    },
+function json(data: unknown, status = 200, extraHeaders: [string, string][] = []): Response {
+  const headers = new Headers({
+    "content-type": "application/json",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
   });
+  for (const [k, v] of extraHeaders) headers.append(k, v);
+  return new Response(JSON.stringify(data), { status, headers });
 }
 
 /**
@@ -184,9 +182,24 @@ async function clearAttempts(env: Env, bucket: string) {
   await env.DB.prepare("DELETE FROM auth_attempts WHERE bucket = ?").bind(bucket).run();
 }
 
-function sessionCookie(request: Request, value: string, maxAgeSeconds: number): string {
-  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
-  return `session=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAgeSeconds}${secure}`;
+// On https the cookie is named __Host-session: browsers then refuse it unless it is
+// Secure, host-only and Path=/, so nothing else (e.g. a sibling subdomain) can set it.
+// Plain http (local dev) can't use the prefix, so it keeps the plain name.
+// LEGACY_COOKIE is read too, so sessions from before the rename keep working;
+// /api/me moves them to the new name. It can be removed once everyone has opened the app.
+const HOST_COOKIE = "__Host-session";
+const LEGACY_COOKIE = "session";
+
+const isHttps = (request: Request) => new URL(request.url).protocol === "https:";
+
+function sessionCookie(request: Request, value: string, maxAgeSeconds: number, name?: string): string {
+  const cookieName = name ?? (isHttps(request) ? HOST_COOKIE : LEGACY_COOKIE);
+  const secure = isHttps(request) ? "; Secure" : "";
+  return `${cookieName}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAgeSeconds}${secure}`;
+}
+
+function sessionToken(request: Request): string | null {
+  return cookieValue(request, HOST_COOKIE) ?? cookieValue(request, LEGACY_COOKIE);
 }
 
 function cookieValue(request: Request, name: string): string | null {
@@ -210,7 +223,7 @@ interface Session {
 }
 
 async function currentSession(request: Request, env: Env): Promise<Session | null> {
-  const token = cookieValue(request, "session");
+  const token = sessionToken(request);
   if (!token || !/^[0-9a-f]{64}$/.test(token)) return null;
   const tokenHash = await sha256Hex(token);
   const row = await env.DB.prepare(
@@ -254,9 +267,7 @@ async function startSession(request: Request, env: Env, userId: string): Promise
       "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, datetime('now', ?))",
     ).bind(await sha256Hex(token), userId, `+${SESSION_DAYS} days`),
   ]);
-  return json({ ok: true }, 200, {
-    "set-cookie": sessionCookie(request, token, SESSION_DAYS * 86400),
-  });
+  return json({ ok: true }, 200, [["set-cookie", sessionCookie(request, token, SESSION_DAYS * 86400)]]);
 }
 
 // ---------------------------------------------------------------------------
@@ -374,13 +385,15 @@ async function changePassword(request: Request, env: Env): Promise<Response> {
 }
 
 async function logout(request: Request, env: Env): Promise<Response> {
-  const token = cookieValue(request, "session");
+  const token = sessionToken(request);
   if (token) {
     await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?")
       .bind(await sha256Hex(token))
       .run();
   }
-  return json({ ok: true }, 200, { "set-cookie": sessionCookie(request, "", 0) });
+  const clear: [string, string][] = [["set-cookie", sessionCookie(request, "", 0)]];
+  if (isHttps(request)) clear.push(["set-cookie", sessionCookie(request, "", 0, LEGACY_COOKIE)]);
+  return json({ ok: true }, 200, clear);
 }
 
 async function me(request: Request, env: Env): Promise<Response> {
@@ -389,13 +402,20 @@ async function me(request: Request, env: Env): Promise<Response> {
   const body = { user: session.user, membership: (await membershipOf(env, session.user.id)) ?? null };
 
   // Sliding sessions: the app calls this every time it opens, so regular use never logs you out.
-  if (session.daysLeft < RENEW_WHEN_DAYS_LEFT) {
+  const renew = session.daysLeft < RENEW_WHEN_DAYS_LEFT;
+  // A session still under the old cookie name gets moved to the __Host- name.
+  const migrate = isHttps(request) && !cookieValue(request, HOST_COOKIE);
+  if (!renew && !migrate) return json(body);
+
+  if (renew) {
     await env.DB.prepare("UPDATE sessions SET expires_at = datetime('now', ?) WHERE token_hash = ?")
       .bind(`+${SESSION_DAYS} days`, session.tokenHash)
       .run();
-    return json(body, 200, { "set-cookie": sessionCookie(request, session.token, SESSION_DAYS * 86400) });
   }
-  return json(body);
+  const maxAge = renew ? SESSION_DAYS * 86400 : Math.floor(session.daysLeft * 86400);
+  const headers: [string, string][] = [["set-cookie", sessionCookie(request, session.token, maxAge)]];
+  if (migrate) headers.push(["set-cookie", sessionCookie(request, "", 0, LEGACY_COOKIE)]);
+  return json(body, 200, headers);
 }
 
 async function createHousehold(request: Request, env: Env): Promise<Response> {
@@ -458,7 +478,7 @@ async function getHousehold(request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
   const { household_id } = await requireMembership(env, user.id);
   const [members, household, entries] = await env.DB.batch([
-    env.DB.prepare("SELECT user_id, display_name FROM members WHERE household_id = ?").bind(household_id),
+    env.DB.prepare("SELECT user_id, display_name, share_pct FROM members WHERE household_id = ?").bind(household_id),
     env.DB.prepare("SELECT invite_code FROM households WHERE id = ?").bind(household_id),
     env.DB.prepare(
       "SELECT * FROM entries WHERE household_id = ? ORDER BY entry_date DESC, created_at DESC",
@@ -471,11 +491,18 @@ async function getHousehold(request: Request, env: Env): Promise<Response> {
   });
 }
 
-async function addEntry(request: Request, env: Env): Promise<Response> {
-  const user = await requireUser(request, env);
-  const { household_id } = await requireMembership(env, user.id);
-  const body = await readBody(request);
+interface ValidEntry {
+  kind: "expense" | "settlement" | "opening";
+  entryDate: string;
+  name: string;
+  amount: number;
+  pct: number | null;
+  owed: number;
+  payerId: string;
+}
 
+/** Checks an entry from the browser and works out what's owed. Shared by add and edit. */
+async function validateEntry(env: Env, householdId: string, body: Record<string, unknown>): Promise<ValidEntry> {
   const kind = body.kind;
   if (kind !== "expense" && kind !== "settlement" && kind !== "opening") {
     throw new HttpError(400, "Invalid entry type.");
@@ -488,8 +515,8 @@ async function addEntry(request: Request, env: Env): Promise<Response> {
     throw new HttpError(400, "Invalid amount.");
   }
 
-  // The server decides how much is owed. Whatever the client sends for it is ignored,
-  // so a hand-made request can't write a number that doesn't follow from the rest.
+  // The server decides how much is owed. The browser doesn't send it, and if
+  // anything does, it's ignored, so the number always follows from the rest.
   let pct: number | null = null;
   if (kind === "expense") {
     const raw = body.payer_share_pct ?? 50;
@@ -500,26 +527,105 @@ async function addEntry(request: Request, env: Env): Promise<Response> {
   const owed = owedCents(kind, amount as number, pct ?? 50);
   const payerId = str(body, "payer_id", 64);
   const payer = await env.DB.prepare("SELECT 1 FROM members WHERE household_id = ? AND user_id = ?")
-    .bind(household_id, payerId)
+    .bind(householdId, payerId)
     .first();
   if (!payer) throw new HttpError(400, "The payer isn't in this household.");
+  return { kind, entryDate, name, amount: amount as number, pct, owed, payerId };
+}
 
+const OPENING_EXISTS = "There's already a starting balance. Void it first to change it.";
+
+async function addEntry(request: Request, env: Env): Promise<Response> {
+  const user = await requireUser(request, env);
+  const { household_id } = await requireMembership(env, user.id);
+  const e = await validateEntry(env, household_id, await readBody(request));
   try {
     await env.DB.prepare(
       `INSERT INTO entries
          (id, household_id, kind, entry_date, name, amount_cents, payer_id, payer_share_pct, owed_cents, created_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-      .bind(crypto.randomUUID(), household_id, kind, entryDate, name, amount, payerId, pct, owed, user.id)
+      .bind(crypto.randomUUID(), household_id, e.kind, e.entryDate, e.name, e.amount, e.payerId, e.pct, e.owed, user.id)
       .run();
   } catch (err) {
     // The unique index allows only one active starting balance per household.
-    if (kind === "opening" && isUniqueViolation(err)) {
-      throw new HttpError(409, "There's already a starting balance. Void it first to change it.");
-    }
+    if (e.kind === "opening" && isUniqueViolation(err)) throw new HttpError(409, OPENING_EXISTS);
     throw err;
   }
   return json({ ok: true }, 201);
+}
+
+/**
+ * Edit = void the original and add the corrected copy, in one transaction.
+ * The original keeps a pointer to its replacement (replaced_by), so the
+ * history still shows what it used to say.
+ */
+async function editEntry(request: Request, env: Env, id: string): Promise<Response> {
+  const user = await requireUser(request, env);
+  const { household_id } = await requireMembership(env, user.id);
+  const e = await validateEntry(env, household_id, await readBody(request));
+  const newId = crypto.randomUUID();
+  const [voided] = await env.DB.batch([
+    // 1. Void the original. Only an active entry of the same type in this household qualifies.
+    env.DB.prepare(
+      `UPDATE entries SET voided_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), voided_by = ?, replaced_by = ?
+       WHERE id = ? AND household_id = ? AND voided_at IS NULL AND kind = ?`,
+    ).bind(user.id, newId, id, household_id, e.kind),
+    // 2. Add the replacement, but only if step 1 actually voided the original.
+    env.DB.prepare(
+      `INSERT INTO entries
+         (id, household_id, kind, entry_date, name, amount_cents, payer_id, payer_share_pct, owed_cents, created_by)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+       WHERE EXISTS (SELECT 1 FROM entries WHERE id = ? AND replaced_by = ?)`,
+    ).bind(newId, household_id, e.kind, e.entryDate, e.name, e.amount, e.payerId, e.pct, e.owed, user.id, id, newId),
+  ]);
+  if (!voided.meta.changes) throw new HttpError(404, "Entry not found, already voided, or a different type.");
+  return json({ ok: true, id: newId });
+}
+
+/** Undo a void. Edited entries can't come back: their replacement already exists. */
+async function unvoidEntry(request: Request, env: Env, id: string): Promise<Response> {
+  const user = await requireUser(request, env);
+  const { household_id } = await requireMembership(env, user.id);
+  let res;
+  try {
+    res = await env.DB.prepare(
+      `UPDATE entries SET voided_at = NULL, voided_by = NULL
+       WHERE id = ? AND household_id = ? AND voided_at IS NOT NULL AND replaced_by IS NULL`,
+    )
+      .bind(id, household_id)
+      .run();
+  } catch (err) {
+    if (isUniqueViolation(err)) throw new HttpError(409, OPENING_EXISTS);
+    throw err;
+  }
+  if (!res.meta.changes) throw new HttpError(404, "Entry not found, not voided, or replaced by an edit.");
+  return json({ ok: true });
+}
+
+/** Set the default split: my share and my partner's (the rest) together. */
+async function setSplit(request: Request, env: Env): Promise<Response> {
+  const user = await requireUser(request, env);
+  const { household_id } = await requireMembership(env, user.id);
+  const raw = (await readBody(request)).myShare;
+  const bp = typeof raw === "number" ? pctToBasisPoints(raw) : null;
+  if (bp === null) throw new HttpError(400, "Your share must be a number from 0 to 100, with at most two decimals.");
+
+  // One transaction; each update only applies if the household has exactly two members.
+  const [mine, theirs] = await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE members SET share_pct = ? WHERE household_id = ? AND user_id = ?
+         AND (SELECT count(*) FROM members WHERE household_id = ?) = 2`,
+    ).bind(bp / 100, household_id, user.id, household_id),
+    env.DB.prepare(
+      `UPDATE members SET share_pct = ? WHERE household_id = ? AND user_id != ?
+         AND (SELECT count(*) FROM members WHERE household_id = ?) = 2`,
+    ).bind((10_000 - bp) / 100, household_id, user.id, household_id),
+  ]);
+  if (!mine.meta.changes || !theirs.meta.changes) {
+    throw new HttpError(409, "Your partner needs to join before you can set a default split.");
+  }
+  return json({ ok: true });
 }
 
 async function voidEntry(request: Request, env: Env, id: string): Promise<Response> {
@@ -552,9 +658,12 @@ export default {
         if (pathname === "/api/logout") return await logout(request, env);
         if (pathname === "/api/household") return await createHousehold(request, env);
         if (pathname === "/api/household/join") return await joinHousehold(request, env);
+        if (pathname === "/api/household/split") return await setSplit(request, env);
         if (pathname === "/api/entries") return await addEntry(request, env);
-        const m = pathname.match(/^\/api\/entries\/([\w-]+)\/void$/);
-        if (m) return await voidEntry(request, env, m[1]);
+        const m = pathname.match(/^\/api\/entries\/([\w-]+)\/(void|unvoid|edit)$/);
+        if (m?.[2] === "void") return await voidEntry(request, env, m[1]);
+        if (m?.[2] === "unvoid") return await unvoidEntry(request, env, m[1]);
+        if (m?.[2] === "edit") return await editEntry(request, env, m[1]);
       }
       throw new HttpError(404, "Not found.");
     } catch (err) {

@@ -139,18 +139,36 @@ export function MoneyInput(props: Omit<InputHTMLAttributes<HTMLInputElement>, "t
   );
 }
 
+export interface ToastState {
+  message: string;
+  /** Optional button, e.g. Undo. The toast stays up longer when there is one. */
+  action?: { label: string; onClick: () => void };
+}
+
 /** Short message at the bottom of the screen that fades away. */
-export function Toast({ message, onDone }: { message: string | null; onDone: () => void }) {
+export function Toast({ toast, onDone }: { toast: ToastState | null; onDone: () => void }) {
   useEffect(() => {
-    if (!message) return;
-    const t = setTimeout(onDone, 2200);
+    if (!toast) return;
+    const t = setTimeout(onDone, toast.action ? 6000 : 2200);
     return () => clearTimeout(t);
-  }, [message, onDone]);
-  return message ? (
+  }, [toast, onDone]);
+  if (!toast) return null;
+  return (
     <div className="toast" role="status">
-      {message}
+      <span>{toast.message}</span>
+      {toast.action && (
+        <button
+          className="toast-action"
+          onClick={() => {
+            toast.action!.onClick();
+            onDone();
+          }}
+        >
+          {toast.action.label}
+        </button>
+      )}
     </div>
-  ) : null;
+  );
 }
 
 /** Two-option toggle (e.g. who paid). */

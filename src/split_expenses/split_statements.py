@@ -8,9 +8,9 @@ Parse bank statement PDFs, prompt for each expense (self vs. split),
 and save split expenses to a CSV.
 
 Usage:
-    uv run split_statements.py /path/to/statements
-    uv run split_statements.py /path/to/statements -o splits.csv
-    uv run split_statements.py /path/to/statements --dump        # just show parsed transactions
+    uv run split-statements /path/to/statements
+    uv run split-statements /path/to/statements -o splits.csv
+    uv run split-statements /path/to/statements --dump        # just show parsed transactions
 
 Requires pdfplumber, which uv installs automatically (see the script header).
 """
@@ -29,7 +29,7 @@ from pathlib import Path
 try:
     import pdfplumber
 except ImportError:
-    sys.exit("Missing pdfplumber. Run this script with:  uv run split_statements.py ...")
+    sys.exit("Missing pdfplumber. Run this script with:  uv run split-statements ...")
 
 CATEGORIES = ["utilities", "groceries", "dining", "entertainment", "travel", "gift", "household"]
 CSV_FIELDS = ["date", "amount", "vendor", "category"]

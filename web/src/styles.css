@@ -656,11 +656,128 @@ input.mono {
   white-space: nowrap;
 }
 
+/* While a sheet is open, show toasts at the top so they don't cover the sheet. */
+body.locked .toast {
+  bottom: auto;
+  top: calc(16px + env(safe-area-inset-top));
+}
+
 @keyframes toast-in {
   from {
     opacity: 0;
     transform: translate(-50%, 8px);
   }
+}
+
+/* ------------------------------------------------- entry rows & details */
+
+.entries li {
+  padding: 0;
+}
+
+button.entry-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 0;
+  padding: 12px 10px 12px 14px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  font-weight: 400;
+  color: var(--text);
+}
+
+.entries li:first-child button.entry-btn {
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.entries li:last-child button.entry-btn {
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+button.entry-btn:active:not(:disabled) {
+  transform: none;
+  background: var(--surface-2);
+}
+
+.chevron {
+  color: var(--muted);
+  font-size: 1.3rem;
+  line-height: 1;
+  margin-left: -4px;
+}
+
+.detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 1.25rem;
+}
+
+.struck {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+dl.facts {
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+dl.facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+}
+
+dl.facts > div:first-child {
+  border-top: 0;
+}
+
+dl.facts dt {
+  color: var(--muted);
+}
+
+dl.facts dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.edit-note {
+  margin: -6px 0 12px;
+}
+
+.menu-value {
+  float: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+button.toast-action {
+  background: none;
+  border: 0;
+  min-height: 0;
+  padding: 2px 4px;
+  color: var(--accent-soft);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.85rem;
 }
 
 /* -------------------------------------------------------- segmented */

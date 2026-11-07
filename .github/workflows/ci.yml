@@ -1,0 +1,51 @@
+# Runs the tests on every push and pull request. It never deploys and uses no
+# secrets, so it's safe in a public repo: deploying stays a manual step on your computer.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: Web app (ledger math + backend API)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    env:
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Ledger math
+        run: npm test
+      - name: Backend API (builds and type-checks first)
+        run: npm run test:api
+
+  python:
+    name: Python scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Commands start
+        run: |
+          uv run split-ledger --help > /dev/null
+          uv run split-statements --help > /dev/null
+      - name: Half-cent rule matches the web app
+        run: |
+          ledger="$RUNNER_TEMP/ledger.csv"
+          uv run split-ledger --ledger "$ledger" --no-color add 1.01 me coffee > /dev/null
+          uv run split-ledger --ledger "$ledger" --no-color balance | tee /dev/stderr | grep -q 'Partner owes you \$0.51'

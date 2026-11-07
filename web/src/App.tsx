@@ -52,7 +52,6 @@ export default function App() {
     <LedgerScreen
       userId={account.user.id}
       email={account.user.email}
-      householdId={account.membership.household_id}
       onSignedOut={() => void refresh()}
     />
   );

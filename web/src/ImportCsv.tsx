@@ -9,6 +9,7 @@ import {
   todayLocal,
   type ImportSummary,
 } from "./ledger";
+import { pctText } from "./forms";
 import type { Entry, Member } from "./types";
 import { ErrorText, Segmented } from "./ui";
 
@@ -17,13 +18,11 @@ import { ErrorText, Segmented } from "./ui";
  * adds it as one entry named "Expenses mm/dd/yy-mm/dd/yy".
  */
 export default function ImportCsv({
-  householdId,
   me,
   partner,
   entries,
   onSaved,
 }: {
-  householdId: string;
   me: Member;
   partner: Member;
   entries: Entry[];
@@ -33,7 +32,7 @@ export default function ImportCsv({
   const [fileName, setFileName] = useState("");
   const [name, setName] = useState("");
   const [payer, setPayer] = useState<"me" | "partner">("me");
-  const [myShare, setMyShare] = useState("50");
+  const [myShare, setMyShare] = useState(pctText(me.share_pct));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,14 +64,12 @@ export default function ImportCsv({
     setError(null);
     try {
       await addEntry({
-        household_id: householdId,
         kind: "expense",
         entry_date: todayLocal(),
         name: name.trim(),
         amount_cents: summary.totalCents,
         payer_id: payer === "me" ? me.user_id : partner.user_id,
         payer_share_pct: payerShare,
-        owed_cents: owedCents("expense", summary.totalCents, payerShare),
       });
       onSaved();
     } catch (err) {

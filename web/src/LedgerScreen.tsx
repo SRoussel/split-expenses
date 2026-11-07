@@ -1,27 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { loadHousehold, signOut, voidEntry } from "./api";
-import { AddExpenseForm, ChangePasswordForm, OpeningForm, SettleForm } from "./forms";
+import { addEntry, editEntry, loadHousehold, signOut, unvoidEntry, voidEntry } from "./api";
+import {
+  AddExpenseForm,
+  ChangePasswordForm,
+  DefaultSplitForm,
+  OpeningForm,
+  pctText,
+  SettleForm,
+} from "./forms";
 import ImportCsv from "./ImportCsv";
 import { balanceFor, effectFor, exportLedgerCsv, fmt } from "./ledger";
-import type { Entry, Member } from "./types";
-import { ConfirmDialog, ErrorText, Modal, Toast } from "./ui";
+import type { Entry, Member, NewEntry } from "./types";
+import { ConfirmDialog, ErrorText, Modal, Toast, type ToastState } from "./ui";
 
-type Panel = null | "add" | "settle" | "opening" | "import" | "more" | "password";
+type Panel = null | "add" | "settle" | "opening" | "import" | "more" | "password" | "split";
 
 // Entry dates are plain calendar days, so format them in UTC to avoid shifting a day.
 const monthFmt = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
 const dayFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+const longDayFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" });
+// created_at / voided_at are real moments, so show them in local time.
+const momentFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 const asDate = (iso: string) => new Date(`${iso}T00:00:00Z`);
+
+const KIND_LABEL = { expense: "Expense", settlement: "Payment", opening: "Starting balance" } as const;
 
 export default function LedgerScreen({
   userId,
   email,
-  householdId,
   onSignedOut,
 }: {
   userId: string;
   email: string;
-  householdId: string;
   onSignedOut: () => void;
 }) {
   const [members, setMembers] = useState<Member[]>([]);
@@ -30,12 +40,16 @@ export default function LedgerScreen({
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Entry | null>(null);
   const [voiding, setVoiding] = useState<Entry | null>(null);
   const [showVoided, setShowVoided] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
   const clearToast = useCallback(() => setToast(null), []);
   const closePanel = useCallback(() => setPanel(null), []);
+  const closeDetails = useCallback(() => setSelectedId(null), []);
+  const closeEdit = useCallback(() => setEditing(null), []);
 
   // Each refresh gets a number; only the newest one is allowed to update the screen,
   // so a slow older response can't overwrite a newer one.
@@ -83,10 +97,13 @@ export default function LedgerScreen({
     members.forEach((m) => map.set(m.user_id, m.user_id === userId ? "You" : m.display_name));
     return map;
   }, [members, userId]);
+  const nameOf = (id: string | null) => (id ? (names.get(id) ?? "Someone") : "Someone");
 
   const balance = balanceFor(entries, userId);
   const hasOpening = entries.some((e) => e.kind === "opening" && !e.voided_at);
   const ready = Boolean(me && partner);
+  // Look the selected entry up fresh, so the sheet reflects the latest refresh.
+  const selected = entries.find((e) => e.id === selectedId) ?? null;
 
   // Entries arrive newest first; group them under month headings.
   const months = useMemo(() => {
@@ -102,7 +119,18 @@ export default function LedgerScreen({
 
   function saved(message: string) {
     setPanel(null);
-    setToast(message);
+    setEditing(null);
+    setToast({ message });
+    void load();
+  }
+
+  async function restore(entry: Entry, message: string) {
+    try {
+      await unvoidEntry(entry.id);
+      setToast({ message });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't restore that entry.");
+    }
     void load();
   }
 
@@ -148,6 +176,7 @@ export default function LedgerScreen({
   }
 
   const tone = balance > 0 ? "pos" : balance < 0 ? "neg" : "even";
+  const saveEdit = (entry: NewEntry) => editEntry(editing!.id, entry);
 
   return (
     <main className="with-bar">
@@ -199,8 +228,9 @@ export default function LedgerScreen({
                   key={e.id}
                   entry={e}
                   userId={userId}
-                  who={names.get(e.payer_id) ?? "Someone"}
-                  onVoid={() => setVoiding(e)}
+                  who={nameOf(e.payer_id)}
+                  addedBy={e.created_by !== userId ? nameOf(e.created_by) : null}
+                  onOpen={() => setSelectedId(e.id)}
                 />
               ))}
             </ul>
@@ -219,7 +249,31 @@ export default function LedgerScreen({
         </div>
       </div>
 
-      <Toast message={toast} onDone={clearToast} />
+      <Toast toast={toast} onDone={clearToast} />
+
+      {selected && (
+        <Modal title={KIND_LABEL[selected.kind]} onClose={closeDetails}>
+          <EntryDetails
+            entry={selected}
+            userId={userId}
+            nameOf={nameOf}
+            partnerName={partnerName}
+            canEdit={ready}
+            onEdit={() => {
+              setSelectedId(null);
+              setEditing(selected);
+            }}
+            onVoid={() => {
+              setSelectedId(null);
+              setVoiding(selected);
+            }}
+            onRestore={() => {
+              setSelectedId(null);
+              void restore(selected, "Entry restored");
+            }}
+          />
+        </Modal>
+      )}
 
       {voiding && (
         <ConfirmDialog
@@ -227,33 +281,62 @@ export default function LedgerScreen({
           message={
             <>
               <strong>{voiding.name}</strong> ({fmt(voiding.amount_cents)}) stays in the history but stops
-              counting toward the balance. This can't be undone, but you can add it again.
+              counting toward the balance. You can undo this right away, or restore it later from the voided
+              entries.
             </>
           }
           confirmLabel="Void entry"
           danger
           onConfirm={async () => {
-            await voidEntry(voiding.id);
-            setToast("Entry voided");
+            const entry = voiding;
+            await voidEntry(entry.id);
+            setToast({
+              message: "Entry voided",
+              action: { label: "Undo", onClick: () => void restore(entry, "Entry restored") },
+            });
             void load();
           }}
           onClose={() => setVoiding(null)}
         />
       )}
 
+      {editing && me && partner && (
+        <Modal title={`Edit ${KIND_LABEL[editing.kind].toLowerCase()}`} onClose={closeEdit}>
+          <p className="muted small edit-note">
+            The original stays in the history (under voided entries) marked as edited.
+          </p>
+          {editing.kind === "expense" && (
+            <AddExpenseForm me={me} partner={partner} initial={editing} save={saveEdit} onSaved={() => saved("Changes saved")} />
+          )}
+          {editing.kind === "settlement" && (
+            <SettleForm
+              me={me}
+              partner={partner}
+              balance={balance}
+              initial={editing}
+              save={saveEdit}
+              onSaved={() => saved("Changes saved")}
+            />
+          )}
+          {editing.kind === "opening" && (
+            <OpeningForm me={me} partner={partner} initial={editing} save={saveEdit} onSaved={() => saved("Changes saved")} />
+          )}
+        </Modal>
+      )}
+
       {panel === "add" && me && partner && (
         <Modal title="Add expense" onClose={closePanel}>
-          <AddExpenseForm householdId={householdId} me={me} partner={partner} onSaved={() => saved("Expense added")} />
+          <AddExpenseForm me={me} partner={partner} save={addEntry} onSaved={() => saved("Expense added")} />
         </Modal>
       )}
 
       {panel === "settle" && me && partner && (
         <Modal title="Settle up" onClose={closePanel}>
           <SettleForm
-            householdId={householdId}
             me={me}
             partner={partner}
             balance={balance}
+            save={addEntry}
             onSaved={() => saved("Payment recorded")}
           />
         </Modal>
@@ -261,24 +344,19 @@ export default function LedgerScreen({
 
       {panel === "opening" && me && partner && (
         <Modal title="Starting balance" onClose={closePanel}>
-          <OpeningForm
-            householdId={householdId}
-            me={me}
-            partner={partner}
-            onSaved={() => saved("Starting balance saved")}
-          />
+          <OpeningForm me={me} partner={partner} save={addEntry} onSaved={() => saved("Starting balance saved")} />
         </Modal>
       )}
 
       {panel === "import" && me && partner && (
         <Modal title="Import statement total" onClose={closePanel}>
-          <ImportCsv
-            householdId={householdId}
-            me={me}
-            partner={partner}
-            entries={entries}
-            onSaved={() => saved("Statement imported")}
-          />
+          <ImportCsv me={me} partner={partner} entries={entries} onSaved={() => saved("Statement imported")} />
+        </Modal>
+      )}
+
+      {panel === "split" && me && partner && (
+        <Modal title="Default split" onClose={closePanel}>
+          <DefaultSplitForm me={me} partner={partner} onSaved={() => saved("Default split saved")} />
         </Modal>
       )}
 
@@ -292,6 +370,14 @@ export default function LedgerScreen({
         <Modal title="More" onClose={closePanel}>
           <div className="stack">
             <div className="menu">
+              <button disabled={!ready} onClick={() => setPanel("split")}>
+                Default split
+                {me && partner && (
+                  <span className="menu-value">
+                    {pctText(me.share_pct)}/{pctText(partner.share_pct)}
+                  </span>
+                )}
+              </button>
               <button disabled={!ready} onClick={() => setPanel("import")}>
                 Import statement total (CSV)
               </button>
@@ -308,7 +394,7 @@ export default function LedgerScreen({
                 checked={showVoided}
                 onChange={(e) => setShowVoided(e.target.checked)}
               />
-              Show voided entries
+              Show voided and edited entries
             </label>
 
             <h2 className="section-label">Account</h2>
@@ -340,53 +426,135 @@ export default function LedgerScreen({
   );
 }
 
+/** What this entry means for `userId`: "+$42.10" (owed to you) or "−$42.10" (you owe). */
+function EffectAmount({ entry, userId }: { entry: Entry; userId: string }) {
+  const effect = effectFor(entry, userId);
+  return (
+    <span className={`amount ${effect > 0 ? "pos" : effect < 0 ? "neg" : "muted"}`}>
+      {effect > 0 ? "+" : effect < 0 ? "−" : ""}
+      {fmt(effect)}
+    </span>
+  );
+}
+
+/** Your share of an expense, in percent. */
+const myPctOf = (e: Entry, userId: string) => {
+  const payerPct = e.payer_share_pct ?? 50;
+  return e.payer_id === userId ? payerPct : 100 - payerPct;
+};
+
 function EntryRow({
   entry: e,
   userId,
   who,
-  onVoid,
+  addedBy,
+  onOpen,
 }: {
   entry: Entry;
   userId: string;
   who: string;
-  onVoid: () => void;
+  addedBy: string | null;
+  onOpen: () => void;
 }) {
-  const effect = effectFor(e, userId);
-  const voided = Boolean(e.voided_at);
   const day = dayFmt.format(asDate(e.entry_date));
 
   let detail: string;
   if (e.kind === "opening") {
     detail = `${day} · Starting balance`;
-  } else if (e.kind === "settlement") {
-    detail = `${day} · ${who} paid ${fmt(e.amount_cents)}`;
   } else {
-    const myPct =
-      e.payer_share_pct === null ? 50 : e.payer_id === userId ? e.payer_share_pct : 100 - e.payer_share_pct;
-    detail = `${day} · ${who} paid ${fmt(e.amount_cents)}` + (myPct !== 50 ? ` · ${myPct}% yours` : "");
+    const myPct = myPctOf(e, userId);
+    detail =
+      `${day} · ${who} paid ${fmt(e.amount_cents)}` +
+      (e.kind === "expense" && myPct !== 50 ? ` · ${pctText(myPct)}% yours` : "");
+  }
+  if (addedBy) detail += ` · added by ${addedBy}`;
+  if (e.voided_at) detail += e.replaced_by ? " · edited" : " · voided";
+
+  return (
+    <li className={e.voided_at ? "voided" : ""}>
+      <button className="entry-btn" onClick={onOpen} aria-label={`${e.name}, details`}>
+        <span className={`dot ${e.kind}`} aria-hidden="true" />
+        <span className="grow">
+          <strong>{e.name}</strong>
+          <span className="muted small">{detail}</span>
+        </span>
+        <EffectAmount entry={e} userId={userId} />
+        <span className="chevron" aria-hidden="true">
+          ›
+        </span>
+      </button>
+    </li>
+  );
+}
+
+function EntryDetails({
+  entry: e,
+  userId,
+  nameOf,
+  partnerName,
+  canEdit,
+  onEdit,
+  onVoid,
+  onRestore,
+}: {
+  entry: Entry;
+  userId: string;
+  nameOf: (id: string | null) => string;
+  partnerName: string;
+  canEdit: boolean;
+  onEdit: () => void;
+  onVoid: () => void;
+  onRestore: () => void;
+}) {
+  const facts: [string, string][] = [["Date", longDayFmt.format(asDate(e.entry_date))]];
+  if (e.kind === "opening") {
+    facts.push(["Owed to", nameOf(e.payer_id)], ["Amount", fmt(e.amount_cents)]);
+  } else {
+    facts.push(["Paid by", nameOf(e.payer_id)], ["Total", fmt(e.amount_cents)]);
+  }
+  if (e.kind === "expense") {
+    const mine = myPctOf(e, userId);
+    facts.push(["Split", `You ${pctText(mine)}% · ${partnerName} ${pctText(100 - mine)}%`]);
+  }
+  facts.push(["Added", `${nameOf(e.created_by)}, ${momentFmt.format(new Date(e.created_at))}`]);
+  if (e.voided_at) {
+    facts.push([e.replaced_by ? "Edited" : "Voided", `${nameOf(e.voided_by)}, ${momentFmt.format(new Date(e.voided_at))}`]);
   }
 
   return (
-    <li className={voided ? "voided" : ""}>
-      <span className={`dot ${e.kind}`} aria-hidden="true" />
-      <div className="grow">
-        <strong>{e.name}</strong>
-        <span className="muted small">
-          {detail}
-          {voided && " · voided"}
-        </span>
+    <div className="stack">
+      <div className="detail-head">
+        <strong className={e.voided_at ? "struck" : ""}>{e.name}</strong>
+        <EffectAmount entry={e} userId={userId} />
       </div>
-      <div className="amount-col">
-        <span className={`amount ${effect > 0 ? "pos" : effect < 0 ? "neg" : "muted"}`}>
-          {effect > 0 ? "+" : effect < 0 ? "−" : ""}
-          {fmt(effect)}
-        </span>
-        {!voided && (
-          <button className="link tiny" onClick={onVoid} aria-label={`Void ${e.name}`}>
-            Void
+      {e.voided_at && (
+        <p className="notice">
+          {e.replaced_by
+            ? "This is the old version of an edited entry. It no longer counts."
+            : "This entry is voided and doesn't count toward the balance."}
+        </p>
+      )}
+      <dl className="facts">
+        {facts.map(([k, v]) => (
+          <div key={k}>
+            <dt>{k}</dt>
+            <dd>{v}</dd>
+          </div>
+        ))}
+      </dl>
+      {!e.voided_at && (
+        <div className="actions-row">
+          <button onClick={onVoid}>Void</button>
+          <button className="primary" onClick={onEdit} disabled={!canEdit}>
+            Edit
           </button>
-        )}
-      </div>
-    </li>
+        </div>
+      )}
+      {e.voided_at && !e.replaced_by && (
+        <button className="primary" onClick={onRestore}>
+          Restore entry
+        </button>
+      )}
+    </div>
   );
 }

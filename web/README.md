@@ -2,7 +2,7 @@
 
 A small app for the two of you to see the ledger, add expenses and settle up from your phones. It's a React site plus one Cloudflare Worker that serves the site and a small JSON API, with the data in Cloudflare D1 (SQLite). Everything runs on your computer with no account and no deploy.
 
-It does the same math as `split_ledger.py`, and the ledger can be exported as a CSV in that script's format.
+It does the same math as the Python ledger (`uv run split-ledger`), and the ledger can be exported as a CSV in that script's format.
 
 The screen refreshes every 15 seconds while it's open, and whenever you switch back to it, so a change one of you makes shows up for the other within seconds.
 
@@ -69,7 +69,11 @@ Then create the missing account right away and run the check again. A plain `DEL
 
 **Step 6: check that sign-in fits in the Free plan.** In one terminal run `npx wrangler tail`, then sign in on your phone. If the tail shows "exceeded resource limits" (error 1102), lower `PBKDF2_ITERATIONS` to `15000` and run `npm run deploy` again.
 
-To update the app later, run `npm run deploy` again. If a future change adds a file in `migrations/`, run `npm run db:migrate:remote` first.
+To update the app later, run `npm run deploy` again. **If the update adds a file in `migrations/`, run `npm run db:migrate:remote` first**, or the new version will fail until you do. Running it when there's nothing new is harmless ("No migrations to apply"), so when in doubt, run both:
+
+    npm run db:migrate:remote && npm run deploy
+
+Every push to GitHub also runs the tests automatically (`.github/workflows/ci.yml`, in the repo's Actions tab). That never deploys anything.
 
 **Sign-in and the Free plan.** Passwords are hashed with PBKDF2, which is deliberately slow. The Workers Free plan allows 10 ms of CPU per request, so `PBKDF2_ITERATIONS` in `wrangler.jsonc` is set to 20,000: about 4.6 ms per hash in local testing, and changing a password (two hashes) still fits. That's lower than the 100,000+ usually recommended, which matters only if the database itself ever leaked, so use strong passwords. If you move to Workers Paid ($5/month), raise it to `100000`; each stored password is upgraded the next time that person signs in.
 
@@ -105,7 +109,7 @@ There's no email, so reset it from your computer:
 
 It asks for the new password and signs that person out everywhere.
 
-Splitting rule: the person who didn't pay owes their share rounded half up to the cent, and the payer keeps the remainder. On an odd half-cent, the payer gets the one-cent discount. This matches `split_ledger.py` when your partner paid; when you paid, the script rounds the other way, so a half-cent amount can differ by a cent.
+Splitting rule: the person who didn't pay owes their share rounded half up to the cent, and the payer keeps the remainder. On an odd half-cent, the payer gets the one-cent discount. The Python ledger (`uv run split-ledger`) uses the same rule, so the two always agree to the cent. The rule lives in `shared/owed.ts` for the app and the Worker.
 
 ## 3. Set up the two accounts
 
@@ -126,11 +130,14 @@ Sign in with email and password. That's deliberate, rather than emailed sign-in 
 
 ## Using it
 
-- **Add expense**: amount, name, who paid, your share (default 50%).
+- **Add expense**: amount, name, who paid, and your share. Your share starts at your default split (see below), and there are quick buttons for "Split evenly", "All theirs" and "All mine".
+- **Tap any entry** to see the details: who paid, the split, who added it and when. Entries your partner added say "added by …" in the list.
+- **Edit**: from an entry's details. The original isn't overwritten. It's kept in the history, marked "edited", and the corrected copy takes its place. The type (expense, payment, starting balance) can't change in an edit.
 - **Settle up**: records a payment between you. It defaults to the full balance, paid by whoever owes. It only updates the ledger and doesn't move any money.
-- **More > Import statement total**: pick the `split_transactions.csv` from `split_statements.py`. The app adds up the amounts and creates one entry called something like `Expenses 01/15/26-02/03/26`. Only the total goes into the app, not the individual transactions. It warns you if an entry with that name already exists. Delete or rename the CSV after importing, same as with the script.
-- **Void**: entries are never deleted. Voiding one keeps it in the history but stops it counting. Turn on "Show voided entries" in **More** to see them.
-- **More > Export ledger as CSV**: same columns as `ledger.csv` from `split_ledger.py` (`date,type,payer,amount,my_share,name`), written from your point of view.
+- **More > Default split**: the share each of you normally pays, like 60/40. It's one setting for both of you and can be set once you've both joined.
+- **More > Import statement total**: pick the `split_transactions.csv` from `split-statements`. The app adds up the amounts and creates one entry called something like `Expenses 01/15/26-02/03/26`. Only the total goes into the app, not the individual transactions. It warns you if an entry with that name already exists. Delete or rename the CSV after importing, same as with the script.
+- **Void**: entries are never deleted. Voiding one keeps it in the history but stops it counting. Tap **Undo** on the message that appears, or later turn on "Show voided and edited entries" in **More**, open the entry and tap **Restore entry**. Edited originals can't be restored, since their replacement already exists.
+- **More > Export ledger as CSV**: same columns as `ledger.csv` from `split_ledger.py` (`date,type,payer,amount,my_share,name`), written from your point of view, in the format `uv run split-ledger` reads.
 
 ## Changing the icon
 
@@ -167,5 +174,4 @@ Also bump the `?v=` numbers on the other icon links, deploy, and remove and re-a
 ## Not done yet
 
 - Push notifications when the other person adds something. They work on iPhone for apps added to the home screen, but need a service worker and a small push sender in the Worker.
-- Editing an entry. For now, void it and add a corrected one.
 - Offline use. It needs a connection.

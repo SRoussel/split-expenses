@@ -29,6 +29,7 @@ function entry(p: Partial<Entry> & Pick<Entry, "kind" | "payer_id" | "amount_cen
     created_at: `2026-01-01T00:00:${String(n).padStart(2, "0")}Z`,
     voided_at: null,
     voided_by: null,
+    replaced_by: null,
     ...p,
   };
 }

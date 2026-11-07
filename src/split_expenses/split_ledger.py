@@ -8,17 +8,17 @@ derived from that file, so you can inspect or hand-edit it at any time.
 Balance convention: positive = partner owes you, negative = you owe partner.
 
 Examples:
-    uv run split_ledger.py init --i-owe 500                 # starting deficit
-    uv run split_ledger.py init --partner-owes 600
-    uv run split_ledger.py add 84.20 me groceries           # you paid, split 50/50
-    uv run split_ledger.py add 120 partner power bill       # name can be several words
-    uv run split_ledger.py add 60 me dinner --my-share 70   # you owe 70% of this one
-    uv run split_ledger.py add                              # prompts for amount, payer, name
-    uv run split_ledger.py import split_transactions.csv    # total -> "Expenses mm/dd/yy-mm/dd/yy"
-    uv run split_ledger.py settle                           # settle the full balance
-    uv run split_ledger.py settle 100 me                    # you paid partner $100
-    uv run split_ledger.py balance
-    uv run split_ledger.py history
+    uv run split-ledger init --i-owe 500                 # starting deficit
+    uv run split-ledger init --partner-owes 600
+    uv run split-ledger add 84.20 me groceries           # you paid, split 50/50
+    uv run split-ledger add 120 partner power bill       # name can be several words
+    uv run split-ledger add 60 me dinner --my-share 70   # you owe 70% of this one
+    uv run split-ledger add                              # prompts for amount, payer, name
+    uv run split-ledger import split_transactions.csv    # total -> "Expenses mm/dd/yy-mm/dd/yy"
+    uv run split-ledger settle                           # settle the full balance
+    uv run split-ledger settle 100 me                    # you paid partner $100
+    uv run split-ledger balance
+    uv run split-ledger history
 """
 
 import argparse
@@ -151,10 +151,12 @@ def effect(row):
         return amount if row["payer"] == "me" else -amount
     if kind == EXPENSE:
         my_share = Decimal(row["my_share"] or "50")
-        my_part = money(amount * my_share / 100)
-        partner_part = amount - my_part
-        # If I paid, partner owes me their part; if partner paid, I owe my part.
-        return partner_part if row["payer"] == "me" else -my_part
+        # The person who didn't pay owes their share, rounded half up to the cent;
+        # the payer covers the rest. So on an odd half-cent the payer gets the
+        # one-cent discount. This matches the web app (web/shared/owed.ts).
+        if row["payer"] == "me":
+            return money(amount * (100 - my_share) / 100)  # partner owes me their part
+        return -money(amount * my_share / 100)  # I owe partner my part
     raise ValueError(f"Unknown entry type in ledger: {kind!r}")
 
 

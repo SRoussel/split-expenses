@@ -48,5 +48,9 @@ export const joinHousehold = (code: string, displayName: string) =>
 export const loadHousehold = () =>
   call<{ members: Member[]; inviteCode: string; entries: Entry[] }>("GET", "/api/household");
 
+export const setDefaultSplit = (myShare: number) => call("POST", "/api/household/split", { myShare });
+
 export const addEntry = (entry: NewEntry) => call("POST", "/api/entries", entry);
+export const editEntry = (id: string, entry: NewEntry) => call("POST", `/api/entries/${id}/edit`, entry);
 export const voidEntry = (id: string) => call("POST", `/api/entries/${id}/void`, {});
+export const unvoidEntry = (id: string) => call("POST", `/api/entries/${id}/unvoid`, {});
