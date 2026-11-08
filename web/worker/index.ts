@@ -1006,6 +1006,64 @@ async function getSpending(request: Request, env: Env): Promise<Response> {
   return json({ batches: batches.results, totals: totals.results, breakdown: breakdown.results });
 }
 
+/**
+ * Move money between two spending categories within one month of one upload
+ * (personal) or one imported shared entry, e.g. $700 of a Costco run from
+ * groceries to household. The source's total doesn't change, so neither does
+ * the ledger balance. Still totals only: nothing about the purchase is stored.
+ */
+async function moveSpending(request: Request, env: Env): Promise<Response> {
+  const user = await requireUser(request, env);
+  const { household_id } = await requireMembership(env, user.id);
+  const body = await readBody(request);
+  const kind = body.kind;
+  const id = str(body, "id", 64);
+  const month = str(body, "month", 7);
+  const from = body.from;
+  const to = body.to;
+  const cents = body.cents;
+  if (kind !== "upload" && kind !== "entry") throw new HttpError(400, "Invalid source.");
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new HttpError(400, "Invalid month.");
+  if (!isSpendingCategory(from) || !isSpendingCategory(to) || from === to) {
+    throw new HttpError(400, "Choose two different spending categories.");
+  }
+  if (!Number.isInteger(cents) || (cents as number) <= 0 || (cents as number) > MAX_AMOUNT_CENTS) {
+    throw new HttpError(400, "Invalid amount.");
+  }
+
+  // Only an upload in this household, or an active imported entry in it.
+  const owner =
+    kind === "upload"
+      ? await env.DB.prepare("SELECT id FROM spending_batches WHERE id = ? AND household_id = ?").bind(id, household_id).first()
+      : await env.DB.prepare("SELECT id FROM entries WHERE id = ? AND household_id = ? AND voided_at IS NULL").bind(id, household_id).first();
+  if (!owner) throw new HttpError(404, kind === "upload" ? "Upload not found." : "Entry not found or voided.");
+
+  const [table, col] = kind === "upload" ? ["spending_totals", "batch_id"] : ["entry_breakdown", "entry_id"];
+  const row = await env.DB.prepare(`SELECT cents FROM ${table} WHERE ${col} = ? AND month = ? AND category = ?`)
+    .bind(id, month, from)
+    .first<{ cents: number }>();
+  const have = row?.cents ?? 0;
+  if (have < (cents as number)) {
+    throw new HttpError(400, `There's only $${(Math.max(0, have) / 100).toFixed(2)} in ${from} for that month to move.`);
+  }
+
+  // One transaction. The take only happens if the amount is still what we read, and
+  // the give only if the take happened, so two people moving at once can't double up.
+  const left = have - (cents as number);
+  const [taken] = await env.DB.batch([
+    env.DB.prepare(`UPDATE ${table} SET cents = ? WHERE ${col} = ? AND month = ? AND category = ? AND cents = ?`)
+      .bind(left, id, month, from, have),
+    env.DB.prepare(
+      `INSERT INTO ${table} (${col}, month, category, cents)
+       SELECT ?, ?, ?, ? WHERE changes() = 1
+       ON CONFLICT (${col}, month, category) DO UPDATE SET cents = cents + excluded.cents`,
+    ).bind(id, month, to, cents),
+    env.DB.prepare(`DELETE FROM ${table} WHERE ${col} = ? AND month = ? AND category = ? AND cents = 0`).bind(id, month, from),
+  ]);
+  if (!taken.meta.changes) throw new HttpError(409, "That changed in the meantime. Try again.");
+  return json({ ok: true });
+}
+
 /** Undo a personal upload. (The shared entry from the same import, if any, is voided separately.) */
 async function deleteBatch(request: Request, env: Env, id: string): Promise<Response> {
   const user = await requireUser(request, env);
@@ -1085,6 +1143,7 @@ export default {
         if (pathname === "/api/household/purge-voided") return await purgeVoided(request, env);
         if (pathname === "/api/household/reset") return await resetHousehold(request, env);
         if (pathname === "/api/statements/import") return await importStatement(request, env);
+        if (pathname === "/api/spending/move") return await moveSpending(request, env);
         const b = pathname.match(/^\/api\/statements\/([\w-]+)\/delete$/);
         if (b) return await deleteBatch(request, env, b[1]);
         if (pathname === "/api/recurring") return await createRecurring(request, env);

@@ -1,24 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { categoryLabel } from "../shared/categories";
-import { deleteUpload, getSpending } from "./api";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { categoryLabel, SPENDING_CATEGORIES } from "../shared/categories";
+import { deleteUpload, getSpending, moveSpending } from "./api";
 import { ChartTable, ColumnChart, signed } from "./charts";
 import Trends from "./Trends";
-import { fmt, todayLocal } from "./ledger";
+import { fmt, parseDollars, todayLocal } from "./ledger";
 import {
   buildIndex,
   compare,
   coverage,
   monthsEnding,
+  moveSources,
   sharedItemsFor,
   shiftMonth,
   summarize,
   UNCATEGORIZED,
   type MonthSummary,
+  type MoveSource,
   type SpendingIndex,
   type View,
 } from "./spending";
 import type { Entry, Member, SpendingBatch, SpendingData } from "./types";
-import { ConfirmDialog, ErrorText, Modal, Segmented } from "./ui";
+import { ConfirmDialog, ErrorText, Modal, MoneyInput, Segmented, TallyLine } from "./ui";
 
 const monthLong = (m: string) =>
   new Date(`${m}-01T00:00:00Z`).toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
@@ -44,10 +46,12 @@ export default function SpendingScreen({
   userId,
   members,
   entries,
+  mode,
 }: {
   userId: string;
   members: Member[];
   entries: Entry[];
+  mode: "month" | "trends";
 }) {
   const partner = members.find((m) => m.user_id !== userId);
   const partnerId = partner?.user_id ?? null;
@@ -57,7 +61,6 @@ export default function SpendingScreen({
   const [data, setData] = useState<SpendingData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>("me");
-  const [mode, setMode] = useState<"month" | "trends">("month");
   const [month, setMonth] = useState<string | null>(null);
   const [detail, setDetail] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<SpendingBatch | null>(null);
@@ -122,17 +125,8 @@ export default function SpendingScreen({
     <div className="spending">
       <ErrorText message={error} />
 
-      <Segmented
-        label="Show"
-        value={mode}
-        onChange={setMode}
-        options={[
-          { value: "month", label: "Month" },
-          { value: "trends", label: "Trends" },
-        ]}
-      />
       <div className="view-switch">
-        <Segmented label="Whose spending" value={view} onChange={setView} options={viewOptions} />
+        <Segmented tabs label="Whose spending" value={view} onChange={setView} options={viewOptions} />
       </div>
 
       {mode === "trends" ? (
@@ -161,49 +155,46 @@ export default function SpendingScreen({
 
         {people.length > 0 && <CoverageStrips batches={data.batches} people={people} month={current} nameOf={nameOf} />}
 
-        {hasCashFlow ? (
-          <section className="card cashflow">
-            <span className="muted small">Net cash flow</span>
-            <strong className={`hero ${summary.net! < 0 && !missing.length ? "neg-text" : ""}${missing.length ? " incomplete" : ""}`}>
-              {signed(summary.net!)}
-            </strong>
-            {missing.length > 0 ? (
-              <span className="notice small">
-                Incomplete: nothing uploaded yet for {missing.join(" or ")}, so money in and personal spending are
-                missing. Only shared expenses are counted.
-              </span>
-            ) : (
-              summary.income! > 0 && (
-                <span className="muted small">
-                  {summary.net! >= 0
-                    ? `Kept ${Math.round((summary.net! / summary.income!) * 100)}% of what came in`
-                    : `Spent ${fmt(-summary.net!)} more than came in`}
-                  {partial && " so far (partial month)"}
-                </span>
-              )
-            )}
-            <div className="tiles">
-              <div>
-                <span className="muted small">Money in</span>
-                <strong>{fmt(summary.income!)}</strong>
-              </div>
-              <div>
-                <span className="muted small">Spent</span>
-                <strong>{fmt(summary.spent)}</strong>
-                {!partial && <Change value={summary.spent} average={spentCompare.average} />}
-              </div>
-            </div>
-            {partial && !missing.length && (
-              <span className="muted small">Comparisons with other months appear once the month is fully uploaded.</span>
-            )}
-          </section>
-        ) : (
-          <section className="card cashflow">
-            <span className="muted small">Shared spending</span>
-            <strong className="hero">{fmt(summary.spent)}</strong>
-            <Change value={summary.spent} average={spentCompare.average} />
-          </section>
-        )}
+        <section className="card tally" aria-label={hasCashFlow ? "Cash flow" : "Shared spending"}>
+          {hasCashFlow ? (
+            <>
+              <TallyLine label="In">{fmt(summary.income!)}</TallyLine>
+              <TallyLine label="Out">
+                {!partial && !missing.length && <Change value={summary.spent} average={spentCompare.average} />}{" "}
+                {fmt(summary.spent)}
+              </TallyLine>
+              <TallyLine
+                label="Net"
+                className={`tally-total${missing.length ? " incomplete" : summary.net! < 0 ? " neg-total" : ""}`}
+              >
+                {signed(summary.net!)}
+              </TallyLine>
+              {missing.length > 0 ? (
+                <p className="notice small">
+                  Nothing uploaded for {missing.join(" or ")} yet, so only shared expenses are counted.
+                </p>
+              ) : (
+                <p className="tally-note">
+                  {summary.income! > 0 &&
+                    (summary.net! >= 0
+                      ? `Kept ${Math.round((summary.net! / summary.income!) * 100)}% of what came in`
+                      : `Spent ${fmt(-summary.net!)} more than came in`)}
+                  {summary.income! > 0 && partial && ", so far. "}
+                  {partial && "Partial month, so no comparisons yet."}
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <TallyLine label="Shared, full amounts" className="tally-total">
+                {fmt(summary.spent)}
+              </TallyLine>
+              <p className="tally-note">
+                <Change value={summary.spent} average={spentCompare.average} />
+              </p>
+            </>
+          )}
+        </section>
 
         <section className="card">
           <h3 className="card-title">By category</h3>
@@ -217,6 +208,7 @@ export default function SpendingScreen({
                   <li key={c}>
                     <button onClick={() => setDetail(c)} aria-label={`${catName(c)}: ${fmt(v)}. Details`}>
                       <span className="cat-name">{catName(c)}</span>
+                      <span className="lead" aria-hidden="true" />
                       <span className="cat-amount">{v < 0 ? `−${fmt(v)}` : fmt(v)}</span>
                       <span className="cat-track">
                         {v > 0 && <span className="cat-fill" style={{ width: `${(v / maxCat) * 100}%` }} />}
@@ -231,7 +223,7 @@ export default function SpendingScreen({
         </section>
 
         <section className="card">
-          <h3 className="card-title">{hasCashFlow ? "Net cash flow, last 6 months" : "Shared spending, last 6 months"}</h3>
+          <h3 className="card-title">{hasCashFlow ? "Net, 6 months" : "Shared, 6 months"}</h3>
           <ColumnChart
             label={`${hasCashFlow ? "Net cash flow" : "Shared spending"} for the 6 months up to ${monthLong(current)}`}
             selected={current}
@@ -278,6 +270,9 @@ export default function SpendingScreen({
           me={userId}
           partner={partnerId}
           people={people}
+          sources={moveSources(entries, data, view, current, detail, userId, partnerId)}
+          nameOf={nameOf}
+          onMoved={load}
           onClose={() => setDetail(null)}
           onMonth={setMonth}
         />
@@ -318,20 +313,20 @@ function CoverageStrips({
   nameOf: (id: string) => string;
 }) {
   return (
-    <div className="coverage">
+    <div className="coverage" aria-label="Days covered by statement uploads">
       {people.map((p) => {
         const c = coverage(batches, p, month);
         const who = nameOf(p);
         const text =
           c.covered === 0
-            ? "no statements uploaded"
+            ? "none"
             : c.covered === c.days
-              ? "statements cover the whole month"
-              : `statements cover ${c.ranges.map(([s, e]) => (s === e ? `${s}` : `${s}–${e}`)).join(", ")} (${c.covered} of ${c.days} days)`;
+              ? "whole month"
+              : `${c.ranges.map(([s, e]) => (s === e ? `${s}` : `${s}–${e}`)).join(", ")} · ${c.covered}/${c.days}`;
         return (
           <div key={p} className={`coverage-row${c.covered < c.days ? " partial" : ""}`}>
-            <span className="small">
-              <strong>{who}:</strong> {text}
+            <span className="coverage-who" title={who}>
+              {who}
             </span>
             <span className="coverage-track" aria-hidden="true">
               {c.ranges.map(([s, e]) => (
@@ -342,12 +337,13 @@ function CoverageStrips({
                 />
               ))}
             </span>
+            <span className="coverage-text">
+              <span className="visually-hidden">{who}'s statements cover: </span>
+              {text}
+            </span>
           </div>
         );
       })}
-      {people.some((p) => coverage(batches, p, month).covered === 0) && (
-        <p className="muted small">Income and personal spending for a month only appear once its statements are uploaded.</p>
-      )}
     </div>
   );
 }
@@ -401,6 +397,9 @@ function CategoryDetail({
   me,
   partner,
   people,
+  sources,
+  nameOf,
+  onMoved,
   onClose,
   onMonth,
 }: {
@@ -411,9 +410,28 @@ function CategoryDetail({
   me: string;
   partner: string | null;
   people: string[];
+  sources: MoveSource[];
+  nameOf: (id: string) => string;
+  onMoved: () => Promise<void>;
   onClose: () => void;
   onMonth: (m: string) => void;
 }) {
+  const [moving, setMoving] = useState(false);
+  const [moved, setMoved] = useState<{ source: MoveSource; to: string; cents: number } | null>(null);
+  const [undoError, setUndoError] = useState<string | null>(null);
+
+  async function undoMove() {
+    if (!moved) return;
+    setUndoError(null);
+    try {
+      await moveSpending({ kind: moved.source.kind, id: moved.source.id, month, from: moved.to, to: category, cents: moved.cents });
+      setMoved(null);
+      await onMoved();
+    } catch (err) {
+      setUndoError(err instanceof Error ? err.message : "Couldn't undo that.");
+    }
+  }
+
   const pick = (s: MonthSummary) => s.categories[category] ?? 0;
   const year = monthsEnding(month, 12).map((m) => ({ m, v: pick(summarize(index, view, m, me, partner)) }));
   const { average, previous } = compare(index, view, month, me, partner, pick);
@@ -451,6 +469,34 @@ function CategoryDetail({
         />
         <ChartTable head={["Month", catName(category)]} rows={year.map(({ m, v }) => [monthLong(m), v < 0 ? `−${fmt(v)}` : fmt(v)])} />
 
+        {moved && (
+          <p className="preview small" role="status">
+            Moved {fmt(moved.cents)} to {catName(moved.to)}.{" "}
+            <button className="link" onClick={() => void undoMove()}>
+              Undo
+            </button>
+          </p>
+        )}
+        <ErrorText message={undoError} />
+        {moving ? (
+          <MoveForm
+            category={category}
+            month={month}
+            sources={sources}
+            nameOf={nameOf}
+            onCancel={() => setMoving(false)}
+            onMoved={async (m) => {
+              setMoving(false);
+              setMoved(m);
+              await onMoved();
+            }}
+          />
+        ) : (
+          sources.length > 0 && (
+            <button onClick={() => { setMoved(null); setMoving(true); }}>Move money to another category</button>
+          )
+        )}
+
         {(items.length > 0 || fromStatements !== 0) && (
           <div className="menu-list">
             <h3 className="card-title">What's in it this month</h3>
@@ -483,5 +529,98 @@ function CategoryDetail({
         )}
       </div>
     </Modal>
+  );
+}
+
+/** "Move $700 from Groceries to Household": fixes a month's categories without uploading anything new. */
+function MoveForm({
+  category,
+  month,
+  sources,
+  nameOf,
+  onCancel,
+  onMoved,
+}: {
+  category: string;
+  month: string;
+  sources: MoveSource[];
+  nameOf: (id: string) => string;
+  onCancel: () => void;
+  onMoved: (m: { source: MoveSource; to: string; cents: number }) => Promise<void>;
+}) {
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const [to, setTo] = useState("");
+  const [amount, setAmount] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const source = sources[sourceIndex];
+  const describe = (s: MoveSource) => (s.person ? `${s.name} (${nameOf(s.person)})` : `${s.name} (shared)`);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    const cents = parseDollars(amount);
+    if (!to) return setError("Choose where the money goes.");
+    if (cents === null) return setError("Enter an amount, like 700 or 700.00.");
+    if (cents > source.cents) return setError(`That's more than the ${fmt(source.cents)} there is to move.`);
+    setBusy(true);
+    setError(null);
+    try {
+      await moveSpending({ kind: source.kind, id: source.id, month, from: category, to, cents });
+      await onMoved({ source, to, cents });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't move that.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="stack move-form" onSubmit={(e) => void submit(e)}>
+      <h3 className="card-title">Move money</h3>
+      {sources.length > 1 ? (
+        <label>
+          From
+          <select id="move-source" value={sourceIndex} onChange={(e) => setSourceIndex(Number(e.target.value))}>
+            {sources.map((s, i) => (
+              <option key={`${s.kind}-${s.id}`} value={i}>
+                {describe(s)}: {fmt(s.cents)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <p className="muted small">
+          From {describe(source)}, which has {fmt(source.cents)} in {catName(category)}.
+        </p>
+      )}
+      <label>
+        To
+        <select id="move-to" value={to} onChange={(e) => setTo(e.target.value)}>
+          <option value="">Choose a category</option>
+          {SPENDING_CATEGORIES.filter((c) => c !== category).map((c) => (
+            <option key={c} value={c}>
+              {categoryLabel(c)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Amount
+        <MoneyInput id="move-amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <span className="hint">
+          {source.person === null
+            ? `The full shared amount, up to ${fmt(source.cents)}. It changes for both of you; the balance stays the same.`
+            : `Up to ${fmt(source.cents)}.`}
+        </span>
+      </label>
+      <ErrorText message={error} />
+      <div className="actions-row">
+        <button type="button" onClick={onCancel} disabled={busy}>
+          Cancel
+        </button>
+        <button className="primary" type="submit" disabled={busy}>
+          {busy ? "Moving…" : "Move"}
+        </button>
+      </div>
+    </form>
   );
 }

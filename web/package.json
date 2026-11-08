@@ -17,6 +17,8 @@
     "reset-password": "node scripts/reset-password.mjs"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "5.2.7",
+    "@fontsource/ibm-plex-sans": "5.2.8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -29,7 +31,7 @@
     "concurrently": "^9.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.5.3",
-    "vite": "^5.4.0",
-    "wrangler": "4.152.0"
+    "vite": "^8.3.6",
+    "wrangler": "^4.158.0"
   }
 }

@@ -211,6 +211,42 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(len(state["done"]), 3)
         self.assertNotIn("starbucks", state["vendor_rules"], "answers given one by one aren't remembered")
 
+    def starbucks(self):
+        return [t for t in st.parse_text(REPEATS, "c.pdf") if t["vendor"].startswith("STARBUCKS")]
+
+    def test_change_single_lines_of_a_merchant(self):
+        # Lines 2 and 3 are something else; the rest is dining, and only dining is remembered.
+        split, personal, state = self.run_review(
+            self.starbucks(), ["c", "2,3", "p", key("household"), "s", key("dining")])
+        self.assertEqual([(r["date"], r["category"]) for r in personal], [("2026-02-01", "dining")])
+        self.assertEqual([(r["date"], r["category"]) for r in split],
+                         [("2026-02-05", "household"), ("2026-02-12", "household")])
+        self.assertEqual(state["vendor_rules"]["starbucks"], {"self": "dining"})
+        self.assertEqual(len(state["done"]), 3)
+
+    def test_remembered_merchant_with_several_lines_is_shown_first(self):
+        state = {"done": [], "vendor_rules": {"starbucks": {"self": "dining"}}}
+        _, personal, _ = self.run_review(self.starbucks(), [""], state=state)  # Enter accepts all
+        self.assertEqual([r["category"] for r in personal], ["dining"] * 3)
+
+    def test_change_a_line_of_a_remembered_merchant(self):
+        state = {"done": [], "vendor_rules": {"starbucks": {"self": "dining"}}}
+        _, personal, state = self.run_review(self.starbucks(), ["c", "3", "x", ""], state=state)
+        self.assertEqual([r["date"] for r in personal], ["2026-02-01", "2026-02-05"])
+        self.assertEqual(state["vendor_rules"]["starbucks"], {"self": "dining"})
+        self.assertEqual(len(state["done"]), 3, "the excluded line counts as reviewed")
+
+    def test_bad_line_numbers_and_esc_change_nothing(self):
+        _, personal, _ = self.run_review(
+            self.starbucks(), ["c", "7", "c", "two", "c", "", "c", "1", st.ESC, "s", key("dining")])
+        self.assertEqual([r["category"] for r in personal], ["dining"] * 3)
+
+    def test_unusually_big_lines_are_marked(self):
+        items = [("k", "s", {"date": "2026-01-0" + str(d), "amount": a}) for d, a in
+                 [(1, "142.10"), (2, "988.00"), (3, "96.40"), (4, "175.80")]]
+        lines = st.item_lines(items, {})
+        self.assertEqual([("bigger than usual" in l) for l in lines], [False, True, False, False])
+
     def test_esc_goes_back_from_the_category(self):
         t = by_vendor(st.parse_text(BANK, "b.pdf"))["FAKE GROCER 123"]
         split, personal, _ = self.run_review([t], ["s", st.ESC, "p", key("groceries")])

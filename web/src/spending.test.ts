@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildIndex, compare, coverage, monthsEnding, nonPayerPart, sharedItemsFor, summarize, UNCATEGORIZED } from "./spending.ts";
+import { buildIndex, compare, coverage, monthsEnding, moveSources, nonPayerPart, sharedItemsFor, summarize, UNCATEGORIZED } from "./spending.ts";
 import { owedCents } from "../shared/owed.ts";
 import type { Entry, SpendingData } from "./types.ts";
 
@@ -174,4 +174,15 @@ test("CSV: one row per month, totals only", () => {
   assert.equal(jan, "2026-01,3000.00,510.00,2490.00,400.00,50.00,50.00,30.00,-20.00,yes");
   assert.equal(feb, "2026-02,0.00,100.00,-100.00,0.00,100.00,0.00,0.00,0.00,yes");
   assert.doesNotMatch(csv, /Entry \d|Expenses 01/, "no entry names");
+});
+
+test("money can be moved out of the view's uploads and imported shared entries", () => {
+  const src = (view: Parameters<typeof moveSources>[2], month: string, cat: string) =>
+    moveSources(entries, data, view, month, cat, A, B).map((s) => [s.kind, s.id, s.cents]);
+  assert.deepEqual(src("me", "2026-01", "dining"), [["upload", "b1", 5000]]);
+  assert.deepEqual(src("partner", "2026-01", "dining"), [], "only the view's people");
+  assert.deepEqual(src("me", "2026-01", "household"), [["entry", "imp", 80000]], "shared imports count for everyone");
+  assert.deepEqual(src("shared", "2026-01", "household"), [["entry", "imp", 80000]]);
+  assert.deepEqual(src("me", "2026-01", "entertainment"), [], "nothing to move out of returns");
+  assert.deepEqual(src("household", "2026-01", "groceries"), [], "hand-added entries are edited instead");
 });

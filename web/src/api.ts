@@ -78,3 +78,12 @@ export const importStatement = (body: StatementImport) =>
   });
 export const getSpending = () => call<SpendingData>("GET", "/api/spending");
 export const deleteUpload = (id: string) => call("POST", `/api/statements/${id}/delete`, {});
+/** Move money between categories in one month of an upload or an imported shared entry. */
+export const moveSpending = (move: {
+  kind: "upload" | "entry";
+  id: string;
+  month: string;
+  from: string;
+  to: string;
+  cents: number;
+}) => call("POST", "/api/spending/move", move);

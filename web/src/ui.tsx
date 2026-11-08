@@ -171,20 +171,33 @@ export function Toast({ toast, onDone }: { toast: ToastState | null; onDone: () 
   );
 }
 
-/** Two-option toggle (e.g. who paid). */
+/** One printed line of a tally: label, dotted leader, amount. */
+export function TallyLine({ label, children, className = "" }: { label: string; children: ReactNode; className?: string }) {
+  return (
+    <div className={`tally-line ${className}`}>
+      <span>{label}</span>
+      <span className="lead" aria-hidden="true" />
+      <span>{children}</span>
+    </div>
+  );
+}
+
+/** A choice between a few options: boxed inside forms (who paid), or `tabs` for switching views. */
 export function Segmented<T extends string>({
   value,
   onChange,
   options,
   label,
+  tabs = false,
 }: {
   value: T;
   onChange: (v: T) => void;
   options: { value: T; label: string }[];
   label?: string;
+  tabs?: boolean;
 }) {
   return (
-    <div className="segmented" role="radiogroup" aria-label={label}>
+    <div className={`segmented${tabs ? " tabs" : ""}`} role="radiogroup" aria-label={label}>
       {options.map((o) => (
         <button
           key={o.value}

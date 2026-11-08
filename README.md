@@ -29,6 +29,7 @@ It groups what's left to review **by merchant**, so "STARBUCKS ×12 · $54.20" i
 - **Categories** are one key each: `1`–`9`, then `a` gift, `b` fees, `c` other (the menu shows them). `Esc` goes back.
 - **Enter** accepts the suggestion, when there is one. Suggestions come from your own answers for similar merchant names first, then a built-in keyword list (Safeway → groceries, Uber → transport, payroll → income, Zelle → exclude…). They're worked out on your computer and never applied without a keypress.
 - **Answers are remembered** for that merchant (separately for money out and in), so next time it's applied without asking. Hold **Shift** (`S`, `P`, `X`…) for "this time only".
+- **A merchant with several transactions is listed, numbered**, even when its answer is remembered: Enter accepts the remembered answer for all of them. `c` changes some lines first (type `2`, `2,5` or `3-6`, then the answer), for a one-off like a TV at Costco. Those lines are answered this time only; the merchant keeps its usual answer. Amounts much bigger than the merchant's usual are marked.
 - `e` answers a group's transactions one by one (when a merchant isn't always the same thing; those answers aren't remembered).
 - `u` undoes your last answer: its lines, its remembered rule, and anything applied automatically after it. It then asks again. Undo works within one session.
 - `k` skips for now, `q` quits (progress is saved as you go).

@@ -319,3 +319,47 @@ export function reportCsv(report: RangeReport, categoryName: (c: string) => stri
   });
   return [head, ...rows].map((r) => r.map(csvCell).join(",")).join("\n") + "\n";
 }
+
+/** Somewhere money in a category can be moved out of: one upload, or one imported shared entry. */
+export interface MoveSource {
+  kind: "upload" | "entry";
+  id: string;
+  /** The upload's or entry's name. */
+  name: string;
+  /** Whose upload, or null for a shared entry (a move there changes it for both of you). */
+  person: string | null;
+  cents: number;
+}
+
+/**
+ * Where the money in `category` for `month` came from, for the people in this view:
+ * their uploads, and imported shared entries. Hand-added entries aren't listed:
+ * change their category by editing them instead.
+ */
+export function moveSources(
+  entries: Entry[],
+  data: SpendingData,
+  view: View,
+  month: string,
+  category: string,
+  me: string,
+  partner: string | null,
+): MoveSource[] {
+  const people = peopleFor(view, me, partner);
+  const sources: MoveSource[] = [];
+  for (const b of data.batches) {
+    if (!people.includes(b.person_id)) continue;
+    const cents = data.totals
+      .filter((t) => t.batch_id === b.id && t.month === month && t.category === category)
+      .reduce((s, t) => s + t.cents, 0);
+    if (cents > 0) sources.push({ kind: "upload", id: b.id, name: b.name, person: b.person_id, cents });
+  }
+  const active = new Map(entries.filter((e) => e.kind === "expense" && !e.voided_at).map((e) => [e.id, e]));
+  for (const d of data.breakdown) {
+    const e = active.get(d.entry_id);
+    if (e && d.month === month && d.category === category && d.cents > 0) {
+      sources.push({ kind: "entry", id: e.id, name: e.name, person: null, cents: d.cents });
+    }
+  }
+  return sources;
+}

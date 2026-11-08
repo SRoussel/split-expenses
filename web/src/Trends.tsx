@@ -11,7 +11,7 @@ import {
   type View,
 } from "./spending";
 import type { SpendingBatch } from "./types";
-import { Segmented } from "./ui";
+import { Segmented, TallyLine } from "./ui";
 
 const monthLong = (m: string) =>
   new Date(`${m}-01T00:00:00Z`).toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
@@ -55,42 +55,41 @@ export default function Trends({
 
   return (
     <div className="trends">
-      <Segmented
-        label="Range"
-        value={range}
-        onChange={setRange}
-        options={[
-          { value: "6m", label: "6 months" },
-          { value: "12m", label: "1 year" },
-          { value: "ytd", label: "This year" },
-        ]}
-      />
+      <div className="month-nav">
+        <Segmented
+          tabs
+          label="Range"
+          value={range}
+          onChange={setRange}
+          options={[
+            { value: "6m", label: "6 months" },
+            { value: "12m", label: "1 year" },
+            { value: "ytd", label: "This year" },
+          ]}
+        />
+      </div>
 
-      <section className="card cashflow">
-        <span className="muted small">
-          {cashflow ? "Net cash flow" : "Shared spending"}, {period}
-        </span>
-        <strong className={`hero ${cashflow && report.net! < 0 ? "neg-text" : ""}`}>
-          {cashflow ? signed(report.net!) : fmt(report.spent)}
-        </strong>
-        {cashflow && report.income! > 0 && (
-          <span className="muted small">
-            {report.net! >= 0
-              ? `Kept ${Math.round((report.net! / report.income!) * 100)}% of what came in`
-              : `Spent ${fmt(-report.net!)} more than came in`}
-          </span>
-        )}
-        {cashflow && (
-          <div className="tiles">
-            <div>
-              <span className="muted small">Money in</span>
-              <strong>{fmt(report.income!)}</strong>
-            </div>
-            <div>
-              <span className="muted small">Spent</span>
-              <strong>{fmt(report.spent)}</strong>
-            </div>
-          </div>
+      <section className="card tally" aria-label={`${cashflow ? "Cash flow" : "Shared spending"}, ${period}`}>
+        <h3 className="card-title">{period}</h3>
+        {cashflow ? (
+          <>
+            <TallyLine label="In">{fmt(report.income!)}</TallyLine>
+            <TallyLine label="Out">{fmt(report.spent)}</TallyLine>
+            <TallyLine label="Net" className={`tally-total${report.net! < 0 ? " neg-total" : ""}`}>
+              {signed(report.net!)}
+            </TallyLine>
+            {report.income! > 0 && (
+              <p className="tally-note">
+                {report.net! >= 0
+                  ? `Kept ${Math.round((report.net! / report.income!) * 100)}% of what came in`
+                  : `Spent ${fmt(-report.net!)} more than came in`}
+              </p>
+            )}
+          </>
+        ) : (
+          <TallyLine label="Shared, full amounts" className="tally-total">
+            {fmt(report.spent)}
+          </TallyLine>
         )}
       </section>
 
@@ -99,7 +98,7 @@ export default function Trends({
       ) : (
         <>
           <section className="card">
-            <h3 className="card-title">{cashflow ? "Net cash flow by month" : "Shared spending by month"}</h3>
+            <h3 className="card-title">{cashflow ? "Net by month" : "Shared by month"}</h3>
             <ColumnChart
               label={`${cashflow ? "Net cash flow" : "Shared spending"} by month, ${period}`}
               selected={months[months.length - 1]}
@@ -138,10 +137,8 @@ export default function Trends({
           </section>
 
           <section className="card">
-            <h3 className="card-title">By category, {period}</h3>
-            <p className="muted small multiples-note">
-              Largest first. Each chart has its own scale, so look at the shape; the numbers say how big.
-            </p>
+            <h3 className="card-title">By category</h3>
+            <p className="muted small multiples-note">Largest first. Each chart has its own scale.</p>
             <div className="multiples">
               {report.categories.map((c) => (
                 <div key={c.category} className="multiple">
@@ -203,15 +200,13 @@ export default function Trends({
           </section>
 
           {anyPartial && (
-            <p className="muted small center">
-              * Lighter bars are months that are only partly uploaded. They're left out of the per-month averages.
-            </p>
+            <p className="muted small center">* Lighter bars: partly uploaded months, left out of averages.</p>
           )}
 
-          <button onClick={() => void exportCsv()}>Export these totals as CSV</button>
-          <p className="muted small center">
-            One row per month: money in, spent, net and each category. Totals only, saved to this device.
-          </p>
+          <div className="export">
+            <button onClick={() => void exportCsv()}>Export totals as CSV</button>
+            <p className="muted small center">One row per month. Totals only, saved to this device.</p>
+          </div>
         </>
       )}
     </div>

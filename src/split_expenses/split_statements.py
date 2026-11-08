@@ -573,6 +573,75 @@ def group_pending(pending):
     return groups
 
 
+def item_lines(items, overrides):
+    """A merchant's transactions, numbered, with any per-line answers and unusually big amounts marked."""
+    amounts = sorted(float(t["amount"]) for _, _, t in items)
+    typical = amounts[len(amounts) // 2]
+    lines = []
+    for i, (_, _, t) in enumerate(items):
+        amount = float(t["amount"])
+        text = f"{f'${amount:,.2f}':>11}"
+        big = len(items) >= 3 and amount >= 100 and amount > 2.5 * typical
+        line = f"    {paint(f'{i + 1:>3}', 'dim')}  {t['date']}  " + (paint(text, "bold", "yellow") if big else text)
+        if i in overrides:
+            line += "  " + paint("→ " + describe_choice(overrides[i]), "green")
+        elif big:
+            line += "  " + paint("bigger than usual", "yellow")
+        lines.append(line)
+    return lines
+
+
+def ask_lines(n):
+    """Line numbers typed as "2", "2,5" or "3-6". Returns [] (with a message) for anything else."""
+    raw = input("  Which lines? e.g. 2 or 2,5 or 3-6 (Enter to cancel) > ").strip()
+    picked = set()
+    for part in filter(None, re.split(r"[\s,]+", raw)):
+        m = re.fullmatch(r"(\d+)(?:-(\d+))?", part)
+        if not m:
+            print(paint(f"  \"{part}\" isn't a line number.", "red"))
+            return []
+        lo, hi = int(m[1]), int(m[2] or m[1])
+        if not 1 <= lo <= hi <= n:
+            print(paint(f"  Lines go from 1 to {n}.", "red"))
+            return []
+        picked.update(range(lo - 1, hi))
+    return sorted(picked)
+
+
+def ask_choice(direction, hint, extra_menu, extra_keys):
+    """Ask what the money was.
+
+    Returns (choice, once, None) for an answer, or (None, False, key) when one of
+    `extra_keys` (lower case, or ESC) was pressed instead. Shift+key means this time only.
+    """
+    if direction == "out":
+        keys, menu = {"s", "p", "x"}, "s self  p split  x exclude"
+    else:
+        keys, menu = {"i", "r", "x"}, "i income  r return  x exclude"
+    valid = keys | extra_keys | ({ENTER} if hint else set())
+    while True:
+        ch = ask_key(f"  {menu}{extra_menu} > ", valid)
+        low = ch.lower()
+        if low in extra_keys:
+            return None, False, low
+        once = ch != low
+        if ch == ENTER:
+            return hint[0], False, None
+        if low == "x":
+            return "exclude", once, None
+        if low == "i":
+            return "income", once, None
+        if low in ("s", "p"):
+            cat = ask_category()
+            if cat is not None:  # Esc goes back to the question
+                return {"self" if low == "s" else "split": cat}, once, None
+            continue
+        cat = ask_category("Which category was the original purchase")
+        if cat is not None:
+            shared = ask_key("  Was the original purchase split with your partner? y/n > ", {"y", "n"})
+            return {"return": cat, "shared": shared.lower() == "y"}, once, None
+
+
 def group_line(n, total_groups, g):
     items = g["items"]
     _, source, first = items[0]
@@ -603,9 +672,11 @@ def review(txns_by_file, paths, state_path):
 
     groups = group_pending(pending)
     print(f"\n{paint(len(pending), 'bold')} transaction(s) from {paint(len(groups), 'bold')} merchant(s) to review. "
-          "One answer covers every transaction from a merchant, and is remembered for next time.")
+          "One answer covers every transaction from a merchant, and is remembered for next time.\n"
+          "A merchant with several transactions is listed so you can answer single lines differently.")
     print(paint("  Money out: s self  p split  x exclude      Money in: i income  r return  x exclude\n"
-                "  Enter accept suggestion   Shift+key this time only   e answer each separately\n"
+                "  Enter accept suggestion   Shift+key this time only\n"
+                "  c change some lines (e.g. a TV at Costco)   e answer each separately\n"
                 "  k skip for now   u undo   q quit\n"
                 "  Exclude = not spending or income: card payments, transfers between your own accounts, "
                 "money between the two of you.\n", "dim"))
@@ -657,6 +728,8 @@ def review(txns_by_file, paths, state_path):
         def show():
             if not asked:
                 print(line)
+                if many:
+                    print("\n".join(item_lines(g["items"], {})))
 
         # 1. Which way did the money go?
         direction = g["direction"]
@@ -700,40 +773,41 @@ def review(txns_by_file, paths, state_path):
             choice = {"self": cat}
             set_rule(rule_key, choice, changed)
 
+        # A merchant with several transactions is always shown, even when its answer is
+        # remembered, so a one-off (a TV at the grocery store) can be changed first.
+        remembered = None
+        if many and choice is not None and direction != "exclude":
+            remembered, choice = (choice, "remembered"), None
+
+        overrides = {}  # line index -> answer for that line only (never remembered)
         result = None
         while choice is None:
             show()
             asked = True
-            hint = suggest(g["vendor_key"], direction, rules)
+            hint = remembered or suggest(g["vendor_key"], direction, rules)
             if hint:
-                print(f"  Suggested: {paint(describe_choice(hint[0]), 'bold', 'green')}  "
-                      f"{paint('(' + hint[1] + ')', 'dim')}   Enter to accept")
-            if direction == "out":
-                keys, menu = {"s", "p", "x"}, "s self  p split  x exclude"
-            else:
-                keys, menu = {"i", "r", "x"}, "i income  r return  x exclude"
-            valid = keys | {"k", "u", "q"} | ({"e"} if many else set()) | ({ENTER} if hint else set())
-            ch = ask_key(f"  {menu}{each_key}  k skip  u undo  q quit > ", valid)
-            low = ch.lower()
-            if low in ("q", "k", "u", "e"):
-                result = low
+                label = "Remembered" if hint is remembered else "Suggested"
+                reason = "" if hint is remembered else "  " + paint("(" + hint[1] + ")", "dim")
+                print(f"  {label}: {paint(describe_choice(hint[0]), 'bold', 'green')}{reason}   "
+                      f"Enter to accept{' for the rest' if overrides else ''}")
+            change_key = "  c change lines" if many else ""
+            choice, picked_once, result = ask_choice(
+                direction, hint, f"{change_key}{each_key}  k skip  u undo  q quit",
+                {"k", "u", "q"} | ({"e", "c"} if many else set()))
+            if result == "c":
+                lines = ask_lines(len(g["items"]))
+                if lines:
+                    which = "Line" + ("s" if len(lines) > 1 else "") + " " + ", ".join(str(i + 1) for i in lines)
+                    print(f"  {which}, this time only:")
+                    alt, _, _ = ask_choice(direction, None, f"  {paint('Esc', 'dim')} back", {ESC})
+                    if alt is not None:
+                        overrides.update((i, alt) for i in lines)
+                    print("\n".join(item_lines(g["items"], overrides)))
+                result = None
+                continue
+            if result:
                 break
-            once = once or (ch != low)
-            if ch == ENTER:
-                choice = hint[0]
-            elif low == "x":
-                choice = "exclude"
-            elif low == "i":
-                choice = "income"
-            elif low in ("s", "p"):
-                cat = ask_category()
-                if cat is not None:  # Esc goes back to the question
-                    choice = {"self" if low == "s" else "split": cat}
-            else:  # return
-                cat = ask_category("Which category was the original purchase")
-                if cat is not None:
-                    shared = ask_key("  Was the original purchase split with your partner? y/n > ", {"y", "n"})
-                    choice = {"return": cat, "shared": shared.lower() == "y"}
+            once = once or picked_once
 
         if result == "q":
             break
@@ -751,11 +825,15 @@ def review(txns_by_file, paths, state_path):
         # 3. Anything that looks already recorded under another id (same date, amount
         #    and merchant)? That happens when ids change: a renamed PDF, a parser fix.
         #    Never add those silently.
+        def choice_for(i):
+            return overrides.get(i, choice)
+
         skip_dups = set()
-        if choice != "exclude":
+        if any(choice_for(i) != "exclude" for i in range(len(g["items"]))):
             ids, looks = recorded_index(paths)
-            dups = [k for k, _, t in g["items"]
-                    if k not in ids and (t["date"], t["amount"], t["vendor"]) in looks]
+            dups = [k for i, (k, _, t) in enumerate(g["items"])
+                    if choice_for(i) != "exclude" and k not in ids
+                    and (t["date"], t["amount"], t["vendor"]) in looks]
             if dups:
                 show()
                 asked = True
@@ -767,13 +845,14 @@ def review(txns_by_file, paths, state_path):
 
         # 4. Apply it to every transaction in the group, and remember it unless told not to.
         action = {"index": gi, "asked": asked, "files": snapshot(paths), "keys": [], "counts": {},
-                  "rules": changed, "note": f"{g['items'][0][2]['vendor']} → {describe_choice(choice)}"}
-        for k, _, t in g["items"]:
+                  "rules": changed, "note": f"{g['items'][0][2]['vendor']} → {describe_choice(choice)}"
+                  + (f" ({len(overrides)} line(s) answered differently)" if overrides else "")}
+        for i, (k, _, t) in enumerate(g["items"]):
             if k in skip_dups:
                 name = "duplicates"
                 counts[name] += 1
             else:
-                name = apply_choice(choice, t, k, paths, counts)
+                name = apply_choice(choice_for(i), t, k, paths, counts)
             action["counts"][name] = action["counts"].get(name, 0) + 1
             action["keys"].append(k)
             done.add(k)
@@ -782,12 +861,14 @@ def review(txns_by_file, paths, state_path):
         history.append(action)
         save()
 
-        times = f" ×{len(g['items'])}" if len(g["items"]) > 1 else ""
+        rest = len(g["items"]) - len(overrides)
+        times = f" ×{rest}" if rest > 1 or overrides else ""
         if not asked:
             print(f"{line}  {paint('→ ' + describe_choice(choice) + ' (remembered)', 'green')}")
         else:
             tail = " (this time only)" if once else ""
-            print(paint(f"  → {describe_choice(choice)}{times}{tail}\n", "green"))
+            more = f", {len(overrides)} line(s) as you set them" if overrides else ""
+            print(paint(f"  → {describe_choice(choice)}{times}{tail}{more}\n", "green"))
         gi += 1
 
     print("\n" + paint("Done for now:", "green", "bold"),

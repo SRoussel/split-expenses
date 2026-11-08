@@ -26,7 +26,7 @@ import { saveTextFile } from "./files";
 import SpendingScreen from "./SpendingScreen";
 import { balanceFor, effectFor, exportLedgerCsv, fmt } from "./ledger";
 import type { Entry, Member, NewEntry, Recurring } from "./types";
-import { ConfirmDialog, ErrorText, Modal, Segmented, Toast, type ToastState } from "./ui";
+import { ConfirmDialog, ErrorText, Modal, Toast, type ToastState } from "./ui";
 
 type Panel =
   | null
@@ -47,6 +47,7 @@ const dayFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeri
 const longDayFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" });
 // created_at / voided_at are real moments, so show them in local time.
 const momentFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+const headerDateFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "2-digit", year: "numeric" });
 const asDate = (iso: string) => new Date(`${iso}T00:00:00Z`);
 
 const KIND_LABEL = { expense: "Expense", settlement: "Payment", opening: "Starting balance" } as const;
@@ -69,7 +70,7 @@ export default function LedgerScreen({
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
-  const [tab, setTab] = useState<"ledger" | "spending">("ledger");
+  const [tab, setTab] = useState<"ledger" | "spending" | "trends">("ledger");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Entry | null>(null);
   const [voiding, setVoiding] = useState<Entry | null>(null);
@@ -199,28 +200,34 @@ export default function LedgerScreen({
 
   return (
     <main className={tab === "ledger" ? "with-bar" : ""}>
-      <header className="top">
-        <h1>Split</h1>
-        <button className="link" onClick={() => setPanel("more")}>
+      <header className="masthead">
+        <h1>SPLIT</h1>
+        <p>
+          {me && partner ? `${me.display_name} & ${partner.display_name}` : (me?.display_name ?? "")} ·{" "}
+          {headerDateFmt.format(new Date())}
+        </p>
+      </header>
+      <nav className="nav" role="tablist" aria-label="Section">
+        {(
+          [
+            ["ledger", "Ledger"],
+            ["spending", "Spending"],
+            ["trends", "Trends"],
+          ] as const
+        ).map(([key, label]) => (
+          <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}>
+            {label}
+          </button>
+        ))}
+        <button className="more" onClick={() => setPanel("more")}>
           More
         </button>
-      </header>
-      <div className="tabs">
-        <Segmented
-          label="Section"
-          value={tab}
-          onChange={setTab}
-          options={[
-            { value: "ledger", label: "Ledger" },
-            { value: "spending", label: "Spending" },
-          ]}
-        />
-      </div>
+      </nav>
 
       <ErrorText message={error} />
 
-      {tab === "spending" ? (
-        <SpendingScreen userId={userId} members={members} entries={entries} />
+      {tab !== "ledger" ? (
+        <SpendingScreen userId={userId} members={members} entries={entries} mode={tab === "trends" ? "trends" : "month"} />
       ) : (
         <>
 
@@ -271,6 +278,12 @@ export default function LedgerScreen({
             </ul>
           </section>
         ))
+      )}
+
+      {me && partner && (
+        <span className="stamp">
+          Split {pctText(me.share_pct)}/{pctText(partner.share_pct)}
+        </span>
       )}
 
       <div className="bar">
@@ -656,22 +669,17 @@ function EntryRow({
   return (
     <li className={e.voided_at ? "voided" : ""}>
       <button className="entry-btn" onClick={onOpen} aria-label={`${e.name}, details`}>
-        <span className={`dot ${e.kind}`} aria-hidden="true" />
-        <span className="grow">
-          <strong>
-            {e.recurring_id && (
-              <span className="repeat" aria-label="Recurring: ">
-                ↻{" "}
-              </span>
-            )}
-            {e.name}
-          </strong>
-          <span className="muted small">{detail}</span>
+        <span className="entry-name">
+          {e.recurring_id && (
+            <span className="repeat" aria-label="Recurring: ">
+              ↻{" "}
+            </span>
+          )}
+          {e.name}
         </span>
+        <span className="lead" aria-hidden="true" />
         <EffectAmount entry={e} userId={userId} />
-        <span className="chevron" aria-hidden="true">
-          ›
-        </span>
+        <span className="entry-detail">{detail}</span>
       </button>
     </li>
   );

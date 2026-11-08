@@ -506,6 +506,53 @@ describe("Split API", () => {
       assert.equal((await new Client().get("/api/spending")).status, 401);
     });
 
+    test("moving money between categories keeps the totals and the balance", async () => {
+      const move = (c, m) => c.post("/api/spending/move", m);
+      const balanceBefore = (await entries()).find((e) => e.id === entryId).owed_cents;
+      // Shared: $50 of the biggest January category goes to travel (a category it doesn't have yet).
+      let sp = await spending();
+      const jan = sp.breakdown.filter((b) => b.entry_id === entryId && b.month === "2026-01").sort((a, b) => b.cents - a.cents)[0];
+      assert.ok(jan.category !== "travel" && jan.cents > 5000);
+      const r = await move(bob, { kind: "entry", id: entryId, month: "2026-01", from: jan.category, to: "travel", cents: 5000 });
+      assert.equal(r.status, 200, JSON.stringify(r.data));
+      sp = await spending();
+      const rows = sp.breakdown.filter((b) => b.entry_id === entryId);
+      assert.equal(rows.find((b) => b.month === "2026-01" && b.category === jan.category).cents, jan.cents - 5000);
+      assert.equal(rows.find((b) => b.month === "2026-01" && b.category === "travel").cents, 5000);
+      assert.equal(rows.reduce((n, b) => n + b.cents, 0), 134955, "same total");
+      assert.equal((await entries()).find((e) => e.id === entryId).owed_cents, balanceBefore, "same balance");
+
+      // Moving all of it back removes the now-empty row.
+      assert.equal((await move(alice, { kind: "entry", id: entryId, month: "2026-01", from: "travel", to: jan.category, cents: 5000 })).status, 200);
+      sp = await spending();
+      assert.ok(!sp.breakdown.some((b) => b.entry_id === entryId && b.category === "travel"));
+
+      // Personal upload: more than there is is refused, and nothing changes.
+      const dining = sp.totals.find((t) => t.batch_id === batchId && t.category !== "income" && t.cents > 0);
+      const tooMuch = await move(alice, { kind: "upload", id: batchId, month: dining.month, from: dining.category, to: "gift", cents: dining.cents + 1 });
+      assert.equal(tooMuch.status, 400);
+      const ok = await move(alice, { kind: "upload", id: batchId, month: dining.month, from: dining.category, to: "gift", cents: dining.cents });
+      assert.equal(ok.status, 200);
+      sp = await spending();
+      assert.ok(!sp.totals.some((t) => t.batch_id === batchId && t.month === dining.month && t.category === dining.category));
+      assert.equal(sp.totals.find((t) => t.batch_id === batchId && t.month === dining.month && t.category === "gift").cents, dining.cents);
+      await move(alice, { kind: "upload", id: batchId, month: dining.month, from: "gift", to: dining.category, cents: dining.cents });
+
+      const base = { kind: "upload", id: batchId, month: dining.month, from: dining.category, to: "gift", cents: 1 };
+      const cases = [
+        ["income can't be moved", { ...base, from: "income" }],
+        ["into income", { ...base, to: "income" }],
+        ["same category", { ...base, to: dining.category }],
+        ["zero", { ...base, cents: 0 }],
+        ["dollars", { ...base, cents: 0.5 }],
+        ["bad month", { ...base, month: "2026-13" }],
+        ["bad kind", { ...base, kind: "batch" }],
+      ];
+      for (const [label, m] of cases) assert.equal((await move(alice, m)).status, 400, label);
+      assert.equal((await move(carol, base)).status, 404, "another household's upload");
+      assert.equal((await move(carol, { ...base, kind: "entry", id: entryId, from: jan.category })).status, 404);
+    });
+
     test("editing the imported entry keeps its breakdown only if the total is unchanged", async () => {
       const entry = (await entries()).find((e) => e.id === entryId);
       const same = { kind: "expense", entry_date: entry.entry_date, name: "Renamed statement", amount_cents: entry.amount_cents, payer_id: bobId, payer_share_pct: 50 };
