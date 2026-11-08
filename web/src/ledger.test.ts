@@ -135,6 +135,8 @@ test("parseSummary refuses the detailed CSVs and anything unexpected", () => {
   assert.throws(() => parseSummary(fixture("sample_split_transactions.csv")), /detailed transactions file/);
   assert.throws(() => parseSummary(fixture("sample_personal_transactions.csv")), /detailed transactions file/);
   const good = () => JSON.parse(fixture("expected_summary_v2.json"));
+  // These cases poke arbitrary fields into parsed JSON, so loose typing is the point.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   type D = Record<string, any>;
   const bad: [string, (d: D) => void, RegExp][] = [
     ["extra field (e.g. transactions)", (d) => (d.transactions = [{ vendor: "X" }]), /unexpected fields \(transactions\)/],

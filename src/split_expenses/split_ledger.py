@@ -75,7 +75,7 @@ def parse_amount(s):
     try:
         d = Decimal(str(s).replace("$", "").replace(",", "").strip())
     except InvalidOperation:
-        raise ValueError(f"Not a valid amount: {s!r}")
+        raise ValueError(f"Not a valid amount: {s!r}") from None
     if d <= 0:
         raise ValueError("Amount must be greater than zero.")
     return money(d)
@@ -85,14 +85,14 @@ def parse_date(s):
     try:
         return datetime.strptime(s, "%Y-%m-%d").date().isoformat()
     except ValueError:
-        raise ValueError(f"Date must be YYYY-MM-DD, got {s!r}")
+        raise ValueError(f"Date must be YYYY-MM-DD, got {s!r}") from None
 
 
 def parse_percent(s):
     try:
         p = Decimal(str(s).replace("%", "").strip())
     except InvalidOperation:
-        raise ValueError(f"Not a valid percentage: {s!r}")
+        raise ValueError(f"Not a valid percentage: {s!r}") from None
     if not (0 <= p <= 100):
         raise ValueError("Share must be between 0 and 100.")
     return p
@@ -274,7 +274,7 @@ def parse_signed_amount(s):
     try:
         d = Decimal(str(s).replace("$", "").replace(",", "").strip())
     except InvalidOperation:
-        raise ValueError(f"Not a valid amount: {s!r}")
+        raise ValueError(f"Not a valid amount: {s!r}") from None
     if d == 0:
         raise ValueError("Amount can't be zero.")
     return money(d)

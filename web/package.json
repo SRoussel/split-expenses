@@ -14,7 +14,8 @@
     "test": "node --import tsx --test src/ledger.test.ts src/spending.test.ts",
     "test:api": "npm run build && node --test tests/api.test.mjs",
     "deploy": "npm run build && wrangler deploy",
-    "reset-password": "node scripts/reset-password.mjs"
+    "reset-password": "node scripts/reset-password.mjs",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "5.2.7",
@@ -24,14 +25,22 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261023.1",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^6.2.1",
     "concurrently": "^9.0.0",
+    "eslint": "^10.14.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.14.0",
     "tsx": "^4.19.0",
     "typescript": "^5.5.3",
+    "typescript-eslint": "^8.72.1",
     "vite": "^8.3.6",
     "wrangler": "^4.158.0"
+  },
+  "overrides": {
+    "minimatch": "^11.0.5"
   }
 }

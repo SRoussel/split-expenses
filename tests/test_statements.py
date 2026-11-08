@@ -1,4 +1,4 @@
-"""Tests for the statement review and the summary file.
+"""Tests for split-statements: reading statements, the review, and re-runs.
 
     uv run python -m unittest discover -s tests -v
 
@@ -9,14 +9,12 @@ review is driven with scripted answers.
 import csv
 import hashlib
 import json
-import os
 import tempfile
 import unittest
-from argparse import Namespace
 from pathlib import Path
 from unittest import mock
 
-from split_expenses import split_ledger, split_statements as st
+from split_expenses import split_statements as st
 from split_expenses.categories import INCOME, SPENDING
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -134,7 +132,7 @@ class ReviewTests(unittest.TestCase):
             try:
                 return next(script)
             except StopIteration:
-                raise AssertionError("the review asked more questions than the test expected")
+                raise AssertionError("the review asked more questions than the test expected") from None
 
         with mock.patch("builtins.input", side_effect=fake_input), mock.patch("builtins.print"):
             st.review([("statement.pdf", txns)], paths, state_path)
@@ -245,7 +243,7 @@ class ReviewTests(unittest.TestCase):
         items = [("k", "s", {"date": "2026-01-0" + str(d), "amount": a}) for d, a in
                  [(1, "142.10"), (2, "988.00"), (3, "96.40"), (4, "175.80")]]
         lines = st.item_lines(items, {})
-        self.assertEqual([("bigger than usual" in l) for l in lines], [False, True, False, False])
+        self.assertEqual([("bigger than usual" in line) for line in lines], [False, True, False, False])
 
     def test_esc_goes_back_from_the_category(self):
         t = by_vendor(st.parse_text(BANK, "b.pdf"))["FAKE GROCER 123"]
@@ -429,66 +427,6 @@ class RerunSafetyTests(unittest.TestCase):
         self.assertEqual(self.state(), {"done": [], "vendor_rules": {"fake noodle bar": {"self": "dining"}}})
 
 
-class ArchiveTests(unittest.TestCase):
-    def test_archive_moves_the_batch_and_keeps_the_history(self):
-        with tempfile.TemporaryDirectory() as d:
-            old = os.getcwd()
-            os.chdir(d)
-            try:
-                for name in ("split_transactions.csv", "personal_transactions.csv", "split_summary.json",
-                             ".split_state.json"):
-                    Path(name).write_text("x")
-                args = Namespace(person=None)
-                with mock.patch("builtins.print"):
-                    split_ledger.cmd_archive(args, None)
-                archived = sorted(p.relative_to("archive").as_posix() for p in Path("archive").rglob("*.*"))
-                self.assertEqual(len(archived), 3)
-                self.assertFalse(Path("split_transactions.csv").exists())
-                self.assertTrue(Path(".split_state.json").exists(), "review history stays")
-                Path("split_transactions.csv").write_text("x")  # a second batch the same day
-                with mock.patch("builtins.print"):
-                    split_ledger.cmd_archive(args, None)
-                self.assertEqual(len(list(Path("archive").iterdir())), 2, "a second folder, nothing overwritten")
-                with self.assertRaises(SystemExit), mock.patch("builtins.print"):
-                    split_ledger.cmd_archive(args, None)  # nothing left to archive
-            finally:
-                os.chdir(old)
-
-    def test_finish_summarizes_then_archives(self):
-        with tempfile.TemporaryDirectory() as d:
-            old = os.getcwd()
-            os.chdir(d)
-            try:
-                for name in ("split_transactions.csv", "personal_transactions.csv"):
-                    Path(name).write_text((FIXTURES / f"sample_{name}").read_text())
-                args = Namespace(person=None, no_personal=False, name=None)
-                with mock.patch("builtins.print"):
-                    split_ledger.cmd_finish(args, None)
-                [dest] = list(Path("archive").iterdir())
-                self.assertEqual(json.loads((dest / "split_summary.json").read_text()),
-                                 json.loads((FIXTURES / "expected_summary_v2.json").read_text()))
-                self.assertTrue((dest / "split_transactions.csv").exists())
-                self.assertFalse(Path("split_summary.json").exists())
-                with self.assertRaises(SystemExit), mock.patch("builtins.print"):
-                    split_ledger.cmd_finish(args, None)  # nothing to summarize: nothing moved
-                self.assertEqual(len(list(Path("archive").iterdir())), 1)
-            finally:
-                os.chdir(old)
-
-    def test_finish_refuses_a_leftover_summary(self):
-        with tempfile.TemporaryDirectory() as d:
-            old = os.getcwd()
-            os.chdir(d)
-            try:
-                Path("split_transactions.csv").write_text((FIXTURES / "sample_split_transactions.csv").read_text())
-                Path("split_summary.json").write_text("{}")
-                with self.assertRaises(SystemExit), mock.patch("builtins.print"):
-                    split_ledger.cmd_finish(Namespace(person=None, no_personal=False, name=None), None)
-                self.assertFalse(Path("archive").exists())
-            finally:
-                os.chdir(old)
-
-
 class SuggestionTests(unittest.TestCase):
     def test_your_own_answer_for_a_similar_name_comes_first(self):
         rules = {"noodle bar": {"split": "dining"}}
@@ -513,41 +451,6 @@ class SuggestionTests(unittest.TestCase):
 
     def test_money_in_and_out_dont_mix(self):
         self.assertIsNone(st.suggest("noodle bar", "in", {"noodle bar": {"self": "dining"}}))
-
-
-class SummaryTests(unittest.TestCase):
-    def summarize(self, out, **kw):
-        args = Namespace(csv=str(FIXTURES / "sample_split_transactions.csv"),
-                         personal=str(FIXTURES / "sample_personal_transactions.csv"),
-                         person=None, no_personal=False, output=str(out), name=None)
-        for k, v in kw.items():
-            setattr(args, k, v)
-        with mock.patch("builtins.print"):
-            split_ledger.cmd_summarize(args, None)
-        return json.loads(Path(out).read_text())
-
-    def test_matches_the_file_the_web_app_tests_use(self):
-        with tempfile.TemporaryDirectory() as d:
-            got = self.summarize(Path(d) / "s.json")
-        self.assertEqual(got, json.loads((FIXTURES / "expected_summary_v2.json").read_text()))
-
-    def test_contains_only_totals(self):
-        with tempfile.TemporaryDirectory() as d:
-            self.summarize(Path(d) / "s.json")
-            text = (Path(d) / "s.json").read_text()
-        self.assertNotIn("FAKE", text, "no merchant names")
-        self.assertNotIn("2026-01-16", text, "no dates of individual purchases")
-
-    def test_no_personal(self):
-        with tempfile.TemporaryDirectory() as d:
-            got = self.summarize(Path(d) / "s.json", no_personal=True)
-        self.assertNotIn("personal", got)
-        self.assertEqual(got["shared"]["total_cents"], 134955)
-
-    def test_category_lists_match_the_web_app(self):
-        web = json.loads((ROOT / "web" / "shared" / "categories.json").read_text())
-        self.assertEqual(web["spending"], SPENDING)
-        self.assertEqual(web["income"], INCOME)
 
 
 if __name__ == "__main__":

@@ -376,7 +376,7 @@ def ask_key(prompt, valid):
 
 def ask_category(title="Category"):
     """One keypress per category. Returns None if Esc was pressed (go back)."""
-    items = [f"{paint(k, 'cyan')} {c:<14}" for k, c in zip(CATEGORY_KEYS, CATEGORIES)]
+    items = [f"{paint(k, 'cyan')} {c:<14}" for k, c in zip(CATEGORY_KEYS, CATEGORIES, strict=True)]
     print(f"  {title}:   {paint('Esc', 'dim')} back")
     for i in range(0, len(items), 4):  # rows of four fit an 80-column terminal
         print("    " + "".join(items[i:i + 4]).rstrip())
@@ -441,7 +441,7 @@ def suggest(vendor_key, direction, rules):
             continue
         theirs = name_tokens(key[3:] if key.startswith("in:") else key)
         shared = 0
-        for x, y in zip(mine, theirs):
+        for x, y in zip(mine, theirs, strict=False):  # names can differ in length
             if x != y:
                 break
             shared += 1
@@ -946,7 +946,7 @@ def main():
 
     if args.dump:
         for source, txns in txns_by_file:
-            print("\n" + paint("== {} ==".format(source), "bold"))
+            print("\n" + paint(f"== {source} ==", "bold"))
             for t in txns:
                 amount_txt = "{:>10}".format(t["amount"])
                 print("{}  {:<7}  {}  {}".format(

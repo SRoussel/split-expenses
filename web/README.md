@@ -31,6 +31,11 @@ To test the whole backend (sign-up and sign-in, the security guards, throttling,
 
 It builds the app, starts the Worker against a brand-new throwaway database, runs about 15 checks over HTTP, then deletes everything. Your local and deployed data aren't touched. Run it after any change to `worker/`, `shared/` or `migrations/`, before you deploy.
 
+To check for common mistakes (unused code, misused React hooks and so on):
+
+    npm run lint
+
+
 ## 2. Deploy to Cloudflare
 
 You need a free Cloudflare account and Node 20 or newer. Run everything from the `web/` folder. Deploy from your computer with the commands below; don't connect the git repo in the Cloudflare dashboard (see "Things to avoid").
@@ -185,7 +190,14 @@ Also bump the `?v=` numbers on the other icon links, deploy, and remove and re-a
     public/_headers       security headers for the pages
     scripts/              reset-password helper
     tests/api.test.mjs    end-to-end backend tests (npm run test:api)
-    worker/index.ts       the backend: sign-in, sessions and the JSON API
+    worker/index.ts       the backend's front door: routes each /api/* request
+    worker/http.ts        shared plumbing: JSON in and out, input checks, errors
+    worker/auth.ts        accounts, passwords, sessions, sign-in throttling
+    worker/household.ts   create and join, load everything, default split, reset
+    worker/entries.ts     add, edit, void and restore entries
+    worker/recurring.ts   recurring expenses
+    worker/spending.ts    statement imports and spending totals
+    eslint.config.js      lint rules (npm run lint)
     src/ledger.ts         money parsing, balance math, CSV import and export
     src/ledger.test.ts    tests for the above
     src/spending.ts       spending and cash-flow math for the Spending tab (+ spending.test.ts)

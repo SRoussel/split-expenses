@@ -15,3 +15,21 @@ split-ledger = "split_expenses.split_ledger:main"
 [build-system]
 requires = ["uv_build>=0.13.7,<0.14.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.4",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# Errors, likely bugs, import order and modern syntax. Style beyond that is left to `ruff format`.
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]  # long lines: the formatter wraps code; long strings are fine
+
+[tool.ruff.lint.per-file-ignores]
+# The review loop defines small helpers (show, choice_for) that are only called within
+# the same pass of the loop, so reading the loop's variables is intended.
+"src/split_expenses/split_statements.py" = ["B023"]

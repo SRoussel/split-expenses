@@ -45,8 +45,11 @@ export default function Trends({
   catName: (c: string) => string;
 }) {
   const [open, setOpen] = useState<string | null>(null);
-  const months = rangeMonths(end, range);
-  const report = useMemo(() => rangeReport(index, batches, view, months, me, partner), [index, batches, view, months.join(), me, partner]);
+  const months = useMemo(() => rangeMonths(end, range), [end, range]);
+  const report = useMemo(
+    () => rangeReport(index, batches, view, months, me, partner),
+    [index, batches, view, months, me, partner],
+  );
   const cashflow = report.income !== null;
   const anyPartial = report.partial.some(Boolean);
   const period =

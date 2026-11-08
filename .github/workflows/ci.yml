@@ -28,6 +28,8 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      - name: Lint
+        run: npm run lint
       - name: Ledger math
         run: npm test
       - name: Backend API (builds and type-checks first)
@@ -40,6 +42,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+      - name: Lint
+        run: uv run ruff check
       - name: Commands start
         run: |
           uv run split-ledger --help > /dev/null

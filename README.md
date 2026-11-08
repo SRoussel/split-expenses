@@ -71,6 +71,11 @@ CI only runs the tests. It never deploys and doesn't use any secrets; deploying 
     cd web && npm test                                 # the app's ledger and spending math
     cd web && npm run test:api                         # the backend, against a throwaway database
 
+And the linters, which CI also runs:
+
+    uv run ruff check
+    cd web && npm run lint
+
 ## Layout
 
     src/split_expenses/   the Python scripts (and their README)
