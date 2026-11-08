@@ -46,7 +46,10 @@ except ImportError:  # run as a plain script
     from people import person_dir
 
 CATEGORIES = SPENDING
-CSV_FIELDS = ["date", "amount", "vendor", "category"]
+# "id" is the transaction's id (see txn_key), so answering a transaction again
+# replaces its row instead of adding a second one. Files from older versions
+# without it still work; their rows just have no id.
+CSV_FIELDS = ["date", "amount", "vendor", "category", "id"]
 
 # ---------------------------------------------------------------------------
 # Terminal colors (auto-disabled when piped, if NO_COLOR is set, or --no-color)
@@ -287,54 +290,240 @@ def txn_key(source, txn):
 
 
 def load_state(path):
-    if path.exists():
-        try:
-            return json.loads(path.read_text())
-        except json.JSONDecodeError:
-            pass
-    return {"done": [], "vendor_rules": {}}
+    if not path.exists():
+        return {"done": [], "vendor_rules": {}}
+    try:
+        state = json.loads(path.read_text())
+        if not isinstance(state.get("done"), list) or not isinstance(state.get("vendor_rules"), dict):
+            raise ValueError("missing 'done' or 'vendor_rules'")
+        return state
+    except (json.JSONDecodeError, ValueError) as e:
+        # Never quietly start over: that would review everything again and duplicate rows.
+        sys.exit(f"{path} can't be read ({e}). Restore it from a backup (e.g. in archive/), "
+                 f"or move it away to start with nothing reviewed and nothing remembered.")
+
+
+def write_atomic(path, text):
+    """Write a whole file in one step (temp file, then rename), so a crash can't leave half a file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, newline="") if sys.version_info >= (3, 10) else tmp.write_text(text)
+    os.replace(tmp, path)
 
 
 def save_state(path, state):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2))
+    write_atomic(path, json.dumps(state, indent=2))
 
 
 # ---------------------------------------------------------------------------
-# CLI interaction
+# Keys
 # ---------------------------------------------------------------------------
 
-def ask_choice(prompt, valid):
+# One key per category, in the order of CATEGORIES.
+CATEGORY_KEYS = "123456789abc"
+assert len(CATEGORY_KEYS) >= len(CATEGORIES)
+ENTER, ESC = "", "\x1b"
+
+
+def getkey(prompt):
+    """Wait for one keypress; no Enter needed. Returns "" for Enter, "\x1b" for Esc.
+
+    When input isn't a terminal (piped, or the tests), it reads a line instead
+    and uses its first character.
+    """
+    print(prompt, end="", flush=True)
+    if not sys.stdin.isatty():
+        ch = input()[:1]
+    elif os.name == "nt":
+        import msvcrt
+        ch = msvcrt.getwch()
+        if ch in ("\x00", "\xe0"):  # arrow and function keys come as two codes
+            msvcrt.getwch()
+            ch = "?"
+    else:
+        import select
+        import termios
+        import tty
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            ch = os.read(fd, 1).decode(errors="ignore")
+            if ch == ESC:  # Esc alone, or the start of an arrow key: drain the rest
+                while select.select([fd], [], [], 0.03)[0]:
+                    os.read(fd, 8)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    if ch == "\x03":
+        raise KeyboardInterrupt
+    if ch == "\x04":
+        raise EOFError
+    if ch in ("\r", "\n"):
+        ch = ENTER
+    if sys.stdin.isatty():
+        print("Enter" if ch == ENTER else "Esc" if ch == ESC else ch)
+    return ch
+
+
+def ask_key(prompt, valid):
+    """getkey() until one of `valid` is pressed (letters match either case)."""
     while True:
-        ans = input(prompt).strip().lower()
-        if ans in valid:
-            return ans
-        print(paint(f"  Please enter one of: {', '.join(sorted(valid))}", "red"))
+        ch = getkey(prompt)
+        if ch in valid or ch.lower() in valid:
+            return ch
+        print(paint("  That key doesn't do anything here.", "red"))
 
 
 def ask_category(title="Category"):
-    print(paint(f"  {title}:", "bold"))
-    for i, cat in enumerate(CATEGORIES, 1):
-        print(f"    {paint(i, 'cyan')}. {cat}")
-    while True:
-        ans = input("  Choose category (number or name): ").strip().lower()
-        if ans.isdigit() and 1 <= int(ans) <= len(CATEGORIES):
-            return CATEGORIES[int(ans) - 1]
-        if ans in CATEGORIES:
-            return ans
-        print(paint("  Invalid choice.", "red"))
+    """One keypress per category. Returns None if Esc was pressed (go back)."""
+    items = [f"{paint(k, 'cyan')} {c:<14}" for k, c in zip(CATEGORY_KEYS, CATEGORIES)]
+    print(f"  {title}:   {paint('Esc', 'dim')} back")
+    for i in range(0, len(items), 4):  # rows of four fit an 80-column terminal
+        print("    " + "".join(items[i:i + 4]).rstrip())
+    ch = ask_key("  > ", set(CATEGORY_KEYS[: len(CATEGORIES)]) | {ESC})
+    return None if ch == ESC else CATEGORIES[CATEGORY_KEYS.index(ch.lower())]
 
 
-def append_row(csv_path, txn, category, negative=False):
-    """Add one transaction to a CSV. Returns are written as negative amounts."""
-    new_file = not csv_path.exists()
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(csv_path, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=CSV_FIELDS)
-        if new_file:
-            w.writeheader()
-        amount = f"-{txn['amount']}" if negative else txn["amount"]
-        w.writerow({"date": txn["date"], "amount": amount, "vendor": txn["vendor"], "category": category})
+# ---------------------------------------------------------------------------
+# Suggestions (all local: your own past answers, then a built-in keyword list)
+# ---------------------------------------------------------------------------
+
+# (direction, pattern, suggestion), checked in order. Only ever a suggestion: you press Enter to accept.
+KEYWORDS = [
+    ("out", r"autopay|card payment|payment to|transfer|zelle|venmo|cash app", "exclude"),
+    ("out", r"uber ?eats|doordash|grubhub|starbucks|coffee|caf[eé]|restaurant|pizza|burger|taco|sushi|"
+            r"grill|bakery|chipotle|mcdonald|noodle|kitchen|diner|bistro", "dining"),
+    ("out", r"safeway|trader joe|whole foods|kroger|costco|aldi|wegmans|publix|sprouts|h-e-b|"
+            r"grocer|supermarket|food market", "groceries"),
+    ("out", r"netflix|spotify|hulu|disney|youtube|prime video|icloud|apple\.com/bill|patreon|nytimes|"
+            r"subscription|membership", "subscriptions"),
+    ("out", r"\buber\b|\blyft\b|shell|chevron|exxon|mobil|\bbp\b|\barco\b|sunoco|valero|parking|"
+            r"transit|metro|toll|gas station|fuel", "transport"),
+    ("out", r"\bcvs\b|walgreens|rite aid|pharmacy|dental|dentist|clinic|medical|hospital|optometr|"
+            r"doctor|health", "health"),
+    ("out", r"comcast|xfinity|verizon|at&t|t-mobile|spectrum|electric|edison|pg&e|con ed|"
+            r"water|utility|utilities|internet", "utilities"),
+    ("out", r"airline|airways|delta|united air|southwest|jetblue|hotel|marriott|hilton|hyatt|"
+            r"airbnb|expedia|booking\.com", "travel"),
+    ("out", r"cinema|theat(er|re)|\bamc\b|ticketmaster|steam|playstation|xbox|nintendo|bowling|"
+            r"museum|concert", "entertainment"),
+    ("out", r"home depot|lowe'?s|ikea|hardware|wayfair|bed bath", "household"),
+    ("out", r"\bfee\b|late fee|overdraft|interest charge|finance charge|annual fee|interest", "fees"),
+    ("in", r"payroll|direct dep|salary|paycheck|interest", "income"),
+    ("in", r"autopay|payment|transfer|zelle|venmo|cash app", "exclude"),
+]
+
+# Words that say nothing about the merchant, ignored when comparing names.
+NAME_NOISE = {"the", "sq", "tst", "pos", "debit", "purchase", "card", "pp", "paypal", "www",
+              "inc", "llc", "co", "com", "store", "online", "recurring", "payment"}
+
+
+def name_tokens(vendor_key):
+    return [t for t in re.split(r"[\s*#./]+", vendor_key) if t and t not in NAME_NOISE]
+
+
+def describe_choice(choice):
+    if choice in ("exclude", "income"):
+        return choice
+    if "self" in choice:
+        return f"self / {choice['self']}"
+    if "split" in choice:
+        return f"split / {choice['split']}"
+    return f"return / {choice['return']}" + (" (shared)" if choice.get("shared") else "")
+
+
+def suggest(vendor_key, direction, rules):
+    """(choice, reason) or None. Your own answers for a similar name come first."""
+    mine = name_tokens(vendor_key)
+    best, best_shared = None, 0
+    for key, value in rules.items():
+        if key.startswith("dir:") or (key.startswith("in:") != (direction == "in")) or value == "self":
+            continue
+        theirs = name_tokens(key[3:] if key.startswith("in:") else key)
+        shared = 0
+        for x, y in zip(mine, theirs):
+            if x != y:
+                break
+            shared += 1
+        # Two words in common, or one distinctive word ("starbucks", not "the").
+        if (shared >= 2 or (shared == 1 and len(mine[0]) >= 5)) and shared > best_shared:
+            best, best_shared = (value, f"like {key[3:] if key.startswith('in:') else key}"), shared
+    if best:
+        return best
+
+    for d, pattern, suggestion in KEYWORDS:
+        if d == direction and re.search(pattern, vendor_key, re.I):
+            if suggestion in ("exclude", "income"):
+                return suggestion, "looks like " + ("a transfer or payment" if suggestion == "exclude" else "income")
+            # A category: self or split, whichever you've used more for it before.
+            split_votes = sum(1 for v in rules.values() if isinstance(v, dict) and v.get("split") == suggestion)
+            self_votes = sum(1 for v in rules.values() if isinstance(v, dict) and v.get("self") == suggestion)
+            kind = "split" if split_votes > self_votes else "self"
+            return {kind: suggestion}, f"looks like {suggestion}"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Writing answers (and taking them back)
+# ---------------------------------------------------------------------------
+
+def read_rows(csv_path):
+    """Rows of an output CSV as dicts (older files without an id column get id "")."""
+    if not csv_path.exists():
+        return []
+    with open(csv_path, newline="") as f:
+        return [{**{k: "" for k in CSV_FIELDS}, **r} for r in csv.DictReader(f)]
+
+
+def write_rows(csv_path, rows):
+    import io
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=CSV_FIELDS, extrasaction="ignore")
+    w.writeheader()
+    w.writerows(rows)
+    write_atomic(csv_path, buf.getvalue())
+
+
+def record(paths, txn_id, target, txn=None, category=None, negative=False):
+    """Make the output files say what was just answered for this transaction.
+
+    Any earlier row for the same transaction id is removed from both files first,
+    so answering again (after --reset, or with a different answer) replaces it.
+    With no target (exclude), the transaction ends up in neither file.
+    """
+    for path in {paths["split"], paths["personal"]}:
+        rows = read_rows(path)
+        kept = [r for r in rows if r["id"] != txn_id]
+        if path == target:
+            amount = f"-{txn['amount']}" if negative else txn["amount"]
+            kept.append({"date": txn["date"], "amount": amount, "vendor": txn["vendor"],
+                         "category": category, "id": txn_id})
+        if len(kept) != len(rows) or path == target:
+            write_rows(path, kept)
+
+
+def recorded_index(paths):
+    """What's already in the output files: ids, and (date, amount, vendor) for the duplicate check."""
+    ids, looks = set(), set()
+    for path in (paths["split"], paths["personal"]):
+        for r in read_rows(path):
+            if r["id"]:
+                ids.add(r["id"])
+            looks.add((r["date"], r["amount"].lstrip("-"), r["vendor"]))
+    return ids, looks
+
+
+def snapshot(paths):
+    """The output files' contents, so undo can put them back exactly."""
+    return {p: (p.read_text() if p.exists() else None) for p in {paths["split"], paths["personal"]}}
+
+
+def restore(snap):
+    for path, text in snap.items():
+        if text is None:
+            path.unlink(missing_ok=True)
+        else:
+            write_atomic(path, text)
 
 
 # Rule values, remembered per vendor (state["vendor_rules"]):
@@ -342,29 +531,59 @@ def append_row(csv_path, txn, category, negative=False):
 #   money in,  key "in:<vendor>":   "income" | {"return": cat, "shared": bool} | "exclude"
 #   unclear,   key "dir:<vendor>":  "out" | "in" | "exclude"
 
-def apply_choice(choice, txn, paths, counts):
-    """Write a transaction where its choice says. Returns a short description."""
+def apply_choice(choice, txn, txn_id, paths, counts):
+    """Write one transaction where its choice says (replacing any earlier answer). Returns the counter name."""
     if choice == "exclude":
+        record(paths, txn_id, None)
         counts["excluded"] += 1
         return "excluded"
     if choice == "income":
-        append_row(paths["personal"], txn, INCOME)
+        record(paths, txn_id, paths["personal"], txn, INCOME)
         counts["income"] += 1
         return "income"
     if "self" in choice:
-        append_row(paths["personal"], txn, choice["self"])
+        record(paths, txn_id, paths["personal"], txn, choice["self"])
         counts["personal"] += 1
-        return f"self/{choice['self']}"
+        return "personal"
     if "split" in choice:
-        append_row(paths["split"], txn, choice["split"])
+        record(paths, txn_id, paths["split"], txn, choice["split"])
         counts["split"] += 1
-        return f"split/{choice['split']}"
+        return "split"
     if "return" in choice:
-        target = "split" if choice.get("shared") else "personal"
-        append_row(paths[target], txn, choice["return"], negative=True)
+        target = paths["split"] if choice.get("shared") else paths["personal"]
+        record(paths, txn_id, target, txn, choice["return"], negative=True)
         counts["returns"] += 1
-        return f"return/{choice['return']}" + (" (shared)" if choice.get("shared") else "")
+        return "returns"
     raise ValueError(f"Unknown choice {choice!r}")
+
+
+# ---------------------------------------------------------------------------
+# The review
+# ---------------------------------------------------------------------------
+
+def group_pending(pending):
+    """Group what's left to review by merchant and direction, in order of first appearance."""
+    groups, index = [], {}
+    for k, source, t in pending:
+        key = (vendor_match_key(t["vendor"]), t["direction"])
+        if key not in index:
+            index[key] = len(groups)
+            groups.append({"vendor_key": key[0], "direction": key[1], "items": [], "each": False})
+        groups[index[key]]["items"].append((k, source, t))
+    return groups
+
+
+def group_line(n, total_groups, g):
+    items = g["items"]
+    _, source, first = items[0]
+    arrow = {"out": paint("OUT", "red"), "in": paint(" IN", "green"), "unknown": paint("  ?", "yellow")}
+    total = sum(float(t["amount"]) for _, _, t in items)
+    dates = sorted(t["date"] for _, _, t in items)
+    count = paint(f" ×{len(items)}", "magenta") if len(items) > 1 else ""
+    when = dates[0] if dates[0] == dates[-1] else f"{dates[0]} – {dates[-1]}"
+    return "{} {}  {}{}  {}  {}".format(
+        paint(f"[{n}/{total_groups}]", "dim"), arrow[g["direction"]], paint(first["vendor"], "bold"), count,
+        paint(f"${total:,.2f}", "bold", "cyan"), paint(f"{when} · {source}", "dim"))
 
 
 def review(txns_by_file, paths, state_path):
@@ -378,111 +597,203 @@ def review(txns_by_file, paths, state_path):
             k = txn_key(source, t)
             if k not in done:
                 pending.append((k, source, t))
-
     if not pending:
         print(paint("No new transactions to review.", "green"))
         return
 
-    print(f"\n{paint(len(pending), 'bold')} transaction(s) to review.")
-    print(f"Money out:  {paint('[s]', 'green')} self   {paint('[p]', 'yellow')} split   "
-          f"{paint('[x]', 'magenta')} exclude")
-    print(f"Money in:   {paint('[i]', 'green')} income   {paint('[r]', 'yellow')} return   "
-          f"{paint('[x]', 'magenta')} exclude")
-    print(f"Always:     {paint('[k]', 'dim')} skip for now   {paint('[q]', 'dim')} quit")
-    print(paint("Exclude = not spending or income: card payments, transfers between your own "
-                "accounts, money between the two of you.\n", "dim"))
+    groups = group_pending(pending)
+    print(f"\n{paint(len(pending), 'bold')} transaction(s) from {paint(len(groups), 'bold')} merchant(s) to review. "
+          "One answer covers every transaction from a merchant, and is remembered for next time.")
+    print(paint("  Money out: s self  p split  x exclude      Money in: i income  r return  x exclude\n"
+                "  Enter accept suggestion   Shift+key this time only   e answer each separately\n"
+                "  k skip for now   u undo   q quit\n"
+                "  Exclude = not spending or income: card payments, transfers between your own accounts, "
+                "money between the two of you.\n", "dim"))
 
-    counts = {"split": 0, "personal": 0, "income": 0, "returns": 0, "excluded": 0}
+    counts = {"split": 0, "personal": 0, "income": 0, "returns": 0, "excluded": 0, "duplicates": 0}
+    history = []  # one entry per applied group, newest last, so 'u' can take answers back
 
-    def finish(k):
-        done.add(k)
+    def save():
         state["done"] = sorted(done)
         state["vendor_rules"] = rules
         save_state(state_path, state)
 
-    for n, (k, source, t) in enumerate(pending, 1):
-        vendor_key = vendor_match_key(t["vendor"])
-        progress = paint(f"[{n}/{len(pending)}]", "dim")
-        arrow = {"out": paint("OUT", "red"), "in": paint(" IN", "green"), "unknown": paint("  ?", "yellow")}
-        line = "{}  {}  {}  {}".format(
-            paint(t["date"], "dim"),
-            arrow[t["direction"]],
-            paint("${:>9}".format(t["amount"]), "bold", "cyan"),
-            paint(t["vendor"], "bold"),
-        )
+    def set_rule(key, value, changed):
+        if key not in changed:
+            changed[key] = rules.get(key)
+        rules[key] = value
 
-        asked = []  # becomes non-empty once the transaction has been shown for a question
+    def undo():
+        """Take back the last answer you gave, and anything applied automatically after it."""
+        if not any(a["asked"] for a in history):
+            print(paint("  Nothing to undo.", "yellow"))
+            return None
+        while history:
+            action = history.pop()
+            restore(action["files"])
+            for key, old in action["rules"].items():
+                if old is None:
+                    rules.pop(key, None)
+                else:
+                    rules[key] = old
+            for k in action["keys"]:
+                done.discard(k)
+            for name, n in action["counts"].items():
+                counts[name] -= n
+            save()
+            if action["asked"]:
+                print(paint(f"  Undid: {action['note']}. Asking again.\n", "yellow"))
+                return action["index"]
+        return None
+
+    gi = 0
+    while gi < len(groups):
+        g = groups[gi]
+        many = len(g["items"]) > 1 and not g["each"]
+        line = group_line(gi + 1, len(groups), g)
+        asked, once, changed = False, g["each"], {}
+        each_key = "  e each" if many else ""
 
         def show():
             if not asked:
-                print(f"{progress} {line}   {paint(f'({source})', 'dim')}")
-                asked.append(True)
+                print(line)
 
         # 1. Which way did the money go?
-        direction = t["direction"]
+        direction = g["direction"]
         if direction == "unknown":
-            remembered = rules.get("dir:" + vendor_key)
-            if remembered:
+            remembered = rules.get("dir:" + g["vendor_key"])
+            if remembered and not g["each"]:
                 direction = remembered
             else:
                 show()
+                asked = True
                 print(paint("  The statement doesn't say whether this was money out or in.", "yellow"))
-                ans = ask_choice("  Money [o]ut, money [n] in, [x] exclude, [k] skip, [q] quit: ",
-                                 {"o", "n", "x", "k", "q"})
-                if ans == "q":
+                ch = ask_key(f"  o out  n in  x exclude{each_key}  k skip  u undo  q quit > ",
+                             {"o", "n", "x", "k", "u", "q"} | ({"e"} if many else set()))
+                low = ch.lower()
+                if low == "q":
                     break
-                if ans == "k":
-                    print()
+                if low == "k":
+                    gi += 1
                     continue
-                direction = {"o": "out", "n": "in", "x": "exclude"}[ans]
+                if low == "u":
+                    back = undo()
+                    gi = gi if back is None else back
+                    continue
+                if low == "e":
+                    groups[gi:gi + 1] = [dict(g, items=[item], each=True) for item in g["items"]]
+                    continue
+                once = once or ch != low
+                direction = {"o": "out", "n": "in", "x": "exclude"}[low]
+                if not once:
+                    set_rule("dir:" + g["vendor_key"], direction, changed)
 
-        # 2. What was it? Use a remembered choice when there is one.
-        rule_key = vendor_key if direction == "out" else "in:" + vendor_key
-        choice = "exclude" if direction == "exclude" else rules.get(rule_key)
+        # 2. What was it? A remembered answer applies straight away.
+        rule_key = g["vendor_key"] if direction == "out" else "in:" + g["vendor_key"]
+        choice = "exclude" if direction == "exclude" else (None if g["each"] else rules.get(rule_key))
         if choice == "self":  # remembered by an older version: only "self", no category yet
             show()
-            choice = {"self": ask_category("Remembered as self. Which category")}
-            rules[rule_key] = choice
+            asked = True
+            cat = None
+            while cat is None:
+                cat = ask_category("Remembered as self. Which category")
+            choice = {"self": cat}
+            set_rule(rule_key, choice, changed)
 
-        if choice is None:
+        result = None
+        while choice is None:
             show()
+            asked = True
+            hint = suggest(g["vendor_key"], direction, rules)
+            if hint:
+                print(f"  Suggested: {paint(describe_choice(hint[0]), 'bold', 'green')}  "
+                      f"{paint('(' + hint[1] + ')', 'dim')}   Enter to accept")
             if direction == "out":
-                ans = ask_choice("  [s]elf, s[p]lit, e[x]clude, [k] skip, [q] quit: ", {"s", "p", "x", "k", "q"})
+                keys, menu = {"s", "p", "x"}, "s self  p split  x exclude"
             else:
-                ans = ask_choice("  [i]ncome, [r]eturn, e[x]clude, [k] skip, [q] quit: ", {"i", "r", "x", "k", "q"})
-            if ans == "q":
+                keys, menu = {"i", "r", "x"}, "i income  r return  x exclude"
+            valid = keys | {"k", "u", "q"} | ({"e"} if many else set()) | ({ENTER} if hint else set())
+            ch = ask_key(f"  {menu}{each_key}  k skip  u undo  q quit > ", valid)
+            low = ch.lower()
+            if low in ("q", "k", "u", "e"):
+                result = low
                 break
-            if ans == "k":
-                print()
-                continue
-            if ans == "x":
+            once = once or (ch != low)
+            if ch == ENTER:
+                choice = hint[0]
+            elif low == "x":
                 choice = "exclude"
-            elif ans == "i":
+            elif low == "i":
                 choice = "income"
-            elif ans == "s":
-                choice = {"self": ask_category()}
-            elif ans == "p":
-                choice = {"split": ask_category()}
+            elif low in ("s", "p"):
+                cat = ask_category()
+                if cat is not None:  # Esc goes back to the question
+                    choice = {"self" if low == "s" else "split": cat}
             else:  # return
                 cat = ask_category("Which category was the original purchase")
-                shared = ask_choice("  Was the original purchase split with your partner? [y/n]: ", {"y", "n"}) == "y"
-                choice = {"return": cat, "shared": shared}
+                if cat is not None:
+                    shared = ask_key("  Was the original purchase split with your partner? y/n > ", {"y", "n"})
+                    choice = {"return": cat, "shared": shared.lower() == "y"}
 
-        note = apply_choice(choice, t, paths, counts)
-        if not asked:  # fully remembered: no questions were needed
-            print(f"{progress} {line}  {paint('-> ' + note + ' (remembered)', 'green')}")
+        if result == "q":
+            break
+        if result == "k":
+            gi += 1
+            continue
+        if result == "u":
+            back = undo()
+            gi = gi if back is None else back
+            continue
+        if result == "e":
+            groups[gi:gi + 1] = [dict(g, items=[item], each=True) for item in g["items"]]
+            continue
+
+        # 3. Anything that looks already recorded under another id (same date, amount
+        #    and merchant)? That happens when ids change: a renamed PDF, a parser fix.
+        #    Never add those silently.
+        skip_dups = set()
+        if choice != "exclude":
+            ids, looks = recorded_index(paths)
+            dups = [k for k, _, t in g["items"]
+                    if k not in ids and (t["date"], t["amount"], t["vendor"]) in looks]
+            if dups:
+                show()
+                asked = True
+                print(paint(f"  {len(dups)} of these look already recorded (same date, amount and merchant).",
+                            "yellow"))
+                ans = ask_key("  s skip those (recommended)  a add anyway > ", {"s", "a"})
+                if ans.lower() == "s":
+                    skip_dups = set(dups)
+
+        # 4. Apply it to every transaction in the group, and remember it unless told not to.
+        action = {"index": gi, "asked": asked, "files": snapshot(paths), "keys": [], "counts": {},
+                  "rules": changed, "note": f"{g['items'][0][2]['vendor']} → {describe_choice(choice)}"}
+        for k, _, t in g["items"]:
+            if k in skip_dups:
+                name = "duplicates"
+                counts[name] += 1
+            else:
+                name = apply_choice(choice, t, k, paths, counts)
+            action["counts"][name] = action["counts"].get(name, 0) + 1
+            action["keys"].append(k)
+            done.add(k)
+        if asked and not once and direction != "exclude":
+            set_rule(rule_key, choice, changed)
+        history.append(action)
+        save()
+
+        times = f" ×{len(g['items'])}" if len(g["items"]) > 1 else ""
+        if not asked:
+            print(f"{line}  {paint('→ ' + describe_choice(choice) + ' (remembered)', 'green')}")
         else:
-            if ask_choice("  Remember this for this vendor? [y/n]: ", {"y", "n"}) == "y":
-                if t["direction"] == "unknown":
-                    rules["dir:" + vendor_key] = direction
-                if direction != "exclude":
-                    rules[rule_key] = choice
-            print()
-        finish(k)
+            tail = " (this time only)" if once else ""
+            print(paint(f"  → {describe_choice(choice)}{times}{tail}\n", "green"))
+        gi += 1
 
     print("\n" + paint("Done for now:", "green", "bold"),
           f"{counts['split']} split, {counts['personal']} personal, {counts['income']} income, "
-          f"{counts['returns']} return(s), {counts['excluded']} excluded.")
+          f"{counts['returns']} return(s), {counts['excluded']} excluded"
+          + (f", {counts['duplicates']} skipped as already recorded." if counts["duplicates"] else "."))
     print(paint(f"Shared: {paths['split']}   Personal: {paths['personal']}", "dim"))
 
 
@@ -502,7 +813,8 @@ def main():
     ap.add_argument("--state", type=Path, help="State file tracking reviewed transactions")
     ap.add_argument("--dump", action="store_true",
                     help="Only print parsed transactions; don't prompt (useful to check parsing)")
-    ap.add_argument("--reset", action="store_true", help="Forget previously reviewed transactions")
+    ap.add_argument("--reset", action="store_true",
+                    help="Review everything again (keeps remembered merchants; answers replace their old rows)")
     ap.add_argument("--clear-rules", action="store_true",
                     help="Forget remembered vendor choices (keeps reviewed-transaction history)")
     ap.add_argument("--no-color", action="store_true", help="Disable colored output")
@@ -529,7 +841,10 @@ def main():
         sys.exit(f"Not a directory: {args.directory}")
 
     if args.reset and state_path.exists():
-        state_path.unlink()
+        st = load_state(state_path)
+        st["done"] = []
+        save_state(state_path, st)
+        print(paint("Forgot which transactions were reviewed (remembered merchants kept).", "green"))
 
     pdfs = sorted(args.directory.glob("*.pdf")) + sorted(args.directory.glob("*.PDF"))
     if not pdfs:

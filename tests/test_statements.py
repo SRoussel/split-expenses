@@ -9,6 +9,7 @@ review is driven with scripted answers.
 import csv
 import hashlib
 import json
+import os
 import tempfile
 import unittest
 from argparse import Namespace
@@ -103,8 +104,23 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(len(keys), len(set(keys)), "every line has its own id")
 
 
+REPEATS = """FAKE CARD  February 2026
+Purchases
+02/01 STARBUCKS #1234 4.50
+02/03 FAKE NOODLE BAR 18.40
+02/05 STARBUCKS #5678 5.25
+02/09 FAKE GROCER 123 52.10
+02/12 STARBUCKS #1234 4.50
+"""
+
+
+def key(category):
+    """The single key for a category."""
+    return st.CATEGORY_KEYS[SPENDING.index(category)]
+
+
 class ReviewTests(unittest.TestCase):
-    """Drive the interactive review with scripted answers."""
+    """Drive the review with scripted keypresses (one per line when input isn't a terminal)."""
 
     def run_review(self, txns, answers, state=None):
         tmp = Path(self.tmp.name)
@@ -112,15 +128,24 @@ class ReviewTests(unittest.TestCase):
         state_path = tmp / "state.json"
         if state is not None:
             state_path.write_text(json.dumps(state))
-        with mock.patch("builtins.input", side_effect=answers), mock.patch("builtins.print"):
+        script = iter(answers)
+
+        def fake_input(*_):
+            try:
+                return next(script)
+            except StopIteration:
+                raise AssertionError("the review asked more questions than the test expected")
+
+        with mock.patch("builtins.input", side_effect=fake_input), mock.patch("builtins.print"):
             st.review([("statement.pdf", txns)], paths, state_path)
-        def read(p):
+        self.assertIsNone(next(script, None), "the review asked fewer questions than the test expected")
+
+        def read(p):  # rows without the id column; raw_rows() has them
             if not p.exists():
                 return []
             with open(p, newline="") as f:
-                return list(csv.DictReader(f))
+                return [{k: v for k, v in r.items() if k != "id"} for r in csv.DictReader(f)]
 
-        # Skipping everything writes no state at all, which is fine.
         saved = json.loads(state_path.read_text()) if state_path.exists() else {"done": [], "vendor_rules": {}}
         return read(paths["split"]), read(paths["personal"]), saved
 
@@ -134,17 +159,15 @@ class ReviewTests(unittest.TestCase):
         txns = by_vendor(st.parse_text(BANK, "b.pdf")) | by_vendor(st.parse_text(CARD, "c.pdf"))
         order = ["FAKE EMPLOYER PAYROLL", "ZELLE FROM SAM", "FAKE NOODLE BAR", "FAKE CARD AUTOPAY",
                  "FAKE GROCER 123", "FAKE GADGET STORE"]
-        dining = str(SPENDING.index("dining") + 1)
-        groceries = str(SPENDING.index("groceries") + 1)
         answers = [
-            "i", "n",                  # payroll: income
-            "x", "n",                  # money from Sam: exclude
-            "s", dining, "n",          # noodle bar: self / dining
-            "x", "n",                  # card payment: exclude
-            "p", groceries, "n",       # grocer: split / groceries
-            "r", "entertainment", "n", "n",  # gadget store: return, personal
+            "i",                               # payroll: income
+            "x",                               # money from Sam: exclude
+            "s", key("dining"),                # noodle bar: self / dining
+            "x",                               # card payment: exclude
+            "p", key("groceries"),             # grocer: split / groceries
+            "r", key("entertainment"), "n",    # gadget store: a return, not shared
         ]
-        split, personal, _ = self.run_review([txns[v] for v in order], answers)
+        split, personal, state = self.run_review([txns[v] for v in order], answers)
         self.assertEqual(split, [{"date": "2026-01-31", "amount": "52.10", "vendor": "FAKE GROCER 123",
                                   "category": "groceries"}])
         self.assertEqual([(r["vendor"], r["amount"], r["category"]) for r in personal], [
@@ -152,21 +175,93 @@ class ReviewTests(unittest.TestCase):
             ("FAKE NOODLE BAR", "18.40", "dining"),
             ("FAKE GADGET STORE", "-20.00", "entertainment"),  # a return reduces its category
         ])
+        rules = state["vendor_rules"]
+        self.assertEqual(rules["fake noodle bar"], {"self": "dining"}, "remembered without being asked")
+        self.assertEqual(rules["in:zelle from sam"], "exclude")
+        self.assertEqual(len(state["done"]), 6)
+
+    def test_one_answer_per_merchant(self):
+        txns = st.parse_text(REPEATS, "c.pdf")
+        # Three Starbucks visits, one noodle bar, one grocer: three questions, not five.
+        split, personal, state = self.run_review(
+            txns, ["s", key("dining"), "s", key("dining"), "p", key("groceries")])
+        self.assertEqual([r["vendor"] for r in personal],
+                         ["STARBUCKS #1234", "STARBUCKS #5678", "STARBUCKS #1234", "FAKE NOODLE BAR"])
+        self.assertEqual(len(split), 1)
+        self.assertEqual(len(state["done"]), 5)
+
+    def test_enter_accepts_the_suggestion(self):
+        t = by_vendor(st.parse_text(BANK, "b.pdf"))["FAKE NOODLE BAR"]  # "noodle" suggests dining
+        _, personal, state = self.run_review([t], [""])
+        self.assertEqual(personal[0]["category"], "dining")
+        self.assertEqual(state["vendor_rules"]["fake noodle bar"], {"self": "dining"})
+
+    def test_shift_means_this_time_only(self):
+        t = by_vendor(st.parse_text(BANK, "b.pdf"))["FAKE NOODLE BAR"]
+        _, personal, state = self.run_review([t], ["S", key("dining")])
+        self.assertEqual(personal[0]["category"], "dining")
+        self.assertNotIn("fake noodle bar", state["vendor_rules"])
+
+    def test_each_separately(self):
+        starbucks = [t for t in st.parse_text(REPEATS, "c.pdf") if t["vendor"].startswith("STARBUCKS")]
+        split, personal, state = self.run_review(
+            starbucks, ["e", "s", key("dining"), "p", key("dining"), "x"])
+        self.assertEqual(len(personal), 1)
+        self.assertEqual(len(split), 1)
+        self.assertEqual(len(state["done"]), 3)
+        self.assertNotIn("starbucks", state["vendor_rules"], "answers given one by one aren't remembered")
+
+    def test_esc_goes_back_from_the_category(self):
+        t = by_vendor(st.parse_text(BANK, "b.pdf"))["FAKE GROCER 123"]
+        split, personal, _ = self.run_review([t], ["s", st.ESC, "p", key("groceries")])
+        self.assertEqual((len(split), len(personal)), (1, 0))
+
+    def test_undo_takes_back_the_last_answer(self):
+        txns = by_vendor(st.parse_text(BANK, "b.pdf"))
+        split, personal, state = self.run_review(
+            [txns["FAKE NOODLE BAR"], txns["FAKE GROCER 123"]],
+            ["s", key("dining"),           # noodle bar: self / dining ...
+             "u",                          # ... at the grocer: undo that
+             "p", key("dining"),           # noodle bar again: split / dining
+             "p", key("groceries")])       # grocer
+        self.assertEqual(personal, [], "the undone answer's line is gone")
+        self.assertEqual([r["vendor"] for r in split], ["FAKE NOODLE BAR", "FAKE GROCER 123"])
+        self.assertEqual(state["vendor_rules"]["fake noodle bar"], {"split": "dining"})
+        self.assertEqual(len(state["done"]), 2)
+
+    def test_undo_reaches_past_remembered_answers(self):
+        txns = by_vendor(st.parse_text(BANK, "b.pdf"))
+        state = {"done": [], "vendor_rules": {"fake card autopay": "exclude"}}
+        _, personal, state = self.run_review(
+            [txns["FAKE NOODLE BAR"], txns["FAKE CARD AUTOPAY"], txns["FAKE GROCER 123"]],
+            ["s", key("dining"),     # noodle bar (autopay then applies by itself)
+             "u",                    # at the grocer: undo goes back past the autopay to the noodle bar
+             "s", key("health"),     # noodle bar, answered again
+             "s", key("groceries")],
+            state=state)
+        self.assertEqual([r["category"] for r in personal], ["health", "groceries"])
+        self.assertEqual(len(state["done"]), 3)
+        self.assertEqual(state["vendor_rules"]["fake card autopay"], "exclude")
+
+    def test_nothing_to_undo(self):
+        t = by_vendor(st.parse_text(BANK, "b.pdf"))["FAKE GROCER 123"]
+        split, _, _ = self.run_review([t], ["u", "p", key("groceries")])
+        self.assertEqual(len(split), 1)
 
     def test_shared_return_reduces_the_shared_side(self):
         t = by_vendor(st.parse_text(CARD, "c.pdf"))["FAKE GADGET STORE"]
-        split, personal, _ = self.run_review([t], ["r", "household", "y", "n"])
+        split, personal, _ = self.run_review([t], ["r", key("household"), "y"])
         self.assertEqual([(r["amount"], r["category"]) for r in split], [("-20.00", "household")])
         self.assertEqual(personal, [])
 
     def test_unclear_direction_is_asked_and_remembered(self):
         t = by_vendor(st.parse_text(NO_SECTIONS, "x-2026.pdf"))["FAKE MYSTERY CO"]
-        _, personal, state = self.run_review([t], ["o", "s", "health", "y"])
+        _, personal, state = self.run_review([t], ["o", "s", key("health")])
         self.assertEqual([(r["amount"], r["category"]) for r in personal], [("30.00", "health")])
         self.assertEqual(state["vendor_rules"]["dir:fake mystery co"], "out")
         self.assertEqual(state["vendor_rules"]["fake mystery co"], {"self": "health"})
         # Next statement: same vendor, no questions at all.
-        again = dict(t, _key_index=("new", 99))
+        again = dict(t, _key_index=("new", 99), date="2026-02-03")  # same merchant, a later statement
         _, personal, _ = self.run_review([again], [], state=state)
         self.assertEqual(len(personal), 2)
 
@@ -185,7 +280,7 @@ class ReviewTests(unittest.TestCase):
     def test_old_self_rule_asks_for_a_category_once(self):
         t = by_vendor(st.parse_text(BANK, "b.pdf"))["FAKE NOODLE BAR"]
         state = {"done": [], "vendor_rules": {"fake noodle bar": "self"}}
-        _, personal, state = self.run_review([t], ["dining", "y"], state=state)
+        _, personal, state = self.run_review([t], [key("dining")], state=state)
         self.assertEqual(personal[0]["category"], "dining")
         self.assertEqual(state["vendor_rules"]["fake noodle bar"], {"self": "dining"})
 
@@ -194,6 +289,160 @@ class ReviewTests(unittest.TestCase):
         _, personal, state = self.run_review([t], ["k"])
         self.assertEqual(personal, [])
         self.assertEqual(state["done"], [])
+
+
+class RerunSafetyTests(unittest.TestCase):
+    """Running again, answering again, or ids changing must never duplicate rows."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        d = Path(self.tmp.name)
+        self.paths = {"split": d / "split.csv", "personal": d / "personal.csv"}
+        self.state_path = d / "state.json"
+        self.txns = by_vendor(st.parse_text(BANK, "b.pdf"))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def review(self, source, txns, answers):
+        script = iter(answers)
+        with mock.patch("builtins.input", side_effect=lambda *_: next(script)), mock.patch("builtins.print"):
+            st.review([(source, txns)], self.paths, self.state_path)
+        self.assertIsNone(next(script, None), "fewer questions than expected")
+
+    def rows(self, which):
+        return st.read_rows(self.paths[which])
+
+    def state(self):
+        return json.loads(self.state_path.read_text())
+
+    def forget_reviewed(self):  # what --reset does
+        s = self.state()
+        s["done"] = []
+        st.save_state(self.state_path, s)
+
+    def test_reviewing_again_replaces_instead_of_duplicating(self):
+        noodle = self.txns["FAKE NOODLE BAR"]
+        self.review("b.pdf", [noodle], ["s", key("dining")])
+        self.forget_reviewed()
+        self.review("b.pdf", [noodle], [])  # remembered, applied again
+        self.assertEqual(len(self.rows("personal")), 1)
+        self.assertTrue(self.rows("personal")[0]["id"], "rows carry the transaction id")
+
+    def test_a_different_answer_moves_the_row(self):
+        noodle = self.txns["FAKE NOODLE BAR"]
+        self.review("b.pdf", [noodle], ["S", key("dining")])  # this time only: no rule
+        self.forget_reviewed()
+        self.review("b.pdf", [noodle], ["P", key("groceries")])
+        self.assertEqual(self.rows("personal"), [])
+        self.assertEqual([r["category"] for r in self.rows("split")], ["groceries"])
+        self.forget_reviewed()
+        self.review("b.pdf", [noodle], ["X"])
+        self.assertEqual(self.rows("split"), [], "excluding it the second time removes the row")
+
+    def test_an_id_change_is_caught_not_duplicated(self):
+        noodle = self.txns["FAKE NOODLE BAR"]
+        self.review("b.pdf", [noodle], ["s", key("dining")])
+        # Same statement under another file name: a new id, same date, amount and merchant.
+        self.review("renamed.pdf", [noodle], ["s"])  # the rule applies, the guard asks: skip
+        self.assertEqual(len(self.rows("personal")), 1)
+        self.assertEqual(len(self.state()["done"]), 2, "the copy is marked reviewed, so it isn't asked again")
+        self.review("renamed-again.pdf", [noodle], ["a"])  # add anyway: a genuine second purchase
+        self.assertEqual(len(self.rows("personal")), 2)
+
+    def test_files_from_older_versions_still_work(self):
+        noodle = self.txns["FAKE NOODLE BAR"]
+        self.paths["personal"].write_text(
+            "date,amount,vendor,category\r\n" + f"{noodle['date']},{noodle['amount']},{noodle['vendor']},dining\r\n")
+        self.review("b.pdf", [noodle], ["s", key("dining"), "s"])  # the old row has no id: the guard asks
+        rows = self.rows("personal")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], "", "the old row is kept as it was")
+        self.review("b.pdf", [self.txns["FAKE GROCER 123"]], ["p", key("groceries")])
+        header = self.paths["split"].read_text().splitlines()[0]
+        self.assertEqual(header, "date,amount,vendor,category,id")
+
+    def test_undo_puts_a_replaced_row_back(self):
+        noodle, grocer = self.txns["FAKE NOODLE BAR"], self.txns["FAKE GROCER 123"]
+        self.review("b.pdf", [noodle], ["S", key("dining")])
+        self.forget_reviewed()
+        # Answer differently, then undo it at the next question, then answer as before.
+        self.review("b.pdf", [noodle, grocer],
+                    ["P", key("travel"), "u", "S", key("dining"), "p", key("groceries")])
+        self.assertEqual([r["category"] for r in self.rows("personal")], ["dining"])
+        self.assertEqual([r["category"] for r in self.rows("split")], ["groceries"])
+
+    def test_an_unreadable_state_file_stops_instead_of_starting_over(self):
+        self.state_path.write_text("{ not json")
+        with self.assertRaises(SystemExit) as stop:
+            self.review("b.pdf", [self.txns["FAKE NOODLE BAR"]], [])
+        self.assertIn("can't be read", str(stop.exception))
+        self.assertEqual(self.state_path.read_text(), "{ not json", "left untouched")
+
+    def test_writes_leave_no_temp_files(self):
+        self.review("b.pdf", [self.txns["FAKE NOODLE BAR"]], ["s", key("dining")])
+        self.assertEqual([p.name for p in Path(self.tmp.name).glob("*.tmp")], [])
+
+    def test_reset_keeps_remembered_merchants(self):
+        st.save_state(self.state_path, {"done": ["x", "y"], "vendor_rules": {"fake noodle bar": {"self": "dining"}}})
+        empty = Path(self.tmp.name) / "no-pdfs"
+        empty.mkdir()
+        argv = ["split-statements", str(empty), "--state", str(self.state_path), "--reset"]
+        with mock.patch("sys.argv", argv), mock.patch("builtins.print"), self.assertRaises(SystemExit):
+            st.main()  # stops at "no PDFs", after the reset
+        self.assertEqual(self.state(), {"done": [], "vendor_rules": {"fake noodle bar": {"self": "dining"}}})
+
+
+class ArchiveTests(unittest.TestCase):
+    def test_archive_moves_the_batch_and_keeps_the_history(self):
+        with tempfile.TemporaryDirectory() as d:
+            old = os.getcwd()
+            os.chdir(d)
+            try:
+                for name in ("split_transactions.csv", "personal_transactions.csv", "split_summary.json",
+                             ".split_state.json"):
+                    Path(name).write_text("x")
+                args = Namespace(person=None)
+                with mock.patch("builtins.print"):
+                    split_ledger.cmd_archive(args, None)
+                archived = sorted(p.relative_to("archive").as_posix() for p in Path("archive").rglob("*.*"))
+                self.assertEqual(len(archived), 3)
+                self.assertFalse(Path("split_transactions.csv").exists())
+                self.assertTrue(Path(".split_state.json").exists(), "review history stays")
+                Path("split_transactions.csv").write_text("x")  # a second batch the same day
+                with mock.patch("builtins.print"):
+                    split_ledger.cmd_archive(args, None)
+                self.assertEqual(len(list(Path("archive").iterdir())), 2, "a second folder, nothing overwritten")
+                with self.assertRaises(SystemExit), mock.patch("builtins.print"):
+                    split_ledger.cmd_archive(args, None)  # nothing left to archive
+            finally:
+                os.chdir(old)
+
+
+class SuggestionTests(unittest.TestCase):
+    def test_your_own_answer_for_a_similar_name_comes_first(self):
+        rules = {"noodle bar": {"split": "dining"}}
+        self.assertEqual(st.suggest("noodle bar downtown", "out", rules)[0], {"split": "dining"})
+        self.assertEqual(st.suggest("starbucks 22nd st", "out", {"starbucks": {"self": "dining"}})[0],
+                         {"self": "dining"})
+
+    def test_meaningless_words_dont_count_as_similar(self):
+        self.assertIsNone(st.suggest("sq the corner", "out", {"sq the plaza": {"self": "gift"}}))
+
+    def test_keywords(self):
+        self.assertEqual(st.suggest("trader joe s", "out", {})[0], {"self": "groceries"})
+        self.assertEqual(st.suggest("uber eats", "out", {})[0], {"self": "dining"})
+        self.assertEqual(st.suggest("uber trip", "out", {})[0], {"self": "transport"})
+        self.assertEqual(st.suggest("acme payroll", "in", {})[0], "income")
+        self.assertEqual(st.suggest("zelle to sam", "out", {})[0], "exclude")
+        self.assertIsNone(st.suggest("mystery place", "out", {}))
+
+    def test_self_or_split_follows_your_habits(self):
+        rules = {"a": {"split": "groceries"}, "b": {"split": "groceries"}, "c": {"self": "groceries"}}
+        self.assertEqual(st.suggest("safeway", "out", rules)[0], {"split": "groceries"})
+
+    def test_money_in_and_out_dont_mix(self):
+        self.assertIsNone(st.suggest("noodle bar", "in", {"noodle bar": {"self": "dining"}}))
 
 
 class SummaryTests(unittest.TestCase):

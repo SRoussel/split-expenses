@@ -17,6 +17,11 @@ ledger.csv
 split_transactions.csv
 .split_state.json
 split_summary*.json
+personal_transactions.csv
+# Per-person files from --person (each person's review state, transactions and summary)
+data/
+# Backups and finished batches (`split-ledger archive`): your real data
+archive/
 *.pdf
 
 # Web app (web/)

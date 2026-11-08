@@ -22,9 +22,11 @@ import {
   SettleForm,
 } from "./forms";
 import ImportSummary from "./ImportSummary";
+import { saveTextFile } from "./files";
+import SpendingScreen from "./SpendingScreen";
 import { balanceFor, effectFor, exportLedgerCsv, fmt } from "./ledger";
 import type { Entry, Member, NewEntry, Recurring } from "./types";
-import { ConfirmDialog, ErrorText, Modal, Toast, type ToastState } from "./ui";
+import { ConfirmDialog, ErrorText, Modal, Segmented, Toast, type ToastState } from "./ui";
 
 type Panel =
   | null
@@ -67,6 +69,7 @@ export default function LedgerScreen({
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
+  const [tab, setTab] = useState<"ledger" | "spending">("ledger");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Entry | null>(null);
   const [voiding, setVoiding] = useState<Entry | null>(null);
@@ -180,26 +183,7 @@ export default function LedgerScreen({
   }
 
   async function exportCsv() {
-    const csv = exportLedgerCsv(entries, userId);
-    const file = new File([csv], "ledger.csv", { type: "text/csv" });
-    // On iPhone the share sheet is the reliable way to save a file from a home-screen app.
-    if (navigator.canShare?.({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file], title: "ledger.csv" });
-        return;
-      } catch (err) {
-        // Cancelling the share sheet is not a failure: don't start a second, unwanted download.
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        /* share isn't usable here; fall through to a normal download */
-      }
-    }
-    const url = URL.createObjectURL(file);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "ledger.csv";
-    a.click();
-    // Give the browser a moment to start the download before releasing the file.
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    await saveTextFile("ledger.csv", exportLedgerCsv(entries, userId));
   }
 
   if (!loaded) {
@@ -214,15 +198,31 @@ export default function LedgerScreen({
   const saveEdit = (entry: NewEntry) => editEntry(editing!.id, entry);
 
   return (
-    <main className="with-bar">
+    <main className={tab === "ledger" ? "with-bar" : ""}>
       <header className="top">
         <h1>Split</h1>
         <button className="link" onClick={() => setPanel("more")}>
           More
         </button>
       </header>
+      <div className="tabs">
+        <Segmented
+          label="Section"
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: "ledger", label: "Ledger" },
+            { value: "spending", label: "Spending" },
+          ]}
+        />
+      </div>
 
       <ErrorText message={error} />
+
+      {tab === "spending" ? (
+        <SpendingScreen userId={userId} members={members} entries={entries} />
+      ) : (
+        <>
 
       {!partner && (
         <section className="card stack">
@@ -283,6 +283,8 @@ export default function LedgerScreen({
           </button>
         </div>
       </div>
+        </>
+      )}
 
       <Toast toast={toast} onDone={clearToast} />
 

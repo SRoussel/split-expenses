@@ -22,19 +22,26 @@ Put your statement PDFs in a folder and point the script at it:
 
     uv run split-statements path/to/statements
 
-For each transaction it shows the date, whether it's money **OUT** or **IN**, the amount and the vendor.
+It groups what's left to review **by merchant**, so "STARBUCKS ×12 · $54.20" is one question covering all twelve. Each question is a single keypress, no Enter:
 
 - **Money out:** `s` self (your own spending), `p` split (shared with your partner), `x` exclude.
-- **Money in:** `i` income (paychecks, interest earned), `r` return (it asks the category of the original purchase and whether it was shared; a return *reduces* that category), `x` exclude.
-- **Always:** `k` skip for now, `q` quit.
+- **Money in:** `i` income (paychecks, interest earned), `r` return (asks the category of the original purchase and whether it was shared; a return *reduces* that category), `x` exclude.
+- **Categories** are one key each: `1`–`9`, then `a` gift, `b` fees, `c` other (the menu shows them). `Esc` goes back.
+- **Enter** accepts the suggestion, when there is one. Suggestions come from your own answers for similar merchant names first, then a built-in keyword list (Safeway → groceries, Uber → transport, payroll → income, Zelle → exclude…). They're worked out on your computer and never applied without a keypress.
+- **Answers are remembered** for that merchant (separately for money out and in), so next time it's applied without asking. Hold **Shift** (`S`, `P`, `X`…) for "this time only".
+- `e` answers a group's transactions one by one (when a merchant isn't always the same thing; those answers aren't remembered).
+- `u` undoes your last answer: its lines, its remembered rule, and anything applied automatically after it. It then asks again. Undo works within one session.
+- `k` skips for now, `q` quits (progress is saved as you go).
 - **Exclude** is for money that's neither spending nor income: credit-card payments, transfers between your own accounts, and money between the two of you (paying each other back is already tracked by the ledger). Counting these would double-count.
-- **`?` (unclear):** a line that wasn't under a heading saying whether it's money out or in, and had no minus sign. It asks: `o` out, `n` in or `x` exclude. Nothing is guessed or dropped.
+- **`?` (unclear)** lines weren't under a heading saying whether they're money out or in, and had no minus sign. It asks: `o` out, `n` in or `x` exclude. Nothing is guessed or dropped.
 
-Self and split ask for a category: groceries, dining, household, utilities, transport, health, subscriptions, entertainment, travel, gift, fees or other. (The list is shared with the web app, in `web/shared/categories.json`.)
+The categories are groceries, dining, household, utilities, transport, health, subscriptions, entertainment, travel, gift, fees and other. (The list is shared with the web app, in `web/shared/categories.json`.)
 
-Shared transactions are saved to `split_transactions.csv` and your own (including income, and returns as negative amounts) to `personal_transactions.csv`. Both have the columns `date`, `amount`, `vendor` and `category`, and neither ever leaves your computer.
+Shared transactions are saved to `split_transactions.csv` and your own (including income, and returns as negative amounts) to `personal_transactions.csv`. Both have the columns `date`, `amount`, `vendor`, `category` and `id` (which transaction it was), and neither ever leaves your computer.
 
-After each answer it asks if it should remember your choice for that vendor (separately for money out and money in). If you say yes, the next time that vendor shows up it gets the same treatment without asking. Numbers at the end of a vendor name and things like `PMT ID: 12345` are ignored when matching, so "CON EDISON PMT ID: 111" and "CON EDISON PMT ID: 222" count as the same vendor.
+**Running it again is safe.** Each row records which transaction it came from, so answering a transaction again (after `--reset`, or with a different answer) *replaces* its row instead of adding a second one, and excluding it removes the row. If a transaction looks new but one with the same date, amount and merchant is already recorded (a renamed PDF, the same statement downloaded twice, or a fix to how statements are read), it asks before adding it: `s` skips it, `a` adds it anyway for a genuine second purchase. The progress file is saved in one step, so a crash can't damage it; if it ever can't be read, the script stops and says so instead of quietly starting over.
+
+Remembered merchants are matched loosely: numbers at the end of a vendor name and things like `PMT ID: 12345` are ignored when matching, so "CON EDISON PMT ID: 111" and "CON EDISON PMT ID: 222" count as the same vendor.
 
 It keeps track of what you've already gone through in `.split_state.json`, so you can quit partway and pick up later.
 
@@ -44,7 +51,7 @@ Options:
 - `-o FILE` save splits somewhere other than `split_transactions.csv`
 - `--personal-output FILE` save your own transactions somewhere other than `personal_transactions.csv`
 - `--dump` just print what it parsed, no questions
-- `--reset` forget what you've already reviewed
+- `--reset` go through everything again (remembered merchants are kept, and new answers replace the old rows)
 - `--clear-rules` forget the remembered vendors
 - `--no-color` turn off colors
 
@@ -99,5 +106,5 @@ Use `--ledger FILE` to keep a different ledger file, and `--no-color` to turn of
 
 1. Run `uv run split-statements` on a folder of statements and go through the expenses.
 2. Run `uv run split-ledger summarize` and import the `split_summary.json` in the web app, choosing whose statement it is (or, for the Python ledger, `uv run split-ledger import split_transactions.csv`).
-3. Delete `split_transactions.csv`, `personal_transactions.csv` and `split_summary.json` (or the ones in `data/<person>/`) so the next batch starts clean.
+3. Run `uv run split-ledger archive` (add `--person sam` for Sam's files). It moves this batch's transaction files and summary into `archive/<date>/` (git-ignored), so the next batch starts clean and nothing is summarized twice. The review history stays, so statements you've already gone through aren't asked about again.
 4. Run `uv run split-ledger settle` whenever one of you pays the other back.

@@ -391,6 +391,33 @@ def cmd_summarize(args, _path):
         for cat, amount in sorted(part["by_category"].items()):
             print(f"    {cat:<15}{paint(f'{fmt(amount):>12}', 'cyan')}" + (" (money in)" if cat == INCOME else ""))
     print(f"Wrote {out}. That file is everything the web app will receive; open it to check.")
+    person = f" --person {args.person}" if args.person else ""
+    print(paint(f"After importing it, run `uv run split-ledger archive{person}` so the next batch starts clean.", "dim"))
+
+
+OUTPUT_FILES = ["split_transactions.csv", "personal_transactions.csv", "split_summary.json"]
+
+
+def cmd_archive(args, _path):
+    """Move this batch's files into archive/<date>/, so the next batch starts clean.
+
+    The review history stays, so statements you've already gone through won't be
+    asked about again, and nothing gets summarized twice.
+    """
+    base = person_dir(args.person) if args.person else Path(".")
+    present = [base / name for name in OUTPUT_FILES if (base / name).exists()]
+    if not present:
+        sys.exit(f"Nothing to archive: no {', '.join(OUTPUT_FILES)} in {base}.")
+    root = Path("archive") / (args.person.lower() if args.person else "")
+    stamp = date.today().isoformat()
+    dest, n = root / stamp, 2
+    while dest.exists():
+        dest, n = root / f"{stamp}-{n}", n + 1
+    dest.mkdir(parents=True)
+    for path in present:
+        path.rename(dest / path.name)
+    print(f"Moved {', '.join(p.name for p in present)} to {dest}/.")
+    print("Reviewed transactions are still remembered, so those statements won't be asked about again.")
 
 
 def cmd_import(args, path):
@@ -552,6 +579,11 @@ def main():
     p.add_argument("-o", "--output", help="Where to write the summary (default: split_summary.json)")
     p.add_argument("--name", help="Override the entry name (default: Expenses mm/dd/yy-mm/dd/yy)")
     p.set_defaults(func=cmd_summarize)
+
+    p = sub.add_parser("archive", parents=[common],
+                       help="Move this batch's transaction files and summary to archive/<date>/")
+    p.add_argument("--person", help="Archive the files in data/<person>/")
+    p.set_defaults(func=cmd_archive)
 
     p = sub.add_parser("balance", parents=[common], help="Show who owes whom")
     p.set_defaults(func=cmd_balance)

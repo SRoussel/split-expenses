@@ -3,6 +3,9 @@
   --surface: #ffffff;
   --surface-2: #eef2f0;
   --seg-on: #ffffff;
+  /* Chart marks (validated with the dataviz palette checker, light surface) */
+  --chart-pos: #2a78d6;
+  --chart-neg: #e34948;
   --text: #17201c;
   --muted: #64706b;
   --line: #dde3e0;
@@ -26,6 +29,8 @@
     --surface: #191f1d;
     --surface-2: #212926;
     --seg-on: #3a4641;
+    --chart-pos: #3987e5;
+    --chart-neg: #e66767;
     --text: #e9edeb;
     --muted: #93a09a;
     --line: #2a3330;
@@ -831,6 +836,353 @@ button.danger-link {
   color: var(--neg);
   font-weight: 600;
   padding: 6px;
+}
+
+/* -------------------------------------------------------- spending */
+
+.tabs {
+  margin: -4px 0 14px;
+}
+
+.month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.month-nav h2 {
+  font-size: 1.2rem;
+}
+
+.month-nav .icon-btn {
+  width: 40px;
+  height: 40px;
+  font-size: 1.4rem;
+}
+
+.spending .card-title {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 10px;
+}
+
+.coverage {
+  margin: 12px 2px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.coverage-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.coverage-track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.coverage-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--chart-pos);
+  border-radius: 999px;
+}
+
+.cashflow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hero {
+  font-size: 2.6rem;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.neg-text {
+  color: var(--neg);
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.tiles > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.tiles strong {
+  font-size: 1.2rem;
+}
+
+.change {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+ul.cat-bars {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+ul.cat-bars button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "name amount" "track change";
+  column-gap: 12px;
+  row-gap: 6px;
+  align-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  padding: 8px 4px;
+  min-height: 0;
+  text-align: left;
+  font-weight: 400;
+}
+
+ul.cat-bars button:active:not(:disabled) {
+  transform: none;
+  background: var(--surface-2);
+}
+
+.cat-name {
+  grid-area: name;
+}
+
+.cat-amount {
+  grid-area: amount;
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.cat-track {
+  grid-area: track;
+  height: 8px;
+  display: block;
+}
+
+.cat-fill {
+  display: block;
+  height: 8px;
+  background: var(--chart-pos);
+  border-radius: 0 4px 4px 0; /* square at the baseline, rounded data end */
+  min-width: 2px;
+}
+
+ul.cat-bars .change {
+  grid-area: change;
+  text-align: right;
+}
+
+.chart {
+  position: relative;
+}
+
+.chart svg {
+  display: block;
+  overflow: visible;
+}
+
+.chart .grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.chart .baseline {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.chart .tick,
+.chart .xlabel,
+.chart .avg text,
+.chart .direct {
+  font-size: 11px;
+  fill: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart .xlabel.on,
+.chart .direct {
+  fill: var(--text);
+  font-weight: 600;
+}
+
+.chart .avg line {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.chart .bar.pos {
+  fill: var(--chart-pos);
+}
+
+.chart .bar.neg {
+  fill: var(--chart-neg);
+}
+
+.chart .bar {
+  transition: opacity 120ms ease;
+}
+
+.chart .bar.partial {
+  opacity: 0.45;
+}
+
+.chart .bar.dim {
+  opacity: 0.45;
+}
+
+.chart .sel {
+  fill: var(--surface-2);
+}
+
+.chart .hit {
+  fill: transparent;
+  cursor: pointer;
+  outline: none;
+}
+
+.chart .hit:focus-visible {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.chart .readout {
+  min-height: 1.5em; /* reserved, so nothing jumps when it changes */
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart .readout strong {
+  color: var(--text);
+}
+
+.hero.incomplete {
+  color: var(--muted);
+}
+
+details.chart-table {
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+
+details.chart-table summary,
+details.uploads summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+details.chart-table table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+details.chart-table th,
+details.chart-table td {
+  text-align: right;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+details.chart-table th:first-child,
+details.chart-table td:first-child {
+  text-align: left;
+}
+
+details.uploads ul {
+  margin-top: 10px;
+}
+
+.view-switch {
+  margin: 10px 0 12px;
+}
+
+.trends {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.trends > .segmented {
+  margin-bottom: 4px;
+}
+
+.multiples-note {
+  margin: -4px 0 10px;
+}
+
+.multiples {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.multiple {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.multiple-name {
+  font-size: 0.92rem;
+  overflow-wrap: anywhere;
+}
+
+.multiple .amount {
+  font-size: 1.05rem;
+}
+
+.multiple .chart .readout {
+  font-size: 0.78rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+details.chart-table.wide table {
+  min-width: 100%;
+  white-space: nowrap;
 }
 
 /* -------------------------------------------------------- segmented */

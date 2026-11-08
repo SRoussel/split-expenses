@@ -11,7 +11,7 @@
     "db:migrate:remote": "wrangler d1 migrations apply ledger --remote",
     "build": "tsc --noEmit && tsc --noEmit -p worker && vite build",
     "start": "npm run build && mkdir -p dist && wrangler dev --port 8787",
-    "test": "node --import tsx --test src/ledger.test.ts",
+    "test": "node --import tsx --test src/ledger.test.ts src/spending.test.ts",
     "test:api": "npm run build && node --test tests/api.test.mjs",
     "deploy": "npm run build && wrangler deploy",
     "reset-password": "node scripts/reset-password.mjs"
