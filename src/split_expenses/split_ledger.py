@@ -17,6 +17,7 @@ Examples:
     uv run split-ledger import split_transactions.csv    # total -> "Expenses mm/dd/yy-mm/dd/yy"
     uv run split-ledger summarize                        # -> split_summary.json (totals only) for the web app
     uv run split-ledger summarize --person sam           # same, from data/sam/
+    uv run split-ledger finish --person sam              # summarize, then archive the batch
     uv run split-ledger settle                           # settle the full balance
     uv run split-ledger settle 100 me                    # you paid partner $100
     uv run split-ledger balance
@@ -390,9 +391,12 @@ def cmd_summarize(args, _path):
         print(f"  {label}: {len(part['dates'])} transaction(s){skipped}")
         for cat, amount in sorted(part["by_category"].items()):
             print(f"    {cat:<15}{paint(f'{fmt(amount):>12}', 'cyan')}" + (" (money in)" if cat == INCOME else ""))
+    if getattr(args, "then_archive", False):
+        return out
     print(f"Wrote {out}. That file is everything the web app will receive; open it to check.")
     person = f" --person {args.person}" if args.person else ""
     print(paint(f"After importing it, run `uv run split-ledger archive{person}` so the next batch starts clean.", "dim"))
+    return out
 
 
 OUTPUT_FILES = ["split_transactions.csv", "personal_transactions.csv", "split_summary.json"]
@@ -418,6 +422,24 @@ def cmd_archive(args, _path):
         path.rename(dest / path.name)
     print(f"Moved {', '.join(p.name for p in present)} to {dest}/.")
     print("Reviewed transactions are still remembered, so those statements won't be asked about again.")
+    return dest
+
+
+def cmd_finish(args, _path):
+    """Summarize this batch, then archive it: the summary ends up in archive/<date>/.
+
+    If summarizing fails, nothing is moved.
+    """
+    base = person_dir(args.person) if args.person else Path(".")
+    if (base / "split_summary.json").exists():
+        sys.exit(f"{base / 'split_summary.json'} is left over from an earlier summarize. "
+                 f"Import it and run `archive` first, or delete it.")
+    args.csv = args.personal = args.output = None
+    args.then_archive = True
+    summary = cmd_summarize(args, _path)
+    dest = cmd_archive(args, _path)
+    print(paint(f"Import this file in the app: {dest / summary.name}", "bold"))
+    print("That file is everything the web app will receive; open it to check.")
 
 
 def cmd_import(args, path):
@@ -584,6 +606,13 @@ def main():
                        help="Move this batch's transaction files and summary to archive/<date>/")
     p.add_argument("--person", help="Archive the files in data/<person>/")
     p.set_defaults(func=cmd_archive)
+
+    p = sub.add_parser("finish", parents=[common],
+                       help="Summarize this batch for the web app, then archive it (summarize + archive)")
+    p.add_argument("--person", help="Use the files in data/<person>/")
+    p.add_argument("--no-personal", action="store_true", help="Leave out personal spending and income")
+    p.add_argument("--name", help="Override the entry name (default: Expenses mm/dd/yy-mm/dd/yy)")
+    p.set_defaults(func=cmd_finish)
 
     p = sub.add_parser("balance", parents=[common], help="Show who owes whom")
     p.set_defaults(func=cmd_balance)

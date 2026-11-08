@@ -1,111 +1,80 @@
-# Statement splitter
+# Split
 
-Two small Python scripts for splitting expenses with a partner, plus a web app so you can both see the ledger and add to it from your phones.
+My partner and I share a lot of expenses, and I wanted an easy way to keep track of who owes who without handing our bank statements to a budgeting app. This is what I ended up with.
 
-- `split_statements.py` reads bank statement PDFs and goes through every transaction once: money out is yours, shared or excluded; money in is income, a return or excluded. Each gets a category.
-- `split_ledger.py` keeps a running balance of who owes who, and can take the total from the first script as a single entry.
-- `web/` is the shared version of the ledger, called Split (React, with a Cloudflare Worker and D1 database). See [web/README.md](web/README.md) for setup and deploying. The scripts and the app don't talk to each other directly: you import the statement script's CSV into the app, and the app can export a CSV in the ledger script's format.
+It has two parts:
 
-The scripts keep your data in plain files (`ledger.csv`, `split_transactions.csv`, `personal_transactions.csv`, `split_summary.json`, `.split_state.json`, `data/` for `--person`, and your PDFs in `statements/`). The `.gitignore` leaves those out of the repo on purpose. This repo is public, so check `git status` before every commit.
+- **Python scripts** that run on my computer. One reads bank statement PDFs and walks me through every transaction so I can mark it as mine, shared, or neither, with a category. The other keeps a running ledger and makes a small summary file for the app. See [src/split_expenses/README.md](src/split_expenses/README.md).
+- **A web app** we both use from our phones. It shows the balance, lets either of us add an expense or settle up, and has spending and cash flow reports by month and category. It runs on Cloudflare (a Worker plus a D1 database). See [web/README.md](web/README.md).
 
-## Setup
+It's built for exactly two people. The app won't let a third person join.
 
-Run both from the repo root with `uv run split-statements` and `uv run split-ledger`. There's nothing to install by hand: the first time, uv sets up the project and its one dependency, `pdfplumber`. Your files are read and written in the folder you run the commands from.
+## How the pieces fit
 
-**Both of you on one computer:** add `--person sam` (any short name) to `split-statements` and `split-ledger summarize`. That person's review progress, remembered vendors, transaction files and summary then live in `data/sam/`, so the two of you never mix. Without `--person`, the files are in the repo root as before.
+```
+bank statement PDFs
+        │
+        ▼
+uv run split-statements      go through each transaction: mine, shared or skip
+        │
+        ▼
+transaction CSVs             stay on my computer
+        │
+        ▼
+uv run split-ledger finish   totals per month and category, then archives the batch
+        │
+        ▼
+split_summary.json           the only thing that goes to the app
+        │
+        ▼
+the web app                  import it from my phone
+```
 
-To run the tests: `uv run python -m unittest discover -s tests -v`.
+The scripts and the app never talk to each other directly. The summary file is just totals per month and category: no merchant names, no individual purchases. Open it before you import it if you want to see exactly what goes up.
 
-## split_statements.py
+Going the other way, the app can export the ledger as a CSV in the format `split-ledger` reads.
 
-Put your statement PDFs in a folder and point the script at it:
+## Getting started
+
+For the scripts you need [uv](https://docs.astral.sh/uv/). From the repo root:
 
     uv run split-statements path/to/statements
 
-It groups what's left to review **by merchant**, so "STARBUCKS ×12 · $54.20" is one question covering all twelve. Each question is a single keypress, no Enter:
+uv sets everything up the first time.
 
-- **Money out:** `s` self (your own spending), `p` split (shared with your partner), `x` exclude.
-- **Money in:** `i` income (paychecks, interest earned), `r` return (asks the category of the original purchase and whether it was shared; a return *reduces* that category), `x` exclude.
-- **Categories** are one key each: `1`–`9`, then `a` gift, `b` fees, `c` other (the menu shows them). `Esc` goes back.
-- **Enter** accepts the suggestion, when there is one. Suggestions come from your own answers for similar merchant names first, then a built-in keyword list (Safeway → groceries, Uber → transport, payroll → income, Zelle → exclude…). They're worked out on your computer and never applied without a keypress.
-- **Answers are remembered** for that merchant (separately for money out and in), so next time it's applied without asking. Hold **Shift** (`S`, `P`, `X`…) for "this time only".
-- **A merchant with several transactions is listed, numbered**, even when its answer is remembered: Enter accepts the remembered answer for all of them. `c` changes some lines first (type `2`, `2,5` or `3-6`, then the answer), for a one-off like a TV at Costco. Those lines are answered this time only; the merchant keeps its usual answer. Amounts much bigger than the merchant's usual are marked.
-- `e` answers a group's transactions one by one (when a merchant isn't always the same thing; those answers aren't remembered).
-- `u` undoes your last answer: its lines, its remembered rule, and anything applied automatically after it. It then asks again. Undo works within one session.
-- `k` skips for now, `q` quits (progress is saved as you go).
-- **Exclude** is for money that's neither spending nor income: credit-card payments, transfers between your own accounts, and money between the two of you (paying each other back is already tracked by the ledger). Counting these would double-count.
-- **`?` (unclear)** lines weren't under a heading saying whether they're money out or in, and had no minus sign. It asks: `o` out, `n` in or `x` exclude. Nothing is guessed or dropped.
+For the app you need Node 22:
 
-The categories are groceries, dining, household, utilities, transport, health, subscriptions, entertainment, travel, gift, fees and other. (The list is shared with the web app, in `web/shared/categories.json`.)
+    cd web
+    npm install
+    npm run db:migrate:local
+    npm run dev
 
-Shared transactions are saved to `split_transactions.csv` and your own (including income, and returns as negative amounts) to `personal_transactions.csv`. Both have the columns `date`, `amount`, `vendor`, `category` and `id` (which transaction it was), and neither ever leaves your computer.
+That runs it locally at http://localhost:5173. Deploying to Cloudflare is a handful of steps, all in [web/README.md](web/README.md).
 
-**Running it again is safe.** Each row records which transaction it came from, so answering a transaction again (after `--reset`, or with a different answer) *replaces* its row instead of adding a second one, and excluding it removes the row. If a transaction looks new but one with the same date, amount and merchant is already recorded (a renamed PDF, the same statement downloaded twice, or a fix to how statements are read), it asks before adding it: `s` skips it, `a` adds it anyway for a genuine second purchase. The progress file is saved in one step, so a crash can't damage it; if it ever can't be read, the script stops and says so instead of quietly starting over.
+## A typical month
 
-Remembered merchants are matched loosely: numbers at the end of a vendor name and things like `PMT ID: 12345` are ignored when matching, so "CON EDISON PMT ID: 111" and "CON EDISON PMT ID: 222" count as the same vendor.
+1. Download the month's statements into `statements/`.
+2. Run `uv run split-statements statements` and go through what's new. It remembers merchants, so after the first month it's mostly pressing Enter.
+3. Run `uv run split-ledger finish` (add `--person sam` if you're doing Sam's statements on the same computer). It writes the summary, moves the batch into `archive/`, and prints the path of the file to import.
+4. Get that file to your phone (AirDrop works) and import it in the app under **More > Import statement summary**, saying whose statement it is.
+5. Add anything else by hand in the app as it happens, and settle up whenever.
 
-It keeps track of what you've already gone through in `.split_state.json`, so you can quit partway and pick up later.
+## Privacy
 
-Options:
+This repo is public, so everything personal is git-ignored: the PDFs, transaction CSVs, the ledger, summaries, `data/` and `archive/`. Still, check `git status` before you commit.
 
-- `--person NAME` keep this person's files in `data/NAME/`
-- `-o FILE` save splits somewhere other than `split_transactions.csv`
-- `--personal-output FILE` save your own transactions somewhere other than `personal_transactions.csv`
-- `--dump` just print what it parsed, no questions
-- `--reset` go through everything again (remembered merchants are kept, and new answers replace the old rows)
-- `--clear-rules` forget the remembered vendors
-- `--no-color` turn off colors
+CI only runs the tests. It never deploys and doesn't use any secrets; deploying is a manual step from my computer.
 
-Run it with `--dump` first on a new statement. Every bank formats these differently, so check that the dates, amounts and directions (out, in, unknown) look right. It also prints how many lines it found of each kind per file; lots of "unclear" means the bank's section headings aren't recognised, and the matching rules near the top of the script are what to change. Remembered vendors from older versions that only say "self" ask for a category once.
+## Tests
 
-## split_ledger.py
+    uv run python -m unittest discover -s tests -v    # the scripts
+    cd web && npm test                                 # the app's ledger and spending math
+    cd web && npm run test:api                         # the backend, against a throwaway database
 
-The balance is always worked out from `ledger.csv`, so you can open that file and fix a mistake by hand if you need to.
+## Layout
 
-Set a starting balance if there is one:
-
-    uv run split-ledger init --i-owe 500
-    uv run split-ledger init --partner-owes 600
-
-Add an expense (amount, who paid, then a name):
-
-    uv run split-ledger add 84.20 me groceries
-    uv run split-ledger add 120 partner power bill
-
-Expenses are split 50/50 unless you say otherwise, for example `--my-share 70` if you owe 70% of it. Run `add` with nothing after it and it will ask you for each piece.
-
-Add the total from the statement script:
-
-    uv run split-ledger import split_transactions.csv
-
-This adds one entry named after the date range, like `Expenses 01/15/26-02/03/26`. It assumes you paid and it's split 50/50. Use `--payer partner` or `--my-share 60` to change that, and `--name` to call it something else. It won't add an entry with the same name twice unless you use `--force`.
-
-For the web app, make a summary instead of importing:
-
-    uv run split-ledger summarize                 # your files
-    uv run split-ledger summarize --person sam    # Sam's files, in data/sam/
-
-It writes `split_summary.json` with only totals per month and category: one block for the shared transactions, one for your own spending and income (`--no-personal` leaves that out; `-o FILE` writes it elsewhere). No merchants, purchase dates or individual amounts. That small file is the only thing the app's import accepts, so your individual transactions never leave your computer. Open it to see exactly what the app will get.
-
-One thing to watch: importing doesn't clear `split_transactions.csv`. If you review more statements and import again, the old transactions get counted again. Either delete the CSV after you import it, or use `-o` to start a new file next time.
-
-Pay each other back:
-
-    uv run split-ledger settle              # pays off the whole balance
-    uv run split-ledger settle 100 me       # you paid your partner $100
-
-Check where things stand:
-
-    uv run split-ledger balance
-    uv run split-ledger history
-
-In `history`, a positive balance means your partner owes you and a negative one means you owe them.
-
-Use `--ledger FILE` to keep a different ledger file, and `--no-color` to turn off colors.
-
-## Typical flow
-
-1. Run `uv run split-statements` on a folder of statements and go through the expenses.
-2. Run `uv run split-ledger summarize` and import the `split_summary.json` in the web app, choosing whose statement it is (or, for the Python ledger, `uv run split-ledger import split_transactions.csv`).
-3. Run `uv run split-ledger archive` (add `--person sam` for Sam's files). It moves this batch's transaction files and summary into `archive/<date>/` (git-ignored), so the next batch starts clean and nothing is summarized twice. The review history stays, so statements you've already gone through aren't asked about again.
-4. Run `uv run split-ledger settle` whenever one of you pays the other back.
+    src/split_expenses/   the Python scripts (and their README)
+    tests/                tests for the scripts
+    web/                  the web app (and its README)
+    web/shared/           code the app and the Worker share, and the category list (the scripts keep a copy; a test checks they match)
+    statements/           your PDFs (git-ignored)

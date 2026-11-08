@@ -3,7 +3,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  activeFilterCount,
   balanceFor,
+  filterTotals,
+  isFiltering,
+  matchesFilter,
+  NO_FILTER,
+  type EntryFilter,
   describeBalance,
   exportLedgerCsv,
   fmt,
@@ -236,4 +242,33 @@ test("schedule descriptions", () => {
   assert.equal(describeSchedule("2026-11-30", "monthly"), "Monthly on the 30th (or the last day)");
   assert.equal(describeSchedule("2026-11-09", "weekly"), "Weekly on Mondays");
   assert.equal(describeSchedule("2026-03-05", "yearly"), "Yearly on Mar 5");
+});
+
+test("search and filters", () => {
+  const groceries = entry({ kind: "expense", payer_id: ME, amount_cents: 8420, owed_cents: 4210, name: "Costco run", category: "groceries", entry_date: "2026-03-14" });
+  const rent = entry({ kind: "expense", payer_id: PARTNER, amount_cents: 200000, owed_cents: 100000, name: "Rent", entry_date: "2026-04-01" });
+  const paid = entry({ kind: "settlement", payer_id: ME, amount_cents: 5000, owed_cents: 5000, name: "Settlement", entry_date: "2026-04-02" });
+  const all = [groceries, rent, paid];
+  const find = (f: Partial<EntryFilter>) => all.filter((e) => matchesFilter(e, { ...NO_FILTER, ...f }, ME)).map((e) => e.name);
+
+  assert.deepEqual(find({}), ["Costco run", "Rent", "Settlement"]);
+  assert.deepEqual(find({ text: "  COSTCO " }), ["Costco run"], "case and spaces don't matter");
+  assert.deepEqual(find({ text: "grocer" }), ["Costco run"], "the category counts as text");
+  assert.deepEqual(find({ text: "84.20" }), ["Costco run"], "an exact amount");
+  assert.deepEqual(find({ text: "$2,000" }), ["Rent"]);
+  assert.deepEqual(find({ kind: "settlement" }), ["Settlement"]);
+  assert.deepEqual(find({ payer: "partner" }), ["Rent"]);
+  assert.deepEqual(find({ payer: "me", kind: "expense" }), ["Costco run"]);
+  assert.deepEqual(find({ category: "groceries" }), ["Costco run"]);
+  assert.deepEqual(find({ category: "none" }), ["Rent"], "no category: expenses only");
+  assert.deepEqual(find({ from: "2026-04-01" }), ["Rent", "Settlement"]);
+  assert.deepEqual(find({ from: "2026-03-01", to: "2026-04-01" }), ["Costco run", "Rent"], "both ends inclusive");
+
+  assert.equal(activeFilterCount(NO_FILTER), 0);
+  assert.equal(activeFilterCount({ ...NO_FILTER, text: "x", payer: "me", from: "2026-01-01", to: "2026-02-01" }), 2);
+  assert.equal(isFiltering({ ...NO_FILTER, text: " " }), false);
+
+  const voided = entry({ kind: "expense", payer_id: ME, amount_cents: 999, owed_cents: 500, voided_at: "2026-04-03T00:00:00Z" });
+  assert.deepEqual(filterTotals([...all, voided], ME), { count: 4, spent: 208420, mine: 4210 + 100000 },
+    "expenses only, not voided; my share is what I paid for myself plus what I owe");
 });

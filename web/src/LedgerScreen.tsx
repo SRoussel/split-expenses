@@ -24,7 +24,8 @@ import {
 import ImportSummary from "./ImportSummary";
 import { saveTextFile } from "./files";
 import SpendingScreen from "./SpendingScreen";
-import { balanceFor, effectFor, exportLedgerCsv, fmt } from "./ledger";
+import { balanceFor, effectFor, exportLedgerCsv, filterTotals, fmt, isFiltering, matchesFilter, NO_FILTER } from "./ledger";
+import LedgerFilters from "./LedgerFilters";
 import type { Entry, Member, NewEntry, Recurring } from "./types";
 import { ConfirmDialog, ErrorText, Modal, Toast, type ToastState } from "./ui";
 
@@ -75,6 +76,7 @@ export default function LedgerScreen({
   const [editing, setEditing] = useState<Entry | null>(null);
   const [voiding, setVoiding] = useState<Entry | null>(null);
   const [showVoided, setShowVoided] = useState(false);
+  const [filter, setFilter] = useState(NO_FILTER);
   const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const clearToast = useCallback(() => setToast(null), []);
@@ -144,8 +146,12 @@ export default function LedgerScreen({
   const selected = entries.find((e) => e.id === selectedId) ?? null;
 
   // Entries arrive newest first; group them under month headings.
+  const matching = useMemo(
+    () => entries.filter((e) => (showVoided || !e.voided_at) && matchesFilter(e, filter, userId)),
+    [entries, showVoided, filter, userId],
+  );
   const months = useMemo(() => {
-    const visible = showVoided ? entries : entries.filter((e) => !e.voided_at);
+    const visible = matching;
     const groups: { key: string; label: string; items: Entry[] }[] = [];
     for (const e of visible) {
       const key = e.entry_date.slice(0, 7);
@@ -153,7 +159,7 @@ export default function LedgerScreen({
       groups.at(-1)!.items.push(e);
     }
     return groups;
-  }, [entries, showVoided]);
+  }, [matching]);
 
   function saved(message: string) {
     setPanel(null);
@@ -253,7 +259,23 @@ export default function LedgerScreen({
         <strong className="balance-amount">{fmt(balance)}</strong>
       </section>
 
-      {months.length === 0 ? (
+      {entries.length > 0 && (
+        <LedgerFilters
+          filter={filter}
+          onChange={setFilter}
+          partnerName={partnerName}
+          totals={filterTotals(matching, userId)}
+        />
+      )}
+
+      {months.length === 0 && isFiltering(filter) ? (
+        <div className="empty">
+          <p>No entries match.</p>
+          <button className="link" onClick={() => setFilter(NO_FILTER)}>
+            Clear search and filters
+          </button>
+        </div>
+      ) : months.length === 0 ? (
         <div className="empty">
           <p>No entries yet.</p>
           <p className="muted small">

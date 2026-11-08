@@ -131,12 +131,13 @@ Sign in with email and password. That's deliberate, rather than emailed sign-in 
 ## Using it
 
 - **Add expense**: amount, name, who paid, and your share. Your share starts at your default split (see below), and there are quick buttons for "Split evenly", "All theirs" and "All mine".
+- **Search and filters**, under the balance: type part of a name, a category or an exact amount (`84.20`). **Filters** narrows by type (expenses or payments), who paid, category and a date range. The line under them counts what matches, with what was spent and your share of it (expenses only, not voided ones), and **Clear** resets everything. Imported statements are split across categories, so the category filter doesn't find them; the Spending tab does.
 - **Tap any entry** to see the details: who paid, the split, who added it and when. Entries your partner added say "added by …" in the list.
 - **Edit**: from an entry's details. The original isn't overwritten. It's kept in the history, marked "edited", and the corrected copy takes its place. The type (expense, payment, starting balance) can't change in an edit.
 - **Settle up**: records a payment between you. It defaults to the full balance, paid by whoever owes. It only updates the ledger and doesn't move any money.
 - **More > Recurring expenses**: rent, subscriptions and other bills with a fixed amount. Set the amount, who pays, the split, how often (weekly, monthly or yearly) and the first date (today or later). Each one is added to the ledger by itself, marked ↻, the first time either of you opens the app on or after its date. If nobody opens the app for a while, the missed ones are all added next time. A rule on the 29th–31st uses the last day of shorter months. Edit a rule to change the amount, payer or split (from the next one on), or to pause it. Resuming doesn't fill in the paused months. Stopping a rule keeps the entries it already added, and a voided or edited one never comes back. Bills paid by card also show up on your statements, so mark those vendors as "self" in `split-statements` to avoid counting them twice.
 - **More > Default split**: the share each of you normally pays, like 60/40. It's one setting for both of you and can be set once you've both joined.
-- **More > Import statement summary**: adds a statement to the app as totals only. On your computer, run `uv run split-ledger summarize` (add `--person sam` for Sam's files). It writes `split_summary.json` with totals per month and category: the shared transactions, plus that person's own spending and income. Open it to see exactly what the app will get. Get that small file to your phone (AirDrop, iCloud Drive), choose it in the app, and say **whose statement it is** (it also sets who paid the shared part). You can leave either part out. The shared part becomes one ledger entry, like `Expenses 01/15/26-02/03/26`, with its category breakdown. The personal part is saved as that person's monthly spending and income by category, visible to both of you. Everything is saved together or not at all, and the same statement can't be uploaded twice for the same person. The detailed transaction files never leave your computer: the app refuses them if you pick one by mistake. Older summary files (shared total only) still work.
+- **More > Import statement summary**: adds a statement to the app as totals only. On your computer, run `uv run split-ledger finish` (add `--person sam` for Sam's files). It writes `split_summary.json` with totals per month and category: the shared transactions, plus that person's own spending and income. Open it to see exactly what the app will get. It then archives the batch and prints where the file is. Get that small file to your phone (AirDrop, iCloud Drive), choose it in the app, and say **whose statement it is** (it also sets who paid the shared part). You can leave either part out. The shared part becomes one ledger entry, like `Expenses 01/15/26-02/03/26`, with its category breakdown. The personal part is saved as that person's monthly spending and income by category, visible to both of you. Everything is saved together or not at all, and the same statement can't be uploaded twice for the same person. The detailed transaction files never leave your computer: the app refuses them if you pick one by mistake. Older summary files (shared total only) still work.
 - **Categories**: expenses you add by hand and recurring expenses can have an optional category, for the spending reports.
 - **Spending tab** (Ledger · Spending · Trends at the top): spending and cash flow by month, built only from totals.
   - Switch between **You**, **Sam**, **Shared** and **Both**. "You" is your own uploaded spending plus *your share* of shared expenses (so a $100 shared grocery run at 50/50 counts as $50). "Shared" is shared expenses at their full amount. "Both" is everything, and always equals You + Sam.
@@ -146,10 +147,10 @@ Sign in with email and password. That's deliberate, rather than emailed sign-in 
   - **Last 6 months** charts net cash flow (or shared spending); tap a month to jump to it. "Show numbers" under each chart has the same numbers as a table.
   - **Statement uploads** lists every upload, and you can delete a wrong one. A shared entry added by the same import stays in the ledger; void it there.
   - Payments between you, starting balances and voided entries never count as spending. Shared expenses added without a category show as "No category".
-  - **Trends** (its own tab at the top): the last 6 months, the last year, or this year so far, for You, Sam, Shared or Both.
+  - **Trends** (its own tab at the top): the last 6 months (6M), the last year (1Y), or this year so far (YTD), for You, Sam, Shared or Both. The range sits on the same row as whose spending.
     - The total for the period: money in, spent and net (or shared spending).
     - Net cash flow by month.
-    - **By category:** one small chart per category, largest first, with its total, its average per month and its share of all spending. Each small chart has its own scale, so compare shapes there and sizes by the numbers. "Show numbers" has the full month-by-category table.
+    - **By category:** a list, largest first, with each category's total, its share of all spending, its average per month and a small month-by-month bar strip. The strips show shape only (each has its own scale); compare sizes by the numbers. Tap a category for a full chart of its months with the average marked. "Show numbers" has the full month-by-category table.
     - Months that are only partly uploaded are drawn lighter, marked `*`, and left out of the per-month averages.
     - **Export totals as CSV:** one row per month with money in, spent, net and each category, plus whether the month was partial. Totals only, saved to your device.
 - **Void**: entries are never deleted. Voiding one keeps it in the history but stops it counting. Tap **Undo** on the message that appears, or later turn on "Show voided and edited entries" in **More**, open the entry and tap **Restore entry**. Edited originals can't be restored, since their replacement already exists.
@@ -193,7 +194,14 @@ Also bump the `?v=` numbers on the other icon links, deploy, and remove and re-a
     src/api.ts            all the calls to the Worker
     src/LedgerScreen.tsx  the main screen, including the refresh timer
     src/forms.tsx         add expense, settle up, starting balance
-    src/ImportCsv.tsx     the CSV import
+    src/LedgerFilters.tsx search and filters above the ledger
+    src/App.tsx           sign-in check and which screen to show
+    src/AuthScreen.tsx    sign in and create account
+    src/Onboarding.tsx    create or join a household
+    src/ImportSummary.tsx the statement summary import
+    src/SpendingScreen.tsx the Spending tab
+    src/files.ts          saving files (CSV exports) to the device
+    src/ui.tsx            shared UI pieces
     wrangler.jsonc        Cloudflare config
 
 ## Not done yet

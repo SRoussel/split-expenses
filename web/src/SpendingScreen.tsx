@@ -16,6 +16,7 @@ import {
   UNCATEGORIZED,
   type MonthSummary,
   type MoveSource,
+  type Range,
   type SpendingIndex,
   type View,
 } from "./spending";
@@ -61,6 +62,7 @@ export default function SpendingScreen({
   const [data, setData] = useState<SpendingData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>("me");
+  const [range, setRange] = useState<Range>("12m");
   const [month, setMonth] = useState<string | null>(null);
   const [detail, setDetail] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<SpendingBatch | null>(null);
@@ -127,6 +129,19 @@ export default function SpendingScreen({
 
       <div className="view-switch">
         <Segmented tabs label="Whose spending" value={view} onChange={setView} options={viewOptions} />
+        {mode === "trends" && (
+          <Segmented
+            tabs
+            label="Range: 6 months, 1 year or this year so far"
+            value={range}
+            onChange={setRange}
+            options={[
+              { value: "6m", label: "6M" },
+              { value: "12m", label: "1Y" },
+              { value: "ytd", label: "YTD" },
+            ]}
+          />
+        )}
       </div>
 
       {mode === "trends" ? (
@@ -134,6 +149,7 @@ export default function SpendingScreen({
           index={index}
           batches={data.batches}
           view={view}
+          range={range}
           viewLabel={viewOptions.find((o) => o.value === view)?.label ?? view}
           end={latest}
           me={userId}

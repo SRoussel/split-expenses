@@ -614,6 +614,74 @@ button.icon-btn {
   color: var(--neg);
 }
 
+/* ------------------------------------------------------- search, filters */
+
+.ledger-filters {
+  margin-top: 12px;
+}
+
+.search-row {
+  display: flex;
+  gap: 8px;
+}
+
+.search-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+button.filters-btn {
+  flex: none;
+  min-height: 46px;
+  padding: 0 14px;
+  background: transparent;
+  border: 1.5px solid var(--rule);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+button.filters-btn.on,
+button.filters-btn[aria-expanded="true"] {
+  border-color: var(--ink);
+}
+
+.filters {
+  margin-top: 12px;
+  padding: 12px 0 4px;
+  border-top: 1px dotted var(--rule);
+}
+
+.date-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.date-pair input {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.filter-result .nowrap {
+  white-space: nowrap;
+}
+
+.filter-result {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  color: var(--faded);
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-result strong {
+  color: var(--ink);
+}
+
 /* -------------------------------------------------------------- entries */
 
 .month {
@@ -1207,6 +1275,13 @@ ul.cat-bars .change {
   font-weight: 600;
 }
 
+.chart .avg text {
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
 .chart .avg line {
   stroke: var(--faded);
   stroke-width: 1;
@@ -1323,42 +1398,48 @@ details.uploads ul {
   margin: 0 0 10px;
 }
 
-.multiples {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 18px 16px;
+/* Trends, by category: the month-view rows, with a sparkline where the bar was. */
+ul.trend-cats li + li {
+  border-top: 1px dotted var(--rule);
 }
 
-.multiple {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-  padding-top: 8px;
-  border-top: 1px dotted var(--faded);
+ul.trend-cats .cat-track {
+  height: 20px;
 }
 
-.multiple-name {
+ul.trend-cats .change {
   font-family: var(--mono);
-  font-size: 0.78rem;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  overflow-wrap: anywhere;
+  font-size: 0.72rem;
+  color: var(--faded);
+  white-space: nowrap;
 }
 
-.multiple .amount {
-  font-size: 1.05rem;
-  font-weight: 600;
+ul.trend-cats button[aria-expanded="true"] {
+  background: var(--paper-2);
 }
 
-.multiple > .muted {
-  font-family: var(--mono);
-  font-size: 0.7rem;
+.spark {
+  display: block;
+  width: 100%;
+  height: 20px;
 }
 
-.multiple .chart .readout {
-  font-size: 0.7rem;
+.spark rect {
+  fill: var(--chart-pos);
+}
+
+.spark rect.partial {
+  opacity: 0.4;
+}
+
+.spark line {
+  stroke: var(--rule);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.trend-cat-chart {
+  padding: 4px 2px 12px;
 }
 
 .table-scroll {

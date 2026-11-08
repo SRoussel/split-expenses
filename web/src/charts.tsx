@@ -120,15 +120,6 @@ export function ColumnChart({
             )}
           </g>
         ))}
-        {average != null && average > 0 && (
-          <g className="avg">
-            <line x1={pad.left} x2={width - pad.right} y1={y(average)} y2={y(average)} />
-            {/* Left end: the selected (usually latest) column's label sits at the right. */}
-            <text x={pad.left + 4} y={y(average) - 4} textAnchor="start">
-              avg {compactMoney(average)}
-            </text>
-          </g>
-        )}
         {columns.map((c, i) => {
           const cx = pad.left + slot * i + slot / 2;
           const isSel = c.key === selected;
@@ -165,6 +156,15 @@ export function ColumnChart({
             </g>
           );
         })}
+        {average != null && average > 0 && (
+          <g className="avg">
+            <line x1={pad.left} x2={width - pad.right} y1={y(average)} y2={y(average)} />
+            {/* Drawn over the bars, with a paper-colored halo so it stays readable. Left end: the selected (usually latest) column's label sits at the right. */}
+            <text x={pad.left + 4} y={y(average) - 4} textAnchor="start">
+              avg {compactMoney(average)}
+            </text>
+          </g>
+        )}
         <line className="baseline" x1={pad.left} x2={width - pad.right} y1={base} y2={base} />
         {labelled && !active && labelled.value !== 0 && !compact && (
           <text
@@ -214,5 +214,24 @@ export function ChartTable({ head, rows }: { head: string[]; rows: ReactNode[][]
         </tbody>
       </table>
     </details>
+  );
+}
+
+/**
+ * A tiny column chart with no axis, for a row in a list: it shows the shape of a
+ * series, not its size (each sparkline has its own scale). Negative values sit at zero.
+ */
+export function Sparkline({ values, partial, label }: { values: number[]; partial?: boolean[]; label: string }) {
+  const max = Math.max(1, ...values);
+  const n = Math.max(1, values.length);
+  const H = 20;
+  return (
+    <svg className="spark" viewBox={`0 0 ${n * 10} ${H}`} preserveAspectRatio="none" role="img" aria-label={label}>
+      {values.map((v, i) => {
+        const h = v > 0 ? Math.max(1.5, (v / max) * H) : 0;
+        return <rect key={i} className={partial?.[i] ? "partial" : undefined} x={i * 10 + 2} y={H - h} width={6} height={h} />;
+      })}
+      <line x1={0} x2={n * 10} y1={H - 0.5} y2={H - 0.5} />
+    </svg>
   );
 }

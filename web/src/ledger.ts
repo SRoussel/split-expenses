@@ -67,6 +67,60 @@ export function balanceFor(entries: Entry[], userId: string): number {
   return total;
 }
 
+// ---------------------------------------------------------------------------
+// Search and filters
+// ---------------------------------------------------------------------------
+
+export interface EntryFilter {
+  /** Matches the name or category; a plain amount like "84.20" also matches that exact amount. */
+  text: string;
+  kind: "all" | "expense" | "settlement";
+  /** Who paid, from the viewer's point of view. */
+  payer: "all" | "me" | "partner";
+  /** A category, "none" for expenses without one, or "" for any. */
+  category: string;
+  /** YYYY-MM-DD, inclusive; "" for open-ended. */
+  from: string;
+  to: string;
+}
+
+export const NO_FILTER: EntryFilter = { text: "", kind: "all", payer: "all", category: "", from: "", to: "" };
+
+/** How many filters are set, not counting the search text. */
+export function activeFilterCount(f: EntryFilter): number {
+  return [f.kind !== "all", f.payer !== "all", f.category !== "", f.from !== "" || f.to !== ""].filter(Boolean).length;
+}
+
+export function isFiltering(f: EntryFilter): boolean {
+  return f.text.trim() !== "" || activeFilterCount(f) > 0;
+}
+
+export function matchesFilter(e: Entry, f: EntryFilter, userId: string): boolean {
+  if (f.kind !== "all" && e.kind !== f.kind) return false;
+  if (f.payer !== "all" && (e.payer_id === userId) !== (f.payer === "me")) return false;
+  if (f.category === "none" ? !(e.kind === "expense" && !e.category) : f.category && e.category !== f.category)
+    return false;
+  if (f.from && e.entry_date < f.from) return false;
+  if (f.to && e.entry_date > f.to) return false;
+  const q = f.text.trim().toLowerCase();
+  if (!q) return true;
+  if (e.name.toLowerCase().includes(q) || (e.category ?? "").includes(q)) return true;
+  return parseDollars(q) === e.amount_cents;
+}
+
+/** Totals for a set of matching entries: active expenses only (payments and starting balances aren't spending). */
+export function filterTotals(entries: Entry[], userId: string): { count: number; spent: number; mine: number } {
+  let spent = 0;
+  let mine = 0;
+  for (const e of entries) {
+    if (e.voided_at || e.kind !== "expense") continue;
+    spent += e.amount_cents;
+    // The payer's own part is what nobody owes them back.
+    mine += e.payer_id === userId ? e.amount_cents - e.owed_cents : e.owed_cents;
+  }
+  return { count: entries.length, spent, mine };
+}
+
 export function describeBalance(balanceCents: number, partnerName: string): string {
   if (balanceCents > 0) return `${partnerName} owes you ${fmt(balanceCents)}`;
   if (balanceCents < 0) return `You owe ${partnerName} ${fmt(balanceCents)}`;

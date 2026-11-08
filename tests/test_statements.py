@@ -454,6 +454,40 @@ class ArchiveTests(unittest.TestCase):
             finally:
                 os.chdir(old)
 
+    def test_finish_summarizes_then_archives(self):
+        with tempfile.TemporaryDirectory() as d:
+            old = os.getcwd()
+            os.chdir(d)
+            try:
+                for name in ("split_transactions.csv", "personal_transactions.csv"):
+                    Path(name).write_text((FIXTURES / f"sample_{name}").read_text())
+                args = Namespace(person=None, no_personal=False, name=None)
+                with mock.patch("builtins.print"):
+                    split_ledger.cmd_finish(args, None)
+                [dest] = list(Path("archive").iterdir())
+                self.assertEqual(json.loads((dest / "split_summary.json").read_text()),
+                                 json.loads((FIXTURES / "expected_summary_v2.json").read_text()))
+                self.assertTrue((dest / "split_transactions.csv").exists())
+                self.assertFalse(Path("split_summary.json").exists())
+                with self.assertRaises(SystemExit), mock.patch("builtins.print"):
+                    split_ledger.cmd_finish(args, None)  # nothing to summarize: nothing moved
+                self.assertEqual(len(list(Path("archive").iterdir())), 1)
+            finally:
+                os.chdir(old)
+
+    def test_finish_refuses_a_leftover_summary(self):
+        with tempfile.TemporaryDirectory() as d:
+            old = os.getcwd()
+            os.chdir(d)
+            try:
+                Path("split_transactions.csv").write_text((FIXTURES / "sample_split_transactions.csv").read_text())
+                Path("split_summary.json").write_text("{}")
+                with self.assertRaises(SystemExit), mock.patch("builtins.print"):
+                    split_ledger.cmd_finish(Namespace(person=None, no_personal=False, name=None), None)
+                self.assertFalse(Path("archive").exists())
+            finally:
+                os.chdir(old)
+
 
 class SuggestionTests(unittest.TestCase):
     def test_your_own_answer_for_a_similar_name_comes_first(self):

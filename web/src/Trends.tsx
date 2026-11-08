@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ChartTable, ColumnChart, signed } from "./charts";
+import { ChartTable, ColumnChart, signed, Sparkline } from "./charts";
 import { saveTextFile } from "./files";
 import { fmt } from "./ledger";
 import {
@@ -11,19 +11,23 @@ import {
   type View,
 } from "./spending";
 import type { SpendingBatch } from "./types";
-import { Segmented, TallyLine } from "./ui";
+import { TallyLine } from "./ui";
 
 const monthLong = (m: string) =>
   new Date(`${m}-01T00:00:00Z`).toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
 const monthShort = (m: string) =>
   new Date(`${m}-01T00:00:00Z`).toLocaleDateString(undefined, { month: "short", timeZone: "UTC" });
+const monthYear = (m: string) =>
+  new Date(`${m}-01T00:00:00Z`).toLocaleDateString(undefined, { month: "short", year: "numeric", timeZone: "UTC" });
 const pct = (share: number) => `${Math.round(share * 100)}%`;
+const amount = (cents: number) => (cents < 0 ? `−${fmt(cents)}` : fmt(cents));
 
 /** Spending and cash flow over 6 months, 12 months or the year so far: totals only. */
 export default function Trends({
   index,
   batches,
   view,
+  range,
   viewLabel,
   end,
   me,
@@ -33,19 +37,20 @@ export default function Trends({
   index: SpendingIndex;
   batches: SpendingBatch[];
   view: View;
+  range: Range;
   viewLabel: string;
   end: string;
   me: string;
   partner: string | null;
   catName: (c: string) => string;
 }) {
-  const [range, setRange] = useState<Range>("12m");
+  const [open, setOpen] = useState<string | null>(null);
   const months = rangeMonths(end, range);
   const report = useMemo(() => rangeReport(index, batches, view, months, me, partner), [index, batches, view, months.join(), me, partner]);
   const cashflow = report.income !== null;
   const anyPartial = report.partial.some(Boolean);
   const period =
-    range === "ytd" ? `${end.slice(0, 4)} so far` : `${monthShort(months[0])} – ${monthLong(months[months.length - 1])}`;
+    range === "ytd" ? `${end.slice(0, 4)} so far` : `${monthYear(months[0])} – ${monthYear(months[months.length - 1])}`;
   const hasData = report.spent !== 0 || (report.income ?? 0) !== 0;
 
   async function exportCsv() {
@@ -55,20 +60,6 @@ export default function Trends({
 
   return (
     <div className="trends">
-      <div className="month-nav">
-        <Segmented
-          tabs
-          label="Range"
-          value={range}
-          onChange={setRange}
-          options={[
-            { value: "6m", label: "6 months" },
-            { value: "12m", label: "1 year" },
-            { value: "ytd", label: "This year" },
-          ]}
-        />
-      </div>
-
       <section className="card tally" aria-label={`${cashflow ? "Cash flow" : "Shared spending"}, ${period}`}>
         <h3 className="card-title">{period}</h3>
         {cashflow ? (
@@ -138,31 +129,52 @@ export default function Trends({
 
           <section className="card">
             <h3 className="card-title">By category</h3>
-            <p className="muted small multiples-note">Largest first. Each chart has its own scale.</p>
-            <div className="multiples">
-              {report.categories.map((c) => (
-                <div key={c.category} className="multiple">
-                  <strong className="multiple-name">{catName(c.category)}</strong>
-                  <span className="amount">{c.total < 0 ? `−${fmt(c.total)}` : fmt(c.total)}</span>
-                  <span className="muted small">
-                    {c.average !== null ? `${fmt(c.average)}/mo` : "no full month yet"} · {pct(c.share)}
-                  </span>
-                  <ColumnChart
-                    compact
-                    height={84}
-                    label={`${catName(c.category)} by month, ${period}`}
-                    columns={months.map((m, i) => ({
-                      key: m,
-                      label: monthShort(m),
-                      value: Math.max(0, c.series[i]),
-                      partial: report.partial[i],
-                      title: `${monthLong(m)}: ${fmt(c.series[i])}`,
-                      details: [{ value: c.series[i] < 0 ? `−${fmt(c.series[i])}` : fmt(c.series[i]), label: monthShort(m) + (report.partial[i] ? "*" : "") }],
-                    }))}
-                  />
-                </div>
-              ))}
-            </div>
+            <p className="muted small multiples-note">Tap one for its months.</p>
+            <ul className="cat-bars trend-cats">
+              {report.categories.map((c) => {
+                const isOpen = open === c.category;
+                return (
+                  <li key={c.category}>
+                    <button
+                      aria-expanded={isOpen}
+                      onClick={() => setOpen(isOpen ? null : c.category)}
+                      aria-label={`${catName(c.category)}: ${amount(c.total)}, ${pct(c.share)} of spending. ${isOpen ? "Hide" : "Show"} months`}
+                    >
+                      <span className="cat-name">{catName(c.category)}</span>
+                      <span className="lead" aria-hidden="true" />
+                      <span className="cat-amount">{amount(c.total)}</span>
+                      <span className="cat-track">
+                        <Sparkline values={c.series} partial={report.partial} label="" />
+                      </span>
+                      <span className="change">
+                        {pct(c.share)} · {c.average !== null ? `${fmt(c.average)}/mo` : "no full month"}
+                      </span>
+                    </button>
+                    {isOpen && (
+                      <div className="trend-cat-chart">
+                        <ColumnChart
+                          height={130}
+                          average={c.average}
+                          selected={months[months.length - 1]}
+                          label={`${catName(c.category)} by month, ${period}`}
+                          columns={months.map((m, i) => ({
+                            key: m,
+                            label: monthShort(m),
+                            value: Math.max(0, c.series[i]),
+                            partial: report.partial[i],
+                            title: `${monthLong(m)}: ${amount(c.series[i])}`,
+                            details: [
+                              { value: monthLong(m), label: report.partial[i] ? "· partly uploaded ·" : "·" },
+                              { value: amount(c.series[i]), label: catName(c.category).toLowerCase() },
+                            ],
+                          }))}
+                        />
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
             <details className="chart-table wide">
               <summary>Show numbers</summary>
               <div className="table-scroll">
@@ -189,7 +201,7 @@ export default function Trends({
                         <td>{c.average !== null ? fmt(c.average) : "–"}</td>
                         <td>{pct(c.share)}</td>
                         {c.series.map((v, i) => (
-                          <td key={i}>{v < 0 ? `−${fmt(v)}` : fmt(v)}</td>
+                          <td key={i}>{amount(v)}</td>
                         ))}
                       </tr>
                     ))}
