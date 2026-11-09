@@ -11,6 +11,8 @@ import {
   previousPeriod,
   shiftMonth,
   similarNames,
+  whatChanged,
+  findRecurring,
   totals,
   type Filters,
   type Txn,
@@ -157,4 +159,95 @@ test("similar names: same start once case, spaces and & are ignored", () => {
   ]);
   assert.deepEqual(similarNames("Ox", all), [], "too short to guess");
   assert.deepEqual(similarNames("Freshway", all), []);
+});
+
+test("what changed: a month against the average of the months before", () => {
+  const rows = [
+    // Groceries: $100 a month for three months, then $160.
+    txn("2026-01-10", 10000, "Freshway", "groceries"),
+    txn("2026-02-10", 10000, "Freshway", "groceries"),
+    txn("2026-03-10", 10000, "Freshway", "groceries"),
+    txn("2026-04-10", 16000, "Freshway", "groceries"),
+    // A gym every month until April.
+    txn("2026-01-02", 5000, "Gym", "hobbies"),
+    txn("2026-02-02", 5000, "Gym", "hobbies"),
+    txn("2026-03-02", 5000, "Gym", "hobbies"),
+    // Somewhere new in April.
+    txn("2026-04-20", 2500, "New Place", "dining"),
+    txn("2026-04-21", 1500, "New Place", "dining"),
+    txn("2026-04-01", 999999, "Payroll", "income"),
+  ];
+  const c = whatChanged(rows, "2026-04", "income");
+  assert.deepEqual(c.compared, ["2026-01", "2026-02", "2026-03"], "only months with data count");
+  assert.equal(c.now, 20000);
+  assert.equal(c.usual, 15000);
+  assert.deepEqual(c.categories[0], { key: "groceries", now: 16000, usual: 10000, diff: 6000 });
+  assert.deepEqual(
+    c.categories.map((x) => x.key),
+    ["groceries", "hobbies", "dining"],
+  );
+  assert.deepEqual(c.fresh, [{ merchant: "New Place", category: "dining", total: 4000, count: 2 }]);
+  assert.deepEqual(c.missing, [{ merchant: "Gym", usual: 5000, last: "2026-03-02" }]);
+  assert.equal(whatChanged(rows, "2026-01", "income").compared.length, 0, "nothing before the first month");
+});
+
+test("recurring: steady pace and amount, price changes, and ones that stopped", () => {
+  const monthly = (merchant: string, amounts: number[], start = 1, category = "entertainment") =>
+    amounts.map((c, i) => txn(`2026-${String(start + i).padStart(2, "0")}-05`, c, merchant, category));
+  const rows = [
+    ...monthly("Streamy", [1599, 1599, 1599, 1799, 1799, 1799]), // went up in April
+    ...monthly("Old App", [499, 499, 499], 1), // stopped after March
+    ...monthly("Gym", [5000, 5000, 5000, 5000, 5000, 5000], 1, "hobbies"),
+    txn("2025-06-01", 9900, "Annual Thing", "other"),
+    txn("2026-06-02", 9900, "Annual Thing", "other"),
+    // Two plans at one store, and a one-off charge at the gym.
+    // Two plans at one store: $2.99 on the 5th and $9.99 on the 20th, every month.
+    ...[1, 2, 3, 4, 5, 6].flatMap((mo) => [
+      txn(`2026-0${mo}-05`, 299, "App Store", "entertainment"),
+      txn(`2026-0${mo}-20`, 999, "App Store", "entertainment"),
+    ]),
+    txn("2025-12-28", 1898, "Gym", "hobbies"),
+    // Electricity: every month, never the same amount.
+    ...monthly("Power Co", [8812, 6420, 5133, 7790, 11020, 9375], 1, "utilities"),
+    // The same grocery bill twice, by chance, ten months apart.
+    txn("2025-08-03", 7393, "Corner Shop", "groceries"),
+    txn("2026-06-01", 7393, "Corner Shop", "groceries"),
+    // Groceries: often, but not steady.
+    ...["01-03", "01-09", "01-20", "02-02", "02-05", "02-25", "03-14"].map((d, i) =>
+      txn(`2026-${d}`, 3000 + i * 2500, "Freshway", "groceries"),
+    ),
+  ];
+  const found = findRecurring(rows, "income", "2026-06-20");
+  const by = new Map(found.map((r) => [r.merchant, r]));
+  assert.equal(by.has("Freshway"), false, "irregular shopping isn't a subscription");
+  assert.equal(by.has("Corner Shop"), false, "two equal bills months apart aren't a yearly charge");
+  assert.deepEqual(
+    found.map((r) => r.merchant),
+    ["Power Co", "Gym", "Streamy", "App Store", "Annual Thing", "App Store", "Old App"],
+    "active first, biggest yearly cost first",
+  );
+
+  const s = by.get("Streamy")!;
+  assert.equal(s.cadence, "monthly");
+  assert.equal(s.amount, 1799);
+  assert.deepEqual(s.change, { from: 1599, since: "2026-04-05" });
+  assert.equal(s.perYear, Math.round((1799 * 365.25) / 30.44));
+  assert.equal(s.next, "2026-07-05");
+  assert.equal(s.active, true);
+
+  assert.equal(by.get("Old App")!.active, false);
+  assert.equal(by.get("Gym")!.change, null, "a single odd charge isn't a price change");
+  assert.equal(by.get("Annual Thing")!.cadence, "yearly");
+  const power = by.get("Power Co")!;
+  assert.equal(power.varies, true);
+  assert.equal(power.amount, Math.round((7790 + 11020 + 9375) / 3), "the average of the last three bills");
+  assert.equal(by.get("Streamy")!.varies, false);
+  assert.deepEqual(
+    found.filter((r) => r.merchant === "App Store").map((r) => [r.plan, r.cadence, r.active]),
+    [
+      [999, "monthly", true],
+      [299, "monthly", true],
+    ],
+    "each plan at a store with several is found on its own",
+  );
 });

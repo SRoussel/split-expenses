@@ -18,8 +18,10 @@ import {
   type Txn,
 } from "./analytics";
 import { categoryLabel, dayLabel, money, moneyRound, monthName, percent, personLabel, rangeLabel } from "./format";
+import ChangesView from "./ChangesView";
 import ExportDialog from "./ExportDialog";
 import MonthChart, { Sparkline } from "./MonthChart";
+import RecurringView from "./RecurringView";
 
 const PRESETS: { id: Preset; label: string }[] = [
   { id: "12m", label: "Last 12 months" },
@@ -29,6 +31,13 @@ const PRESETS: { id: Preset; label: string }[] = [
 ];
 
 type Theme = "system" | "light" | "dark";
+type Screen = "overview" | "changes" | "recurring";
+
+const SCREENS: { id: Screen; label: string }[] = [
+  { id: "overview", label: "Where the money goes" },
+  { id: "changes", label: "What changed" },
+  { id: "recurring", label: "Recurring charges" },
+];
 
 function useTheme(): [Theme, (t: Theme) => void] {
   const [theme, setTheme] = useState<Theme>(() => {
@@ -98,6 +107,7 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
   );
 
   const [preset, setPreset] = useState<Preset>("12m");
+  const [screen, setScreen] = useState<Screen>("overview");
   const [f, setF] = useState<Filters>(() => ({
     ...presetRange("12m", first, last),
     person: null,
@@ -192,6 +202,28 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
 
   const merchants = useMemo(() => byMerchant(applyFilters(txns, f, "merchant"), income), [txns, f, income]);
 
+  // The other views use only who and what type; they pick their own months.
+  const scoped = useMemo(
+    () => txns.filter((t) => (!f.person || t.person === f.person) && (!f.kind || t.kind === f.kind)),
+    [txns, f.person, f.kind],
+  );
+
+  /** From another view to the overview, showing what was clicked across all time. */
+  function openInOverview(patch: Partial<Filters>) {
+    setScreen("overview");
+    setPreset("all");
+    setF((prev) => ({
+      ...prev,
+      ...presetRange("all", first, last),
+      month: null,
+      category: null,
+      merchant: null,
+      query: "",
+      ...patch,
+    }));
+    window.scrollTo(0, 0);
+  }
+
   const refiled = useMemo(() => txns.filter((t) => t.original).length, [txns]);
   const scope = f.month ? monthName(f.month) : rangeLabel(f.from, f.to);
   const what = f.category ? categoryLabel(f.category) : f.merchant ? f.merchant : "Spending";
@@ -213,13 +245,23 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
           Split <span className="brand-sub">Insights</span>
         </div>
 
-        <NavGroup title="Period">
-          {PRESETS.map((p) => (
-            <NavItem key={p.id} on={preset === p.id} onClick={() => choosePreset(p.id)}>
-              {p.label}
+        <NavGroup title="View">
+          {SCREENS.map((v) => (
+            <NavItem key={v.id} on={screen === v.id} onClick={() => setScreen(v.id)}>
+              {v.label}
             </NavItem>
           ))}
         </NavGroup>
+
+        {screen === "overview" && (
+          <NavGroup title="Period">
+            {PRESETS.map((p) => (
+              <NavItem key={p.id} on={preset === p.id} onClick={() => choosePreset(p.id)}>
+                {p.label}
+              </NavItem>
+            ))}
+          </NavGroup>
+        )}
 
         {people.length > 1 && (
           <NavGroup title="Whose">
@@ -279,152 +321,164 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
       </aside>
 
       <main className="main">
-        <header className="top">
-          <div>
-            <h1>Where the money goes</h1>
-            <p className="sub">{scope}</p>
-          </div>
-          <div className="top-actions">
-            <label className="search">
-              <span className="sr-only">Search transactions</span>
-              <input
-                ref={search}
-                type="search"
-                placeholder="Search merchants, categories, amounts"
-                value={f.query}
-                onChange={(e) => set({ query: e.target.value })}
-              />
-              <kbd>/</kbd>
-            </label>
-            <button className="btn" onClick={() => setExporting(true)}>
-              Export for phone app
-            </button>
-          </div>
-        </header>
+        {screen === "changes" ? (
+          <ChangesView txns={scoped} income={income} onOpen={openInOverview} />
+        ) : screen === "recurring" ? (
+          <RecurringView txns={scoped} income={income} today={txns[0].date} onOpen={openInOverview} />
+        ) : (
+          <>
+            <header className="top">
+              <div>
+                <h1>Where the money goes</h1>
+                <p className="sub">{scope}</p>
+              </div>
+              <div className="top-actions">
+                <label className="search">
+                  <span className="sr-only">Search transactions</span>
+                  <input
+                    ref={search}
+                    type="search"
+                    placeholder="Search merchants, categories, amounts"
+                    value={f.query}
+                    onChange={(e) => set({ query: e.target.value })}
+                  />
+                  <kbd>/</kbd>
+                </label>
+                <button className="btn" onClick={() => setExporting(true)}>
+                  Export for phone app
+                </button>
+              </div>
+            </header>
 
-        {chips.length > 0 && (
-          <div className="chips">
-            {chips.map((c) => (
-              <button key={c.label} className="chip" onClick={c.clear} title="Remove this filter">
-                {c.label} <span aria-hidden="true">×</span>
-              </button>
-            ))}
-            <button
-              className="link"
-              onClick={() => set({ month: null, category: null, merchant: null, person: null, kind: null, query: "" })}
-            >
-              Clear all <kbd>Esc</kbd>
-            </button>
-          </div>
-        )}
-
-        <section className="kpis">
-          <Kpi label="Spent" value={now.spent} delta={delta("spent")} vs={vs} />
-          <Kpi label="Shared" value={now.shared} delta={delta("shared")} vs={vs} swatch="shared" />
-          <Kpi label="Personal" value={now.personal} delta={delta("personal")} vs={vs} swatch="personal" />
-          {f.month ? (
-            <div className="kpi">
-              <div className="kpi-label">Transactions</div>
-              <div className="kpi-value">{now.count}</div>
-            </div>
-          ) : (
-            <Kpi label="Per month" value={Math.round(now.spent / months.length)} />
-          )}
-          {f.category || f.merchant ? (
-            <Kpi label="Average transaction" value={now.count ? Math.round(now.spent / now.count) : 0} />
-          ) : (
-            <Kpi label="Money in" value={now.income} delta={delta("income")} vs={vs} />
-          )}
-        </section>
-
-        <section className="panel">
-          <div className="panel-head">
-            <h2>{what} by month</h2>
-            <div className="legend">
-              <span>
-                <span className="swatch shared" />
-                Shared
-              </span>
-              <span>
-                <span className="swatch personal" />
-                Personal
-              </span>
-            </div>
-          </div>
-          <MonthChart rows={monthRows} selected={f.month} onSelect={(month) => set({ month })} />
-        </section>
-
-        <div className="split">
-          <section className="panel">
-            <div className="panel-head">
-              <h2>Categories</h2>
-              <span className="muted">click to filter</span>
-            </div>
-            <table className="grid-table">
-              <thead>
-                <tr>
-                  <th>Category</th>
-                  <th className="bar-col" aria-label="Share" />
-                  <th className="num">Share</th>
-                  <th className="num">Amount</th>
-                  <th className="spark-col">Trend</th>
-                </tr>
-              </thead>
-              <tbody>
-                {categories.map((c) => (
-                  <tr
-                    key={c.category}
-                    className={`clickable${f.category === c.category ? " on" : ""}${f.category && f.category !== c.category ? " dim" : ""}`}
-                    onClick={() => set({ category: f.category === c.category ? null : c.category })}
-                  >
-                    <td>
-                      <button className="row-button" aria-pressed={f.category === c.category}>
-                        {categoryLabel(c.category)}
-                      </button>
-                    </td>
-                    <td className="bar-col">
-                      <span
-                        className="hbar"
-                        style={{ width: `${(Math.max(0, c.total) / Math.max(1, categories[0]?.total ?? 1)) * 100}%` }}
-                      />
-                    </td>
-                    <td className="num muted">{percent(c.share)}</td>
-                    <td className="num">{moneyRound(c.total)}</td>
-                    <td className="spark-col">
-                      <Sparkline values={trend.get(c.category) ?? []} />
-                    </td>
-                  </tr>
+            {chips.length > 0 && (
+              <div className="chips">
+                {chips.map((c) => (
+                  <button key={c.label} className="chip" onClick={c.clear} title="Remove this filter">
+                    {c.label} <span aria-hidden="true">×</span>
+                  </button>
                 ))}
-                {categories.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="empty">
-                      Nothing here.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
+                <button
+                  className="link"
+                  onClick={() =>
+                    set({ month: null, category: null, merchant: null, person: null, kind: null, query: "" })
+                  }
+                >
+                  Clear all <kbd>Esc</kbd>
+                </button>
+              </div>
+            )}
 
-          <MerchantsPanel
-            rows={merchants}
-            selected={f.merchant}
-            onSelect={(merchant) => set({ merchant })}
-            autosByMerchant={autosByMerchant}
-            onRename={rename}
-          />
-        </div>
+            <section className="kpis">
+              <Kpi label="Spent" value={now.spent} delta={delta("spent")} vs={vs} />
+              <Kpi label="Shared" value={now.shared} delta={delta("shared")} vs={vs} swatch="shared" />
+              <Kpi label="Personal" value={now.personal} delta={delta("personal")} vs={vs} swatch="personal" />
+              {f.month ? (
+                <div className="kpi">
+                  <div className="kpi-label">Transactions</div>
+                  <div className="kpi-value">{now.count}</div>
+                </div>
+              ) : (
+                <Kpi label="Per month" value={Math.round(now.spent / months.length)} />
+              )}
+              {f.category || f.merchant ? (
+                <Kpi label="Average transaction" value={now.count ? Math.round(now.spent / now.count) : 0} />
+              ) : (
+                <Kpi label="Money in" value={now.income} delta={delta("income")} vs={vs} />
+              )}
+            </section>
 
-        <TransactionsPanel
-          txns={view}
-          all={txns}
-          me={me}
-          income={income}
-          categories={data.categories}
-          onMerchant={(merchant) => set({ merchant })}
-          onClassify={(changes) => post("/api/classify", { changes })}
-          onRemember={(rules) => post("/api/rules", { rules })}
-        />
+            <section className="panel">
+              <div className="panel-head">
+                <h2>{what} by month</h2>
+                <div className="legend">
+                  <span>
+                    <span className="swatch shared" />
+                    Shared
+                  </span>
+                  <span>
+                    <span className="swatch personal" />
+                    Personal
+                  </span>
+                </div>
+              </div>
+              <MonthChart rows={monthRows} selected={f.month} onSelect={(month) => set({ month })} />
+            </section>
+
+            <div className="split">
+              <section className="panel">
+                <div className="panel-head">
+                  <h2>Categories</h2>
+                  <span className="muted">click to filter</span>
+                </div>
+                <table className="grid-table">
+                  <thead>
+                    <tr>
+                      <th>Category</th>
+                      <th className="bar-col" aria-label="Share" />
+                      <th className="num">Share</th>
+                      <th className="num">Amount</th>
+                      <th className="spark-col">Trend</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {categories.map((c) => (
+                      <tr
+                        key={c.category}
+                        className={`clickable${f.category === c.category ? " on" : ""}${f.category && f.category !== c.category ? " dim" : ""}`}
+                        onClick={() => set({ category: f.category === c.category ? null : c.category })}
+                      >
+                        <td>
+                          <button className="row-button" aria-pressed={f.category === c.category}>
+                            {categoryLabel(c.category)}
+                          </button>
+                        </td>
+                        <td className="bar-col">
+                          <span
+                            className="hbar"
+                            style={{
+                              width: `${(Math.max(0, c.total) / Math.max(1, categories[0]?.total ?? 1)) * 100}%`,
+                            }}
+                          />
+                        </td>
+                        <td className="num muted">{percent(c.share)}</td>
+                        <td className="num">{moneyRound(c.total)}</td>
+                        <td className="spark-col">
+                          <Sparkline values={trend.get(c.category) ?? []} />
+                        </td>
+                      </tr>
+                    ))}
+                    {categories.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="empty">
+                          Nothing here.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </section>
+
+              <MerchantsPanel
+                rows={merchants}
+                selected={f.merchant}
+                onSelect={(merchant) => set({ merchant })}
+                autosByMerchant={autosByMerchant}
+                onRename={rename}
+              />
+            </div>
+
+            <TransactionsPanel
+              txns={view}
+              all={txns}
+              me={me}
+              income={income}
+              categories={data.categories}
+              onMerchant={(merchant) => set({ merchant })}
+              onClassify={(changes) => post("/api/classify", { changes })}
+              onRemember={(rules) => post("/api/rules", { rules })}
+            />
+          </>
+        )}
       </main>
       {exporting && <ExportDialog data={data} onData={onData} onClose={() => setExporting(false)} />}
     </div>

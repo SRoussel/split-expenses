@@ -16,6 +16,8 @@
   --bar: #c4c6cb; /* neutral bars in tables */
   --bar-on: #2a78d6;
   --credit: #0f7a3f;
+  --more: #e34948; /* spent more than usual (diverging: red) */
+  --less: #2a78d6; /* spent less (diverging: blue) */
   --focus: #2a78d6;
   --side: #ebebe7;
   --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -38,6 +40,8 @@
     --bar: #464950;
     --bar-on: #3987e5;
     --credit: #4cc38a;
+    --more: #e66767;
+    --less: #3987e5;
     --focus: #5598e7;
     --side: #121316;
     color-scheme: dark;
@@ -57,6 +61,8 @@
   --bar: #464950;
   --bar-on: #3987e5;
   --credit: #4cc38a;
+  --more: #e66767;
+  --less: #3987e5;
   --focus: #5598e7;
   --side: #121316;
   color-scheme: dark;
@@ -927,6 +933,88 @@ dialog.export::backdrop {
 }
 .export-actions .hint {
   margin-right: auto;
+}
+
+/* --- What changed --- */
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.stepper .btn {
+  padding: 3px 10px;
+}
+.stepper-label {
+  min-width: 120px;
+  text-align: center;
+  font-weight: 600;
+}
+.note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.swatch.more {
+  background: var(--more);
+}
+.swatch.less {
+  background: var(--less);
+}
+.div-col {
+  width: 30%;
+}
+.div-track {
+  position: relative;
+  display: block;
+  height: 10px;
+  background: linear-gradient(var(--axis), var(--axis)) center / 1px 100% no-repeat;
+}
+.div-bar {
+  position: absolute;
+  top: 1px;
+  height: 8px;
+  min-width: 2px;
+}
+.div-bar.more {
+  background: var(--more);
+  border-radius: 0 3px 3px 0;
+}
+.div-bar.less {
+  background: var(--less);
+  border-radius: 3px 0 0 3px;
+}
+.stack-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.panel .empty {
+  margin: 0;
+}
+
+/* --- Recurring charges --- */
+
+.pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 11px;
+  background: var(--panel-2);
+  color: var(--text-2);
+  margin-left: 6px;
+}
+.pill.up {
+  background: color-mix(in srgb, var(--more) 18%, var(--panel));
+  color: var(--text);
+}
+.pill.down {
+  background: color-mix(in srgb, var(--less) 18%, var(--panel));
+  color: var(--text);
+}
+.recurring.stopped td {
+  opacity: 0.6;
 }
 
 /* --- Narrower windows --- */

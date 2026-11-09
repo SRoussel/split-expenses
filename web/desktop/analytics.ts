@@ -245,3 +245,223 @@ export function similarNames(name: string, all: Iterable<string>): string[] {
   }
   return out.sort().slice(0, 6);
 }
+
+// ---------------------------------------------------------------------------
+// What changed: one month against the months before it
+// ---------------------------------------------------------------------------
+
+export interface Mover {
+  key: string; // a category or merchant
+  now: number;
+  usual: number; // average over the months compared with
+  diff: number;
+}
+
+export interface Changes {
+  month: string;
+  compared: string[]; // the months "usual" averages over (only ones with data)
+  now: number;
+  usual: number;
+  categories: Mover[];
+  merchants: Mover[];
+  /** First time ever at this merchant. */
+  fresh: { merchant: string; category: string; total: number; count: number }[];
+  /** At this merchant most months, but not this one. */
+  missing: { merchant: string; usual: number; last: string }[];
+}
+
+/** `month` against the average of up to `lookback` months before it, from the transactions given. */
+export function whatChanged(txns: Txn[], month: string, income: string, lookback = 6): Changes {
+  const spending = txns.filter((t) => isSpending(t, income));
+  const first = spending.length ? spending.map((t) => monthOf(t.date)).sort()[0] : month;
+  const compared = monthRange(shiftMonth(month, -lookback), shiftMonth(month, -1)).filter((m) => m >= first);
+  const span = Math.max(1, compared.length);
+  const inCompared = new Set(compared);
+
+  const tally = (key: (t: Txn) => string) => {
+    const now = new Map<string, number>();
+    const before = new Map<string, number>();
+    for (const t of spending) {
+      const m = monthOf(t.date);
+      if (m === month) now.set(key(t), (now.get(key(t)) ?? 0) + t.cents);
+      else if (inCompared.has(m)) before.set(key(t), (before.get(key(t)) ?? 0) + t.cents);
+    }
+    const keys = new Set([...now.keys(), ...before.keys()]);
+    return [...keys]
+      .map((k) => {
+        const n = now.get(k) ?? 0;
+        const usual = compared.length ? Math.round((before.get(k) ?? 0) / span) : 0;
+        return { key: k, now: n, usual, diff: n - usual };
+      })
+      .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff) || a.key.localeCompare(b.key));
+  };
+
+  const seenBefore = new Set(spending.filter((t) => monthOf(t.date) < month).map((t) => t.merchant));
+  const fresh = byMerchant(
+    spending.filter((t) => monthOf(t.date) === month && !seenBefore.has(t.merchant)),
+    income,
+  ).map(({ merchant, category, total, count }) => ({ merchant, category, total, count }));
+
+  // "Most months": in at least two thirds of the months compared with (and at least 3 of them).
+  const monthsAt = new Map<string, Set<string>>();
+  const lastAt = new Map<string, string>();
+  for (const t of spending) {
+    const m = monthOf(t.date);
+    if (!inCompared.has(m)) continue;
+    if (!monthsAt.has(t.merchant)) monthsAt.set(t.merchant, new Set());
+    monthsAt.get(t.merchant)!.add(m);
+    if (t.date > (lastAt.get(t.merchant) ?? "")) lastAt.set(t.merchant, t.date);
+  }
+  const hereNow = new Set(spending.filter((t) => monthOf(t.date) === month).map((t) => t.merchant));
+  const merchants = tally((t) => t.merchant);
+  const usualOf = new Map(merchants.map((m) => [m.key, m.usual]));
+  const missing = [...monthsAt]
+    .filter(([m, months]) => !hereNow.has(m) && months.size >= Math.max(3, Math.ceil((compared.length * 2) / 3)))
+    .map(([m]) => ({ merchant: m, usual: usualOf.get(m) ?? 0, last: lastAt.get(m)! }))
+    .sort((a, b) => b.usual - a.usual);
+
+  const categories = tally((t) => t.category);
+  return {
+    month,
+    compared,
+    now: categories.reduce((n, c) => n + c.now, 0),
+    usual: categories.reduce((n, c) => n + c.usual, 0),
+    categories,
+    merchants,
+    fresh,
+    missing,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Recurring charges: the same merchant, at a steady pace, for a steady amount
+// ---------------------------------------------------------------------------
+
+export type Cadence = "weekly" | "monthly" | "yearly";
+const CADENCE_DAYS: Record<Cadence, number> = { weekly: 7, monthly: 30.44, yearly: 365.25 };
+// How far a gap may stray from the cadence. Tight for yearly: two visits about a year apart
+// for about the same amount happen by chance at shops you go to all the time.
+const LEEWAY: Record<Cadence, number> = { weekly: 0.3, monthly: 0.3, yearly: 0.1 };
+
+export interface Recurring {
+  merchant: string;
+  plan: number | null; // when a merchant has several plans: this one's amount
+  varies: boolean; // a bill whose amount changes month to month (utilities, housing): amount is the recent average
+  category: string;
+  kind: Kind;
+  cadence: Cadence;
+  amount: number; // the latest charge
+  perYear: number;
+  count: number;
+  first: string;
+  last: string;
+  next: string; // when the next one would come
+  active: boolean; // a charge has come within about one and a half cycles
+  change: { from: number; since: string } | null; // the price moved, and when
+  charges: { date: string; cents: number }[];
+}
+
+const DAY = 86_400_000;
+const toDay = (d: string) => Date.parse(`${d}T00:00:00Z`) / DAY;
+const fromDay = (n: number) => new Date(Math.round(n) * DAY).toISOString().slice(0, 10);
+const median = (xs: number[]) => {
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = s.length >> 1;
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+};
+const near = (a: number, b: number, tolerance: number) => Math.abs(a - b) <= Math.max(Math.abs(b) * tolerance, 100);
+
+/**
+ * Charges that repeat. A merchant counts when its charges come at a steady pace (weekly,
+ * monthly or yearly: most gaps within 30% of it) and for a steady amount (most within 20%
+ * of the usual, or a dollar). Price changes show up as the latest run of equal charges
+ * differing from the run before it. `today` is the latest date in the data.
+ */
+export function findRecurring(txns: Txn[], income: string, today: string): Recurring[] {
+  const byMerchant = new Map<string, Txn[]>();
+  for (const t of txns) {
+    if (!isSpending(t, income) || t.cents <= 0) continue;
+    if (!byMerchant.has(t.merchant)) byMerchant.set(t.merchant, []);
+    byMerchant.get(t.merchant)!.push(t);
+  }
+  const out: Recurring[] = [];
+  for (const [merchant, rows] of byMerchant) {
+    rows.sort((a, b) => a.date.localeCompare(b.date));
+    const whole = detect(merchant, rows, today);
+    if (whole) {
+      out.push(whole);
+      continue;
+    }
+    // Several plans at one merchant (Apple, Google): look at each repeating amount on its own.
+    const byAmount = new Map<number, Txn[]>();
+    for (const t of rows) {
+      if (!byAmount.has(t.cents)) byAmount.set(t.cents, []);
+      byAmount.get(t.cents)!.push(t);
+    }
+    for (const [cents, same] of byAmount) {
+      const r = same.length >= 3 ? detect(merchant, same, today) : null;
+      if (r) out.push({ ...r, plan: cents });
+    }
+  }
+  return out.sort((a, b) => Number(b.active) - Number(a.active) || b.perYear - a.perYear);
+}
+
+const BILLS = new Set(["utilities", "housing"]);
+
+function detect(merchant: string, rows: Txn[], today: string): Recurring | null {
+  if (rows.length < 2) return null;
+  const days = rows.map((t) => toDay(t.date));
+  const gaps = days.slice(1).map((d, i) => d - days[i]);
+  const gap = median(gaps);
+  const cadence = (["weekly", "monthly", "yearly"] as Cadence[]).find(
+    (c) => Math.abs(gap - CADENCE_DAYS[c]) <= CADENCE_DAYS[c] * LEEWAY[c],
+  );
+  if (!cadence || rows.length < (cadence === "yearly" ? 2 : 3)) return null;
+  const step = CADENCE_DAYS[cadence];
+  const steady = gaps.filter((g) => Math.abs(g - step) <= step * LEEWAY[cadence]).length;
+  if (steady < Math.ceil(gaps.length * 0.75)) return null;
+  const most = <T>(xs: T[]) =>
+    [...new Set(xs)].sort((a, b) => xs.filter((x) => x === b).length - xs.filter((x) => x === a).length)[0];
+  const category = most(rows.map((t) => t.category));
+  const usual = median(rows.map((t) => t.cents));
+  const alike = rows.filter((t) => near(t.cents, usual, 0.2)).length;
+  // Bills like electricity come every month for a different amount; still recurring.
+  const varies = alike < Math.ceil(rows.length * 0.7);
+  if (varies && !(cadence === "monthly" && rows.length >= 4 && BILLS.has(category))) return null;
+
+  // The latest run of charges at (about) one amount, and the run before it. A price change
+  // needs the old price charged at least twice, so a one-off extra charge doesn't count.
+  const same = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, b * 0.01);
+  const last = rows[rows.length - 1];
+  let i = rows.length - 1;
+  while (i > 0 && same(rows[i - 1].cents, last.cents)) i--;
+  let change: Recurring["change"] = null;
+  if (i > 0) {
+    const before = rows[i - 1].cents;
+    let j = i - 1;
+    while (j > 0 && same(rows[j - 1].cents, before)) j--;
+    if (i - j >= 2 && Math.abs(before - last.cents) >= Math.max(50, before * 0.02)) {
+      change = { from: before, since: rows[i].date };
+    }
+  }
+
+  const recent = rows.slice(-3);
+  const amount = varies ? Math.round(recent.reduce((n, t) => n + t.cents, 0) / recent.length) : last.cents;
+  return {
+    merchant,
+    plan: null,
+    varies,
+    category,
+    kind: most(rows.map((t) => t.kind)),
+    cadence,
+    amount,
+    perYear: Math.round((amount * 365.25) / step),
+    count: rows.length,
+    first: rows[0].date,
+    last: last.date,
+    next: fromDay(toDay(last.date) + step),
+    active: toDay(today) - toDay(last.date) <= step * 1.5 + 5,
+    change: varies ? null : change,
+    charges: rows.map((t) => ({ date: t.date, cents: t.cents })),
+  };
+}

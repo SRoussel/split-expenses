@@ -124,6 +124,8 @@ The page runs on `127.0.0.1` and only answers to that address, so other machines
 
 Click a month, a category or a merchant to filter everything else by it. `/` jumps to search, and Esc clears.
 
+Besides that overview there are two more views in the sidebar. **What changed** compares a month with the six before it: which categories and merchants went up or down, places you went for the first time, and regulars you skipped. **Recurring charges** finds subscriptions, memberships and bills from merchants that charge on a steady schedule, with what each costs a year, when the next one is due, and any price change. Bills that vary (electricity) count when they're filed as utilities or housing. Click anything in either view to see those transactions in the overview.
+
 When the same place shows up under different names, pick one in Merchants and rename it. Typing another merchant's name merges the two, and it suggests names that look alike.
 
 You can also refile transactions there: change the category or shared/personal right in the list, or tick several (shift-click for a range) and change them together. Each change can be undone, and "edited" on a row shows what the statement had and puts it back. When everything you changed is one merchant, it offers to file that merchant the same way in future statements, which saves the same rule `split-statements` would.
