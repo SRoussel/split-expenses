@@ -250,6 +250,5 @@ Ideas, roughly in the order I'd do them. These will move to GitHub issues.
 - Splitting one receipt by item, part shared and part personal.
 - A year in review page.
 - Offline use. It needs a connection.
-- Desktop page: let refilings made there go into the next `finish` too, not only into its own exports.
 - Desktop page: a year in review, now that it has every transaction to work with.
 - Desktop app: a Windows build, for when the files don't live in WSL.
