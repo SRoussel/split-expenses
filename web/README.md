@@ -244,10 +244,12 @@ Ideas, roughly in the order I'd do them. These will move to GitHub issues.
 - Settle up through Venmo or PayPal with the amount filled in.
 - A note under the balance like "last settled 47 days ago".
 - Notes on entries.
-- Flag unusual spending ("dining is 40% above usual").
 - A reminder when it's been a while since the last statement upload.
 - Budgets per category.
 - Shared savings goals, like a vacation fund.
 - Splitting one receipt by item, part shared and part personal.
 - A year in review page.
 - Offline use. It needs a connection.
+- Desktop page: let refilings made there go into the next `finish` too, not only into its own exports.
+- Desktop page: a year in review, now that it has every transaction to work with.
+- Desktop app: a Windows build, for when the files don't live in WSL.

@@ -8,6 +8,10 @@
   <img src="screenshots/trends.png" alt="Trends: a year of cash flow and spending by category" width="260">
 </p>
 
+<p>
+  <img src="screenshots/desktop.png" alt="The desktop page: a year of spending by month, category and merchant" width="790">
+</p>
+
 My partner and I share a lot of expenses, and I wanted an easy way to keep track of who owes who without handing our bank statements to a budgeting app. This is what I ended up with.
 
 It has three parts:
