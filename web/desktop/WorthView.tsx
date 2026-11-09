@@ -34,6 +34,12 @@ const TYPE_LABEL: Record<string, string> = {
   mortgage: "Mortgage",
   loan: "Loan",
 };
+const KIND_LABEL = { bank: "Bank account", card: "Card", investment: "Investment account" };
+const KIND_DEFAULT = {
+  bank: { name: "Checking", type: "checking" },
+  card: { name: "Card", type: "credit card" },
+  investment: { name: "Investments", type: "investment" },
+};
 const STALE_DAYS = 45;
 const longDay = (d: string) => `${dayLabel(d)}, ${d.slice(0, 4)}`;
 
@@ -134,7 +140,8 @@ export default function WorthView({ txns, income }: { txns: Txn[]; income: strin
           <h2>Start with your accounts</h2>
           <p className="hint">
             Add each account once: checking and savings, investments and retirement, the house if you count it, and
-            cards or loans. Accounts with statements here fill in their own history; the rest you update once a month.
+            cards or loans. Accounts with statements or downloads here fill in their own history (statements go in
+            statements/, brokerage and retirement downloads in balances/); the rest you update once a month.
           </p>
         </section>
       ) : (
@@ -257,17 +264,17 @@ export default function WorthView({ txns, income }: { txns: Txn[]; income: strin
       {suggestions.length > 0 && (
         <section className="panel">
           <div className="panel-head">
-            <h2>In your statements, not added yet</h2>
+            <h2>In your statements and downloads, not added yet</h2>
           </div>
           <ul className="found">
             {suggestions.map((s) => (
               <li key={`${s.ref}|${s.person}`}>
                 <span>
                   <strong>
-                    {s.kind === "card" ? "Card" : "Bank account"} ending {s.ref}
+                    {KIND_LABEL[s.kind]} ending {s.ref}
                   </strong>
                   <span className="cell-sub">
-                    {s.person === me ? "Your" : `${who(s.person)}'s`} statements · {s.count} statement
+                    {s.person === me ? "Your" : `${who(s.person)}'s`} files · {s.count} file
                     {s.count === 1 ? "" : "s"} · latest {money(s.latest.cents)} on {longDay(s.latest.date)}
                   </span>
                 </span>
@@ -276,8 +283,8 @@ export default function WorthView({ txns, income }: { txns: Txn[]; income: strin
                   onClick={() =>
                     setEditing({
                       prefill: {
-                        name: `${s.kind === "card" ? "Card" : "Checking"} ••${s.ref}`,
-                        type: s.kind === "card" ? "credit card" : "checking",
+                        name: `${KIND_DEFAULT[s.kind].name} ••${s.ref}`,
+                        type: KIND_DEFAULT[s.kind].type,
                         owner: s.person,
                         match: s.ref,
                       },
@@ -286,6 +293,24 @@ export default function WorthView({ txns, income }: { txns: Txn[]; income: strin
                 >
                   Add
                 </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {worth.problems.length > 0 && (
+        <section className="panel">
+          <div className="panel-head">
+            <h2>Downloads that couldn&apos;t be matched</h2>
+          </div>
+          <ul className="found">
+            {worth.problems.map((p) => (
+              <li key={p.file}>
+                <span>
+                  <code>{p.file}</code>
+                  <span className="cell-sub">{p.reason}</span>
+                </span>
               </li>
             ))}
           </ul>
@@ -548,8 +573,8 @@ function BalancesDialog({
         )}
         {fromStatements.length > 0 && (
           <p className="hint">
-            From statements, no typing needed: {fromStatements.map((a) => a.name).join(", ")}. Download new statements
-            into statements/ and reload.
+            From downloads, no typing needed: {fromStatements.map((a) => a.name).join(", ")}. Put new statements in
+            statements/ and brokerage or retirement downloads in balances/, then reload.
           </p>
         )}
         {bad.length > 0 && <p className="warn">Amounts look like 12,345.67.</p>}

@@ -327,6 +327,7 @@ test("net worth: statements fill in an account's history, typed balances win, de
       { id: "401k", name: "401k", owner: "jordan", type: "retirement", match: null, closed: false },
       { id: "card", name: "Card", owner: "joint", type: "credit card", match: "8899", closed: false },
     ],
+    problems: [],
     balances: [
       { account: "401k", date: "2026-01-31", cents: 5_000_000 },
       { account: "chk", date: "2026-02-09", cents: 999 }, // typed over the statement's

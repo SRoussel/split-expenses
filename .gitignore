@@ -14,6 +14,7 @@ wheels/
 
 # Local Inputs
 statements/
+balances/
 
 # Local Outputs
 ledger.csv

@@ -626,9 +626,11 @@ def worth(root):
     root = Path(root)
     people = sorted({t["person"] for t in load(root)["transactions"]} | {ME})
     data = balances.read_accounts(desktop_file(root, "accounts.json"))
+    found, problems = balances.statement_balances(root, ME, desktop_file(root, "statement-balances.json"))
     return {
         **data,
-        "found": balances.statement_balances(root, ME, desktop_file(root, "statement-balances.json")),
+        "found": found,
+        "problems": problems,
         "types": {k: {"group": g, "debt": d} for k, (g, d) in balances.TYPES.items()},
         "people": people,
         "me": ME,

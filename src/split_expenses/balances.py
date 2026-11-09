@@ -1,9 +1,10 @@
 """Account balances for the desktop page's net worth view.
 
-Two sources. Statements: a PDF's closing balance ("Ending balance on January 9, 2026
+Two sources. Downloads: a PDF statement's closing balance ("Ending balance on January 9, 2026
 $1,234.56" on bank statements, "New Balance Total $1,234.56" on cards) and an OFX
-download's <LEDGERBAL>, each with the account's last four digits so it can be matched
-to an account you set up once. And balances you type in, for accounts with no
+download's <LEDGERBAL>, a bank CSV's running balance, or a brokerage's list of holdings
+(added up), each with the account's last four digits so it can be matched to an account
+you set up once. Statements go in statements/, balance-only downloads in balances/. And balances you type in, for accounts with no
 statements here (retirement, a brokerage, the house).
 
 Everything stays in desktop-data/: accounts.json (your accounts and typed balances) and
@@ -28,7 +29,6 @@ TYPES = {
     "mortgage": ("debt", True),
     "loan": ("debt", True),
 }
-STATEMENT_EXTS = (".pdf", ".ofx", ".qfx")
 MONTHS = "january|february|march|april|may|june|july|august|september|october|november|december"
 
 
@@ -102,50 +102,176 @@ def balance_from_ofx(text):
     }
 
 
-def read_statement(path):
-    if path.suffix.lower() == ".pdf":
+# ---------------------------------------------------------------------------
+# CSV downloads: a bank's running balance, or a brokerage's list of holdings
+# ---------------------------------------------------------------------------
+
+RUNNING_COLUMNS = ("running bal.", "running balance", "balance", "ledger balance", "available balance")
+VALUE_COLUMNS = ("current value", "market value", "total value", "ending value", "value", "market value ($)")
+ACCOUNT_COLUMNS = ("account number", "account", "account name", "acct", "account #")
+DATE_COLUMNS = ("date", "transaction date", "posted date", "posting date", "post date", "trans. date")
+CSV_DATES = ("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d", "%b-%d-%Y", "%b %d, %Y", "%B %d, %Y")
+
+
+def csv_date(text):
+    for fmt in CSV_DATES:
+        try:
+            return datetime.strptime(text.strip(), fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return None
+
+
+def ref_from_name(name):
+    """The last four digits of an account in a file name ("brokerage-1234.csv"), not a year."""
+    groups = [g for g in re.findall(r"(?<!\d)\d{4}(?!\d)", name) if not 1990 <= int(g) <= 2099]
+    return groups[-1] if groups else None
+
+
+def column(header, names):
+    cells = [h.strip().lower() for h in header]
+    for n in names:
+        if n in cells:
+            return cells.index(n)
+    return None
+
+
+def balances_from_csv(text, filename, file_date):
+    """Balances in a CSV download, one per month at most: [{ref, kind, date, cents}], or a
+    reason it couldn't tell. A running-balance column gives the balance on each day; a
+    list of holdings gives one total, as of a date in the file (or when it was saved)."""
+    import csv
+    import io
+
+    rows = [r for r in csv.reader(io.StringIO(text))]
+    for start, header in enumerate(rows[:40]):
+        date_i, running_i = column(header, DATE_COLUMNS), column(header, RUNNING_COLUMNS)
+        value_i, account_i = column(header, VALUE_COLUMNS), column(header, ACCOUNT_COLUMNS)
+        if date_i is not None and running_i is not None:
+            return running_balances(rows[start + 1 :], date_i, running_i, ref_from_name(filename))
+        if value_i is not None:
+            return holdings_total(rows[start + 1 :], value_i, account_i, text, filename, file_date)
+    return "no balance or value column"
+
+
+def running_balances(rows, date_i, bal_i, ref):
+    if not ref:
+        return "put the account's last four digits in the file name, like checking-1234.csv"
+    points = []
+    for r in rows:
+        if len(r) <= max(date_i, bal_i):
+            continue
+        d, cents = csv_date(r[date_i]), to_cents(r[bal_i]) if r[bal_i].strip() else None
+        if d and cents is not None:
+            points.append((d, cents))
+    if not points:
+        return "no balances in it"
+    # Banks list newest first or oldest first; within a day the last row in time order is the day's balance.
+    if points[0][0] > points[-1][0]:
+        points.reverse()
+    by_month = {}
+    for d, cents in points:
+        by_month[d[:7]] = (d, cents)
+    return [{"ref": ref, "kind": "bank", "date": d, "cents": c} for d, c in by_month.values()]
+
+
+def holdings_total(rows, value_i, account_i, text, filename, file_date):
+    totals, total_rows = {}, {}
+    for r in rows:
+        if len(r) <= value_i:
+            continue
+        cents = to_cents(r[value_i]) if re.search(r"\d", r[value_i]) else None
+        if cents is None:
+            continue
+        acct = r[account_i] if account_i is not None and account_i < len(r) else ""
+        ref = (re.sub(r"\D", "", acct)[-4:] or None) if re.search(r"\d{4}", acct) else None
+        ref = ref or ref_from_name(filename)
+        first = next((c.strip() for c in r if c.strip()), "")
+        # "Total" or "Account Total" as the row's first word, not a fund named "Total Stock Market".
+        if re.match(r"(account )?totals?\b", first, re.I) and value_i != r.index(next(c for c in r if c.strip())):
+            total_rows[ref] = cents  # a total row already adds up the others
+        else:
+            totals[ref] = totals.get(ref, 0) + cents
+    if None in total_rows and any(r is not None for r in totals):
+        del total_rows[None]  # a grand total across accounts, when each row says its account
+    totals.update(total_rows)
+    if not totals:
+        return "no values in it"
+    if None in totals:
+        return "put the account's last four digits in the file name, like brokerage-1234.csv"
+    as_of = re.search(
+        r"(?:as of|date downloaded|downloaded)[^0-9A-Za-z]*([A-Za-z]{3,9}[- ]\d{1,2},?[- ]\d{4}|\d{1,2}/\d{1,2}/\d{2,4})",
+        text,
+        re.I,
+    )
+    date = (csv_date(as_of.group(1).replace(",", ", ").replace("  ", " ")) if as_of else None) or file_date
+    return [{"ref": ref, "kind": "investment", "date": date, "cents": c} for ref, c in totals.items()]
+
+
+def read_balances(path):
+    """Balances in one file, as a list, or a reason (a string) when it can't tell."""
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
         import pdfplumber  # only needed here, and only when a PDF changed
 
         with pdfplumber.open(path) as pdf:
             text = "\n".join((p.extract_text() or "") for p in pdf.pages[:3])
-        return balance_from_text(text)
-    return balance_from_ofx(path.read_bytes().decode("utf-8", "replace"))
+        found = balance_from_text(text)
+        return [found] if found else []
+    text = path.read_bytes().decode("utf-8-sig", "replace")
+    if suffix == ".csv":
+        saved = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d")
+        return balances_from_csv(text, path.name, saved)
+    found = balance_from_ofx(text)
+    return [found] if found else []
+
+
+CACHE_VERSION = 2
+FOLDERS = {"statements": (".pdf", ".ofx", ".qfx", ".csv"), "balances": (".ofx", ".qfx", ".csv")}
 
 
 def statement_balances(root, me, cache_path):
-    """Every closing balance found in statements/ (statements/<name>/ for someone else's), cached by file."""
+    """Every balance in statements/ and balances/ (a subfolder <name>/ for the other person's),
+    cached by file. Returns (found, problems): problems are files that look like they should
+    have balances but couldn't be matched to an account."""
     root = Path(root)
-    folder = root / "statements"
     try:
         cache = json.loads(cache_path.read_text())
+        if cache.get("version") != CACHE_VERSION:
+            cache = {}
     except (OSError, ValueError):
         cache = {}
-    found, fresh = [], {}
-    files = (
-        sorted(p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in STATEMENT_EXTS)
-        if folder.is_dir()
-        else []
-    )
-    for path in files:
-        key = str(path.relative_to(root))
-        stamp = f"{path.stat().st_mtime_ns}:{path.stat().st_size}"
-        hit = cache.get(key)
-        if hit and hit.get("stamp") == stamp:
-            result = hit.get("balance")
-        else:
-            try:
-                result = read_statement(path)
-            except Exception:  # an unreadable file just has no balance
-                result = None
-        fresh[key] = {"stamp": stamp, "balance": result}
-        if result:
+    files_cache = cache.get("files", {})
+    found, problems, fresh = [], [], {}
+    for name, exts in FOLDERS.items():
+        folder = root / name
+        if not folder.is_dir():
+            continue
+        for path in sorted(p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in exts):
+            key = str(path.relative_to(root))
+            stamp = f"{path.stat().st_mtime_ns}:{path.stat().st_size}"
+            hit = files_cache.get(key)
+            if hit and hit.get("stamp") == stamp:
+                result = hit.get("result")
+            else:
+                try:
+                    result = read_balances(path)
+                except Exception:  # an unreadable file just has no balance
+                    result = []
+            fresh[key] = {"stamp": stamp, "result": result}
             parts = path.relative_to(folder).parts
             person = parts[0].lower() if len(parts) > 1 else me
-            found.append({**result, "person": person, "file": key})
-    if fresh != cache:
+            if isinstance(result, str):
+                # A bank CSV in statements/ with no balance column is just transactions: say nothing.
+                if name == "balances" or "last four" in result:
+                    problems.append({"file": key, "person": person, "reason": result})
+                continue
+            found += [{**b, "person": person, "file": key} for b in result]
+    fresh_cache = {"version": CACHE_VERSION, "files": fresh}
+    if fresh_cache != cache:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(json.dumps(fresh, indent=1))
-    return found
+        cache_path.write_text(json.dumps(fresh_cache, indent=1))
+    return found, problems
 
 
 # ---------------------------------------------------------------------------

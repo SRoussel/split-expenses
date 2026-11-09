@@ -5,7 +5,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from split_expenses.balances import balance_from_ofx, balance_from_text, change_accounts, read_accounts
+from split_expenses.balances import (
+    balance_from_ofx,
+    balance_from_text,
+    balances_from_csv,
+    change_accounts,
+    read_accounts,
+    statement_balances,
+)
 
 # Made-up statement text, shaped like the real ones.
 BANK = """FAKE BANK
@@ -49,6 +56,103 @@ class StatementBalanceTest(unittest.TestCase):
             "owed, positive",
         )
         self.assertIsNone(balance_from_ofx("<OFX></OFX>"))
+
+
+# A checking download with a summary on top and a running balance, oldest first.
+CHECKING_CSV = """Description,,Summary Amt.
+Beginning balance as of 01/01/2026,,"1,000.00"
+
+Date,Description,Amount,Running Bal.
+01/01/2026,Beginning balance as of 01/01/2026,,"1,000.00"
+01/15/2026,FAKE PAYROLL,"3,000.00","4,000.00"
+01/31/2026,FAKE RENT,"-1,500.00","2,500.00"
+01/31/2026,FAKE CAFE,-4.50,"2,495.50"
+02/10/2026,FAKE GROCER,-95.50,"2,400.00"
+"""
+# The same, newest first, as some banks do.
+NEWEST_FIRST = """Date,Description,Amount,Balance
+02/10/2026,FAKE GROCER,-95.50,"2,400.00"
+01/31/2026,FAKE CAFE,-4.50,"2,495.50"
+01/31/2026,FAKE RENT,"-1,500.00","2,500.00"
+"""
+# A brokerage's holdings, with an account column, a fund called "Total ...", and a total row.
+HOLDINGS = """Account Number,Account Name,Symbol,Description,Quantity,Last Price,Current Value
+X11117788,Brokerage,VTSAX,Vanguard Total Stock Market Index,100,$120.00,"$12,000.00"
+X11117788,Brokerage,SPAXX**,Money Market,,,"$500.50"
+Z22225566,Roth IRA,FXAIX,Fidelity 500 Index,10,$200.00,"$2,000.00"
+,,,Account Total,,,"$14,500.50"
+
+"Date downloaded Nov-08-2026 3:15 p.m ET"
+"""
+# Holdings for one account with no account column: the digits come from the file name.
+ONE_ACCOUNT = """Symbol,Description,Shares,Price,Market Value
+VTI,Total Stock Market ETF,10,250.00,"2,500.00"
+BND,Total Bond Market ETF,20,75.00,"1,500.00"
+Total,,,,"4,000.00"
+"""
+
+
+class CsvBalanceTest(unittest.TestCase):
+    def test_running_balance_one_per_month(self):
+        self.assertEqual(
+            balances_from_csv(CHECKING_CSV, "checking-3344.csv", "2026-02-11"),
+            [
+                {"ref": "3344", "kind": "bank", "date": "2026-01-31", "cents": 249550},
+                {"ref": "3344", "kind": "bank", "date": "2026-02-10", "cents": 240000},
+            ],
+        )
+        self.assertEqual(
+            balances_from_csv(NEWEST_FIRST, "chk_3344.csv", "2026-02-11")[0],
+            {"ref": "3344", "kind": "bank", "date": "2026-01-31", "cents": 249550},
+            "newest-first files give the day's last balance too",
+        )
+
+    def test_running_balance_needs_the_account(self):
+        self.assertIn("last four digits", balances_from_csv(CHECKING_CSV, "stmt.csv", "2026-02-11"))
+        self.assertIn(
+            "last four digits",
+            balances_from_csv(CHECKING_CSV, "checking-2026.csv", "2026-02-11"),
+            "a year isn't an account",
+        )
+
+    def test_holdings_add_up_per_account(self):
+        self.assertEqual(
+            sorted(balances_from_csv(HOLDINGS, "Portfolio_Positions.csv", "2026-11-09"), key=lambda b: b["ref"]),
+            [
+                {"ref": "5566", "kind": "investment", "date": "2026-11-08", "cents": 200000},
+                {"ref": "7788", "kind": "investment", "date": "2026-11-08", "cents": 1250050},
+            ],
+            "a fund named Total isn't the total row; the date comes from 'Date downloaded'",
+        )
+
+    def test_holdings_total_row_and_file_name(self):
+        self.assertEqual(
+            balances_from_csv(ONE_ACCOUNT, "ira-9012.csv", "2026-11-09"),
+            [{"ref": "9012", "kind": "investment", "date": "2026-11-09", "cents": 400000}],
+            "the Total row is used, not added on top; no date in the file means the day it was saved",
+        )
+        self.assertIn("last four digits", balances_from_csv(ONE_ACCOUNT, "positions.csv", "2026-11-09"))
+
+    def test_folders_and_problems(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "statements").mkdir()
+            (root / "balances" / "jordan").mkdir(parents=True)
+            (root / "statements" / "checking-3344.csv").write_text(CHECKING_CSV)
+            (root / "statements" / "card.csv").write_text("Date,Description,Amount\n01/02/2026,X,-5.00\n")
+            (root / "balances" / "jordan" / "ira-9012.csv").write_text(ONE_ACCOUNT)
+            (root / "balances" / "positions.csv").write_text(ONE_ACCOUNT)
+            cache = root / "desktop-data" / "statement-balances.json"
+            found, problems = statement_balances(root, "me", cache)
+            self.assertEqual(
+                sorted((f["ref"], f["person"]) for f in found), [("3344", "me"), ("3344", "me"), ("9012", "jordan")]
+            )
+            self.assertEqual(
+                [p["file"] for p in problems], ["balances/positions.csv"], "a transactions-only CSV isn't a problem"
+            )
+            self.assertEqual(
+                statement_balances(root, "me", cache), (found, problems), "the cache gives the same answer"
+            )
 
 
 class AccountsTest(unittest.TestCase):

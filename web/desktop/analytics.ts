@@ -554,9 +554,10 @@ export interface Balance {
   date: string;
   cents: number;
 }
+export type FoundKind = "bank" | "card" | "investment";
 export interface FoundBalance {
   ref: string;
-  kind: "bank" | "card";
+  kind: FoundKind;
   date: string;
   cents: number;
   person: string;
@@ -565,7 +566,8 @@ export interface FoundBalance {
 export interface Worth {
   accounts: Account[];
   balances: Balance[]; // typed in
-  found: FoundBalance[]; // read from statements
+  found: FoundBalance[]; // read from statements and downloads
+  problems: { file: string; person: string; reason: string }[]; // downloads that couldn't be matched to an account
   types: Record<string, { group: Group; debt: boolean }>;
   people: string[];
   me: string;
@@ -652,7 +654,7 @@ export function unlinked(worth: Worth) {
   const jointLinked = new Set(worth.accounts.filter((a) => a.match && a.owner === "joint").map((a) => a.match));
   const groups = new Map<
     string,
-    { ref: string; kind: "bank" | "card"; person: string; count: number; latest: FoundBalance }
+    { ref: string; kind: FoundKind; person: string; count: number; latest: FoundBalance }
   >();
   for (const f of worth.found) {
     if (linked.has(`${f.ref}|${f.person}`) || jointLinked.has(f.ref)) continue;
