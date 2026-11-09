@@ -32,8 +32,10 @@ jobs:
         run: npm run lint
       - name: Formatting
         run: npm run format:check
-      - name: Ledger math
+      - name: Ledger math and desktop analytics
         run: npm test
+      - name: Desktop page builds
+        run: npm run build:desktop
       - name: Backend API (builds and type-checks first)
         run: npm run test:api
 
@@ -52,6 +54,7 @@ jobs:
         run: |
           uv run split-ledger --help > /dev/null
           uv run split-statements --help > /dev/null
+          uv run split-insights --help > /dev/null
       - name: Half-cent rule matches the web app
         run: |
           ledger="$RUNNER_TEMP/ledger.csv"

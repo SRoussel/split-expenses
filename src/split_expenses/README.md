@@ -1,9 +1,10 @@
 # Python scripts
 
-These run on your computer and never send anything anywhere. There are two:
+These run on your computer and never send anything anywhere. There are three:
 
 - `split-statements` reads bank statement PDFs and goes through every transaction once: money out is yours, shared or excluded; money in is income, a return or excluded. Each gets a category.
 - `split-ledger` keeps a running balance of who owes who, and writes the totals-only summary that the web app imports.
+- `split-insights` opens a page in your browser with every transaction you've gone through, for digging into where the money goes.
 
 Run both from the repo root, not from this folder. For how they fit with the web app, see the [main README](../../README.md).
 
@@ -109,3 +110,26 @@ Check where things stand:
 In `history`, a positive balance means your partner owes you and a negative one means you owe them.
 
 Use `--ledger FILE` to keep a different ledger file, and `--no-color` to turn off colors.
+
+## split-insights
+
+The phone app only ever sees monthly totals. This is the other side: every transaction on this computer, in one page, for the kind of digging you'd do at a desk. Build the page once, then start it:
+
+    cd web && npm install && npm run build:desktop && cd ..
+    uv run split-insights
+
+It reads every `split_transactions.csv` and `personal_transactions.csv` it can find: the current batch, `data/<person>/`, and everything in `archive/`. When the same statement shows up in more than one batch (an archived copy and a second pass, say), the newest file wins, so nothing is counted twice. The terminal prints what came from where.
+
+The page runs on `127.0.0.1` and only answers to that address, so other machines and other websites can't read it. Reload it after going through new statements. Merchant names are cleaned up from what the bank sends (`TST* CAFE BLUEBELL 207-555-0100 ME 6462 1111` becomes Cafe Bluebell); hover a name in the transactions list to see the original.
+
+Click a month, a category or a merchant to filter everything else by it. `/` jumps to search, and Esc clears.
+
+When the same place shows up under different names, pick one in Merchants and rename it. Typing another merchant's name merges the two, and it suggests names that look alike.
+
+You can also refile transactions there: change the category or shared/personal right in the list, or tick several (shift-click for a range) and change them together. Each change can be undone, and "edited" on a row shows what the statement had and puts it back. When everything you changed is one merchant, it offers to file that merchant the same way in future statements, which saves the same rule `split-statements` would.
+
+**Sending it to the phone app.** "Export for phone app" makes the same `split_summary.json` that `split-ledger finish` does, for one person and the dates you pick, with your refilings and renames applied. Import it on the phone under More > Import statement summary. It starts from the day after the last summary it knows about (the ones `finish` archived, and earlier exports), and warns when the dates overlap one, since importing the same days twice counts them twice. To fix something already in the app, delete that upload there and import the new file.
+
+The page keeps its own files in `desktop-data/` (git-ignored): your renames and refilings. They change what this page shows and what it exports. The transaction CSVs and the ledger stay as they were; the only thing it writes outside its folder is a vendor rule, when you say yes to one. `desktop-data/exports.json` remembers what you exported.
+
+To work on the page itself, run `uv run split-insights --no-open` and `npm run dev:desktop` in `web/` together, and open http://localhost:5174.

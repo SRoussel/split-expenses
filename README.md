@@ -10,10 +10,11 @@
 
 My partner and I share a lot of expenses, and I wanted an easy way to keep track of who owes who without handing our bank statements to a budgeting app. This is what I ended up with.
 
-It has two parts:
+It has three parts:
 
 - **Python scripts** that run on my computer. One reads bank statement PDFs and walks me through every transaction so I can mark it as mine, shared, or neither, with a category. The other keeps a running ledger and makes a small summary file for the app. See [src/split_expenses/README.md](src/split_expenses/README.md).
 - **A web app** we both use from our phones. It shows the balance, lets either of us add an expense or settle up, and has spending and cash flow reports by month and category. It runs on Cloudflare (a Worker plus a D1 database). See [web/README.md](web/README.md).
+- **A desktop page** for digging into every transaction, both of ours, on my computer. `uv run split-insights` serves it locally, so the details never leave the machine.
 
 It's built for exactly two people. The app won't let a third person join.
 
@@ -59,6 +60,11 @@ For the app you need Node 22:
 
 That runs it locally at http://localhost:5173. Deploying to Cloudflare is a handful of steps, all in [web/README.md](web/README.md).
 
+For the desktop page, build it once and start it from the repo root:
+
+    cd web && npm run build:desktop && cd ..
+    uv run split-insights
+
 ## A typical month
 
 1. Download the month's statements into `statements/`.
@@ -89,5 +95,6 @@ And the linters, which CI also runs:
     src/split_expenses/   the Python scripts (and their README)
     tests/                tests for the scripts
     web/                  the web app (and its README)
+    web/desktop/          the desktop page that split-insights serves
     web/shared/           code the app and the Worker share, and the category list (the scripts keep a copy; a test checks they match)
     statements/           your PDFs (git-ignored)

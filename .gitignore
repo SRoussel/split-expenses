@@ -3,6 +3,7 @@ __pycache__/
 *.py[oc]
 build/
 dist/
+dist-desktop/
 wheels/
 *.egg-info
 
@@ -16,6 +17,8 @@ statements/
 ledger.csv
 split_transactions.csv
 .split_state.json
+.merchant_names.json
+desktop-data/
 split_summary*.json
 personal_transactions.csv
 # Per-person files from --person (each person's review state, transactions and summary)
