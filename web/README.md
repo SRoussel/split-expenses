@@ -233,5 +233,21 @@ Also bump the `?v=` numbers on the other icon links, deploy, and remove and re-a
 
 ## Not done yet
 
+Ideas, roughly in the order I'd do them. These will move to GitHub issues.
+
+- Backups: a scheduled job that dumps the database somewhere I control, since D1's own restore window is 30 days at most.
+- Recurring expenses on a schedule (a Cron Trigger) instead of when someone opens the app.
 - Push notifications when the other person adds something. They work on iPhone for apps added to the home screen, but need a service worker and a small push sender in the Worker.
+- Import bank CSV/OFX exports instead of PDFs. More reliable than reading PDF text.
+- Tap a category on Spending to see its entries in the Ledger.
+- Keep search filters when the app reloads.
+- Settle up through Venmo or PayPal with the amount filled in.
+- A note under the balance like "last settled 47 days ago".
+- Notes on entries.
+- Flag unusual spending ("dining is 40% above usual").
+- A reminder when it's been a while since the last statement upload.
+- Budgets per category.
+- Shared savings goals, like a vacation fund.
+- Splitting one receipt by item, part shared and part personal.
+- A year in review page.
 - Offline use. It needs a connection.
