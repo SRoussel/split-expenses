@@ -12,7 +12,7 @@
     // Requests to /api/* always go to the Worker; everything else is a static file.
     "run_worker_first": ["/api/*"],
     // Any other path that isn't a real file falls back to index.html (single page app).
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
   },
   "vars": {
     // Sign-up closes once this many accounts exist. Two of you = 2.
@@ -22,7 +22,7 @@
     // per request, and changing a password hashes twice, so 20000 (~4.6 ms per hash)
     // keeps every request under the limit. On the Paid plan, raise it to 100000.
     // Existing passwords move to this value the next time each person signs in.
-    "PBKDF2_ITERATIONS": "20000"
+    "PBKDF2_ITERATIONS": "20000",
   },
   "d1_databases": [
     {
@@ -30,7 +30,7 @@
       "binding": "DB",
       "database_name": "ledger",
       "database_id": "d0eaf71d-6d38-4bf1-a7f0-2379710bce52",
-      "migrations_dir": "migrations"
-    }
-  ]
+      "migrations_dir": "migrations",
+    },
+  ],
 }

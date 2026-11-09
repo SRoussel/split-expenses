@@ -212,7 +212,9 @@ function ConfirmIdentity({
       <p>
         <strong>Confirm it's you</strong>
         <br />
-        <span className="muted small">Changes to how you sign in need a fresh confirmation, in case someone else has your phone open.</span>
+        <span className="muted small">
+          Changes to how you sign in need a fresh confirmation, in case someone else has your phone open.
+        </span>
       </p>
       {account.passkeys.length > 0 && passkeysSupported() && (
         <button className="primary" disabled={busy} onClick={() => void attempt(confirmWithPasskey)}>

@@ -29,7 +29,16 @@ import ImportSummary from "./ImportSummary";
 import { saveTextFile } from "./files";
 import SignInSettings from "./SignInSettings";
 import SpendingScreen from "./SpendingScreen";
-import { balanceFor, effectFor, exportLedgerCsv, filterTotals, fmt, isFiltering, matchesFilter, NO_FILTER } from "./ledger";
+import {
+  balanceFor,
+  effectFor,
+  exportLedgerCsv,
+  filterTotals,
+  fmt,
+  isFiltering,
+  matchesFilter,
+  NO_FILTER,
+} from "./ledger";
 import LedgerFilters from "./LedgerFilters";
 import type { Entry, Member, NewEntry, Recurring } from "./types";
 import { ConfirmDialog, ErrorText, Modal, Toast, type ToastState } from "./ui";
@@ -259,93 +268,97 @@ export default function LedgerScreen({
       <ErrorText message={error} />
 
       {tab !== "ledger" ? (
-        <SpendingScreen userId={userId} members={members} entries={entries} mode={tab === "trends" ? "trends" : "month"} />
+        <SpendingScreen
+          userId={userId}
+          members={members}
+          entries={entries}
+          mode={tab === "trends" ? "trends" : "month"}
+        />
       ) : (
         <>
+          {!partner && (
+            <section className="card stack">
+              <strong>Waiting for your partner</strong>
+              <p className="muted">Have them create an account, choose "Join partner's", and enter this code:</p>
+              <div className="row">
+                <code className="code">{inviteCode}</code>
+                <button className="link" onClick={() => void copyCode()}>
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
+            </section>
+          )}
 
-      {!partner && (
-        <section className="card stack">
-          <strong>Waiting for your partner</strong>
-          <p className="muted">
-            Have them create an account, choose "Join partner's", and enter this code:
-          </p>
-          <div className="row">
-            <code className="code">{inviteCode}</code>
-            <button className="link" onClick={() => void copyCode()}>
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
-        </section>
-      )}
-
-      <section className={`balance ${tone}`} aria-live="polite">
-        <span className="balance-label">
-          {balance > 0 ? `${partnerName} owes you` : balance < 0 ? `You owe ${partnerName}` : "All settled up"}
-        </span>
-        <strong className="balance-amount">{fmt(balance)}</strong>
-      </section>
-
-      {entries.length > 0 && (
-        <LedgerFilters
-          filter={filter}
-          onChange={setFilter}
-          partnerName={partnerName}
-          totals={filterTotals(matching, userId)}
-        />
-      )}
-
-      {months.length === 0 && isFiltering(filter) ? (
-        <div className="empty">
-          <p>No entries match.</p>
-          <button className="link" onClick={() => setFilter(NO_FILTER)}>
-            Clear search and filters
-          </button>
-        </div>
-      ) : months.length === 0 ? (
-        <div className="empty">
-          <p>No entries yet.</p>
-          <p className="muted small">
-            {ready ? "Add your first expense with the button below." : "Once your partner joins, you can add expenses."}
-          </p>
-        </div>
-      ) : (
-        months.map((m) => (
-          <section key={m.key} className="month">
-            <h2 className="month-label">{m.label}</h2>
-            <ul className="entries">
-              {m.items.map((e) => (
-                <EntryRow
-                  key={e.id}
-                  entry={e}
-                  userId={userId}
-                  partnerName={partnerName}
-                  fresh={freshIds.has(e.id)}
-                  addedBy={e.created_by !== userId ? nameOf(e.created_by) : null}
-                  onOpen={() => setSelectedId(e.id)}
-                />
-              ))}
-              <MonthSubtotal entries={m.items} userId={userId} month={m.label} />
-            </ul>
+          <section className={`balance ${tone}`} aria-live="polite">
+            <span className="balance-label">
+              {balance > 0 ? `${partnerName} owes you` : balance < 0 ? `You owe ${partnerName}` : "All settled up"}
+            </span>
+            <strong className="balance-amount">{fmt(balance)}</strong>
           </section>
-        ))
-      )}
 
-      {me && partner && (
-        <span className="stamp">
-          Split {pctText(me.share_pct)}/{pctText(partner.share_pct)}
-        </span>
-      )}
+          {entries.length > 0 && (
+            <LedgerFilters
+              filter={filter}
+              onChange={setFilter}
+              partnerName={partnerName}
+              totals={filterTotals(matching, userId)}
+            />
+          )}
 
-      <div className="bar">
-        <div className="bar-inner">
-          <button disabled={!ready || balance === 0} onClick={() => setPanel("settle")}>
-            Settle up
-          </button>
-          <button className="primary" disabled={!ready} onClick={() => setPanel("add")}>
-            Add expense
-          </button>
-        </div>
-      </div>
+          {months.length === 0 && isFiltering(filter) ? (
+            <div className="empty">
+              <p>No entries match.</p>
+              <button className="link" onClick={() => setFilter(NO_FILTER)}>
+                Clear search and filters
+              </button>
+            </div>
+          ) : months.length === 0 ? (
+            <div className="empty">
+              <p>No entries yet.</p>
+              <p className="muted small">
+                {ready
+                  ? "Add your first expense with the button below."
+                  : "Once your partner joins, you can add expenses."}
+              </p>
+            </div>
+          ) : (
+            months.map((m) => (
+              <section key={m.key} className="month">
+                <h2 className="month-label">{m.label}</h2>
+                <ul className="entries">
+                  {m.items.map((e) => (
+                    <EntryRow
+                      key={e.id}
+                      entry={e}
+                      userId={userId}
+                      partnerName={partnerName}
+                      fresh={freshIds.has(e.id)}
+                      addedBy={e.created_by !== userId ? nameOf(e.created_by) : null}
+                      onOpen={() => setSelectedId(e.id)}
+                    />
+                  ))}
+                  <MonthSubtotal entries={m.items} userId={userId} month={m.label} />
+                </ul>
+              </section>
+            ))
+          )}
+
+          {me && partner && (
+            <span className="stamp">
+              Split {pctText(me.share_pct)}/{pctText(partner.share_pct)}
+            </span>
+          )}
+
+          <div className="bar">
+            <div className="bar-inner">
+              <button disabled={!ready || balance === 0} onClick={() => setPanel("settle")}>
+                Settle up
+              </button>
+              <button className="primary" disabled={!ready} onClick={() => setPanel("add")}>
+                Add expense
+              </button>
+            </div>
+          </div>
         </>
       )}
 
@@ -381,9 +394,8 @@ export default function LedgerScreen({
           title="Void this entry?"
           message={
             <>
-              <strong>{voiding.name}</strong> ({fmt(voiding.amount_cents)}) stays in the history but stops
-              counting toward the balance. You can undo this right away, or restore it later from the voided
-              entries.
+              <strong>{voiding.name}</strong> ({fmt(voiding.amount_cents)}) stays in the history but stops counting
+              toward the balance. You can undo this right away, or restore it later from the voided entries.
             </>
           }
           confirmLabel="Void entry"
@@ -407,7 +419,13 @@ export default function LedgerScreen({
             The original stays in the history (under voided entries) marked as edited.
           </p>
           {editing.kind === "expense" && (
-            <AddExpenseForm me={me} partner={partner} initial={editing} save={saveEdit} onSaved={() => saved("Changes saved")} />
+            <AddExpenseForm
+              me={me}
+              partner={partner}
+              initial={editing}
+              save={saveEdit}
+              onSaved={() => saved("Changes saved")}
+            />
           )}
           {editing.kind === "settlement" && (
             <SettleForm
@@ -420,7 +438,13 @@ export default function LedgerScreen({
             />
           )}
           {editing.kind === "opening" && (
-            <OpeningForm me={me} partner={partner} initial={editing} save={saveEdit} onSaved={() => saved("Changes saved")} />
+            <OpeningForm
+              me={me}
+              partner={partner}
+              initial={editing}
+              save={saveEdit}
+              onSaved={() => saved("Changes saved")}
+            />
           )}
         </Modal>
       )}
@@ -520,10 +544,14 @@ export default function LedgerScreen({
               setToast({ message: isNew ? "Recurring expense added" : "Changes saved" });
               void load();
             }}
-            onStop={ruleEditing === "new" ? undefined : () => {
-              setStopping(ruleEditing);
-              setRuleEditing(null);
-            }}
+            onStop={
+              ruleEditing === "new"
+                ? undefined
+                : () => {
+                    setStopping(ruleEditing);
+                    setRuleEditing(null);
+                  }
+            }
           />
         </Modal>
       )}
@@ -533,8 +561,8 @@ export default function LedgerScreen({
           title="Stop this recurring expense?"
           message={
             <>
-              <strong>{stopping.name}</strong> won't be added again. The ones already in the ledger stay. To
-              take a break instead, edit it and turn on Paused.
+              <strong>{stopping.name}</strong> won't be added again. The ones already in the ledger stay. To take a
+              break instead, edit it and turn on Paused.
             </>
           }
           confirmLabel="Stop"
@@ -556,9 +584,8 @@ export default function LedgerScreen({
           title="Delete voided and edited history?"
           message={
             <>
-              This permanently deletes {voidedCount} voided {voidedCount === 1 ? "entry" : "entries"} and old
-              versions of edited entries. Active entries and the balance don't change, but these can't be restored
-              afterwards.
+              This permanently deletes {voidedCount} voided {voidedCount === 1 ? "entry" : "entries"} and old versions
+              of edited entries. Active entries and the balance don't change, but these can't be restored afterwards.
             </>
           }
           confirmLabel={`Delete ${voidedCount}`}
@@ -634,11 +661,7 @@ export default function LedgerScreen({
               </button>
             </div>
             <label className="check">
-              <input
-                type="checkbox"
-                checked={showVoided}
-                onChange={(e) => setShowVoided(e.target.checked)}
-              />
+              <input type="checkbox" checked={showVoided} onChange={(e) => setShowVoided(e.target.checked)} />
               Show voided and edited entries
             </label>
 
@@ -778,7 +801,11 @@ function EntryRow({
   const payment = e.kind === "settlement";
 
   return (
-    <li className={[e.voided_at && "voided", payment && "payment", fresh && "printed"].filter(Boolean).join(" ") || undefined}>
+    <li
+      className={
+        [e.voided_at && "voided", payment && "payment", fresh && "printed"].filter(Boolean).join(" ") || undefined
+      }
+    >
       <button className="entry-btn" onClick={onOpen} aria-label={`${e.name}, ${detail}. Details`}>
         <span className="entry-name">
           {payment && (
@@ -858,7 +885,10 @@ function EntryDetails({
     `${e.recurring_id ? "" : `${nameOf(e.created_by)}, `}${momentFmt.format(new Date(e.created_at))}`,
   ]);
   if (e.voided_at) {
-    facts.push([e.replaced_by ? "Edited" : "Voided", `${nameOf(e.voided_by)}, ${momentFmt.format(new Date(e.voided_at))}`]);
+    facts.push([
+      e.replaced_by ? "Edited" : "Voided",
+      `${nameOf(e.voided_by)}, ${momentFmt.format(new Date(e.voided_at))}`,
+    ]);
   }
 
   return (

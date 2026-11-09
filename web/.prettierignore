@@ -1,0 +1,7 @@
+dist/
+.wrangler/
+node_modules/
+backups/
+package-lock.json
+public/
+*.md

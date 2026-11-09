@@ -74,8 +74,7 @@ export const getMe = () => call<{ user: User | null; membership?: Membership | n
 export const signUp = (email: string, password: string) => call("POST", "/api/signup", { email, password });
 export const signIn = (email: string, password: string) => call("POST", "/api/login", { email, password });
 export const signOut = () => call("POST", "/api/logout", {});
-export const changePassword = (current: string, next: string) =>
-  call("POST", "/api/password", { current, next });
+export const changePassword = (current: string, next: string) => call("POST", "/api/password", { current, next });
 
 export const createHousehold = (displayName: string) => call("POST", "/api/household", { displayName });
 export const joinHousehold = (code: string, displayName: string) =>

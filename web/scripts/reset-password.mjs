@@ -14,7 +14,10 @@ import { createInterface } from "node:readline/promises";
 
 const args = process.argv.slice(2);
 const remote = args.includes("--remote");
-const email = args.find((a) => !a.startsWith("--"))?.trim().toLowerCase();
+const email = args
+  .find((a) => !a.startsWith("--"))
+  ?.trim()
+  .toLowerCase();
 if (!email || !email.includes("@")) {
   console.error("Usage: npm run reset-password -- <email> [--remote]");
   process.exit(1);

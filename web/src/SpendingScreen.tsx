@@ -57,7 +57,8 @@ export default function SpendingScreen({
   const partner = members.find((m) => m.user_id !== userId);
   const partnerId = partner?.user_id ?? null;
   const partnerName = partner?.display_name ?? "Partner";
-  const nameOf = (id: string) => (id === userId ? "You" : (members.find((m) => m.user_id === id)?.display_name ?? "Someone"));
+  const nameOf = (id: string) =>
+    id === userId ? "You" : (members.find((m) => m.user_id === id)?.display_name ?? "Someone");
 
   const [data, setData] = useState<SpendingData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,7 +85,14 @@ export default function SpendingScreen({
   }, [load]);
 
   const index = useMemo(
-    () => (data ? buildIndex(entries, data, members.map((m) => m.user_id)) : null),
+    () =>
+      data
+        ? buildIndex(
+            entries,
+            data,
+            members.map((m) => m.user_id),
+          )
+        : null,
     [entries, data, members],
   );
 
@@ -108,7 +116,14 @@ export default function SpendingScreen({
   const cats = Object.entries(summary.categories).sort(([, a], [, b]) => b - a);
   const maxCat = Math.max(1, ...cats.map(([, v]) => v));
   const spentCompare = compare(index, view, current, userId, partnerId, (s) => s.spent);
-  const people = view === "me" ? [userId] : view === "partner" ? [partnerId!] : view === "household" ? [userId, partnerId!].filter(Boolean) : [];
+  const people =
+    view === "me"
+      ? [userId]
+      : view === "partner"
+        ? [partnerId!]
+        : view === "household"
+          ? [userId, partnerId!].filter(Boolean)
+          : [];
   const hasCashFlow = view !== "shared";
   // A month only partly covered by uploads can't be compared fairly with full months.
   const covers = people.map((p) => ({ p, c: coverage(data.batches, p, current) }));
@@ -158,120 +173,139 @@ export default function SpendingScreen({
         />
       ) : (
         <>
-        <div className="month-nav">
-          <button className="icon-btn" aria-label="Previous month" disabled={current <= first} onClick={() => setMonth(shiftMonth(current, -1))}>
-            ‹
-          </button>
-          <h2>{monthLong(current)}</h2>
-          <button className="icon-btn" aria-label="Next month" disabled={current >= last} onClick={() => setMonth(shiftMonth(current, 1))}>
-            ›
-          </button>
-        </div>
+          <div className="month-nav">
+            <button
+              className="icon-btn"
+              aria-label="Previous month"
+              disabled={current <= first}
+              onClick={() => setMonth(shiftMonth(current, -1))}
+            >
+              ‹
+            </button>
+            <h2>{monthLong(current)}</h2>
+            <button
+              className="icon-btn"
+              aria-label="Next month"
+              disabled={current >= last}
+              onClick={() => setMonth(shiftMonth(current, 1))}
+            >
+              ›
+            </button>
+          </div>
 
+          {people.length > 0 && (
+            <CoverageStrips batches={data.batches} people={people} month={current} nameOf={nameOf} />
+          )}
 
-        {people.length > 0 && <CoverageStrips batches={data.batches} people={people} month={current} nameOf={nameOf} />}
-
-        <section className="card tally" aria-label={hasCashFlow ? "Cash flow" : "Shared spending"}>
-          {hasCashFlow ? (
-            <>
-              <TallyLine label="In">{fmt(summary.income!)}</TallyLine>
-              <TallyLine label="Out">
-                {!partial && !missing.length && <Change value={summary.spent} average={spentCompare.average} />}{" "}
-                {fmt(summary.spent)}
-              </TallyLine>
-              <TallyLine
-                label="Net"
-                className={`tally-total${missing.length ? " incomplete" : summary.net! < 0 ? " neg-total" : ""}`}
-              >
-                {signed(summary.net!)}
-              </TallyLine>
-              {missing.length > 0 ? (
-                <p className="notice small">
-                  Nothing uploaded for {missing.join(" or ")} yet, so only shared expenses are counted.
-                </p>
-              ) : (
+          <section className="card tally" aria-label={hasCashFlow ? "Cash flow" : "Shared spending"}>
+            {hasCashFlow ? (
+              <>
+                <TallyLine label="In">{fmt(summary.income!)}</TallyLine>
+                <TallyLine label="Out">
+                  {!partial && !missing.length && <Change value={summary.spent} average={spentCompare.average} />}{" "}
+                  {fmt(summary.spent)}
+                </TallyLine>
+                <TallyLine
+                  label="Net"
+                  className={`tally-total${missing.length ? " incomplete" : summary.net! < 0 ? " neg-total" : ""}`}
+                >
+                  {signed(summary.net!)}
+                </TallyLine>
+                {missing.length > 0 ? (
+                  <p className="notice small">
+                    Nothing uploaded for {missing.join(" or ")} yet, so only shared expenses are counted.
+                  </p>
+                ) : (
+                  <p className="tally-note">
+                    {summary.income! > 0 &&
+                      (summary.net! >= 0
+                        ? `Kept ${Math.round((summary.net! / summary.income!) * 100)}% of what came in`
+                        : `Spent ${fmt(-summary.net!)} more than came in`)}
+                    {summary.income! > 0 && partial && ", so far. "}
+                    {partial && "Partial month, so no comparisons yet."}
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <TallyLine label="Shared, full amounts" className="tally-total">
+                  {fmt(summary.spent)}
+                </TallyLine>
                 <p className="tally-note">
-                  {summary.income! > 0 &&
-                    (summary.net! >= 0
-                      ? `Kept ${Math.round((summary.net! / summary.income!) * 100)}% of what came in`
-                      : `Spent ${fmt(-summary.net!)} more than came in`)}
-                  {summary.income! > 0 && partial && ", so far. "}
-                  {partial && "Partial month, so no comparisons yet."}
+                  <Change value={summary.spent} average={spentCompare.average} />
                 </p>
-              )}
-            </>
-          ) : (
-            <>
-              <TallyLine label="Shared, full amounts" className="tally-total">
-                {fmt(summary.spent)}
-              </TallyLine>
-              <p className="tally-note">
-                <Change value={summary.spent} average={spentCompare.average} />
-              </p>
-            </>
-          )}
-        </section>
-
-        <section className="card">
-          <h3 className="card-title">By category</h3>
-          {cats.length === 0 ? (
-            <p className="muted small">Nothing for {monthLong(current)} yet.</p>
-          ) : (
-            <ul className="cat-bars">
-              {cats.map(([c, v]) => {
-                const avg = compare(index, view, current, userId, partnerId, (s) => s.categories[c] ?? 0).average;
-                return (
-                  <li key={c}>
-                    <button onClick={() => setDetail(c)} aria-label={`${catName(c)}: ${fmt(v)}. Details`}>
-                      <span className="cat-name">{catName(c)}</span>
-                      <span className="lead" aria-hidden="true" />
-                      <span className="cat-amount">{v < 0 ? `−${fmt(v)}` : fmt(v)}</span>
-                      <span className="cat-track">
-                        {v > 0 && <span className="cat-fill" style={{ width: `${(v / maxCat) * 100}%` }} />}
-                      </span>
-                      {v < 0 ? <span className="change">returns</span> : !partial && <Change value={v} average={avg} />}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-
-        <section className="card">
-          <h3 className="card-title">{hasCashFlow ? "Net, 6 months" : "Shared, 6 months"}</h3>
-          <ColumnChart
-            label={`${hasCashFlow ? "Net cash flow" : "Shared spending"} for the 6 months up to ${monthLong(current)}`}
-            selected={current}
-            onSelect={(m) => setMonth(m)}
-            columns={six.map(({ m, s }) => ({
-              key: m,
-              label: monthShort(m),
-              value: hasCashFlow ? s.net! : s.spent,
-              title: hasCashFlow
-                ? `${monthLong(m)}: in ${fmt(s.income!)}, spent ${fmt(s.spent)}, net ${signed(s.net!)}`
-                : `${monthLong(m)}: ${fmt(s.spent)}`,
-              details:
-                s.spent === 0 && !s.income
-                  ? [{ value: monthLong(m), label: "· nothing uploaded" }]
-                  : hasCashFlow
-                    ? [
-                        { value: monthLong(m), label: "·" },
-                        { value: signed(s.net!), label: "net" },
-                        { value: fmt(s.income!), label: "in" },
-                        { value: fmt(s.spent), label: "spent" },
-                      ]
-                    : [{ value: monthLong(m), label: "·" }, { value: fmt(s.spent), label: "shared spending" }],
-            }))}
-          />
-          <ChartTable
-            head={hasCashFlow ? ["Month", "Money in", "Spent", "Net"] : ["Month", "Spent"]}
-            rows={six.map(({ m, s }) =>
-              hasCashFlow ? [monthLong(m), fmt(s.income!), fmt(s.spent), signed(s.net!)] : [monthLong(m), fmt(s.spent)],
+              </>
             )}
-          />
-        </section>
+          </section>
 
+          <section className="card">
+            <h3 className="card-title">By category</h3>
+            {cats.length === 0 ? (
+              <p className="muted small">Nothing for {monthLong(current)} yet.</p>
+            ) : (
+              <ul className="cat-bars">
+                {cats.map(([c, v]) => {
+                  const avg = compare(index, view, current, userId, partnerId, (s) => s.categories[c] ?? 0).average;
+                  return (
+                    <li key={c}>
+                      <button onClick={() => setDetail(c)} aria-label={`${catName(c)}: ${fmt(v)}. Details`}>
+                        <span className="cat-name">{catName(c)}</span>
+                        <span className="lead" aria-hidden="true" />
+                        <span className="cat-amount">{v < 0 ? `−${fmt(v)}` : fmt(v)}</span>
+                        <span className="cat-track">
+                          {v > 0 && <span className="cat-fill" style={{ width: `${(v / maxCat) * 100}%` }} />}
+                        </span>
+                        {v < 0 ? (
+                          <span className="change">returns</span>
+                        ) : (
+                          !partial && <Change value={v} average={avg} />
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+
+          <section className="card">
+            <h3 className="card-title">{hasCashFlow ? "Net, 6 months" : "Shared, 6 months"}</h3>
+            <ColumnChart
+              label={`${hasCashFlow ? "Net cash flow" : "Shared spending"} for the 6 months up to ${monthLong(current)}`}
+              selected={current}
+              onSelect={(m) => setMonth(m)}
+              columns={six.map(({ m, s }) => ({
+                key: m,
+                label: monthShort(m),
+                value: hasCashFlow ? s.net! : s.spent,
+                title: hasCashFlow
+                  ? `${monthLong(m)}: in ${fmt(s.income!)}, spent ${fmt(s.spent)}, net ${signed(s.net!)}`
+                  : `${monthLong(m)}: ${fmt(s.spent)}`,
+                details:
+                  s.spent === 0 && !s.income
+                    ? [{ value: monthLong(m), label: "· nothing uploaded" }]
+                    : hasCashFlow
+                      ? [
+                          { value: monthLong(m), label: "·" },
+                          { value: signed(s.net!), label: "net" },
+                          { value: fmt(s.income!), label: "in" },
+                          { value: fmt(s.spent), label: "spent" },
+                        ]
+                      : [
+                          { value: monthLong(m), label: "·" },
+                          { value: fmt(s.spent), label: "shared spending" },
+                        ],
+              }))}
+            />
+            <ChartTable
+              head={hasCashFlow ? ["Month", "Money in", "Spent", "Net"] : ["Month", "Spent"]}
+              rows={six.map(({ m, s }) =>
+                hasCashFlow
+                  ? [monthLong(m), fmt(s.income!), fmt(s.spent), signed(s.net!)]
+                  : [monthLong(m), fmt(s.spent)],
+              )}
+            />
+          </section>
         </>
       )}
 
@@ -299,8 +333,8 @@ export default function SpendingScreen({
           title="Delete this upload?"
           message={
             <>
-              Removes <strong>{deleting.name}</strong> ({nameOf(deleting.person_id)}) from spending and cash flow. If the
-              same import added a shared entry to the ledger, that entry stays; void it there if you need to.
+              Removes <strong>{deleting.name}</strong> ({nameOf(deleting.person_id)}) from spending and cash flow. If
+              the same import added a shared entry to the ledger, that entry stays; void it there if you need to.
             </>
           }
           confirmLabel="Delete upload"
@@ -337,7 +371,10 @@ function CoverageStrips({
         const c = coverage(batches, p, month);
         const who = nameOf(p);
         // In words: "whole month", "nothing yet", or the days covered, like "Nov 1–5, 12–20".
-        const monthName = new Date(`${month}-01T00:00:00Z`).toLocaleDateString(undefined, { month: "short", timeZone: "UTC" });
+        const monthName = new Date(`${month}-01T00:00:00Z`).toLocaleDateString(undefined, {
+          month: "short",
+          timeZone: "UTC",
+        });
         const text =
           c.covered === 0
             ? "nothing yet"
@@ -445,7 +482,14 @@ function CategoryDetail({
     if (!moved) return;
     setUndoError(null);
     try {
-      await moveSpending({ kind: moved.source.kind, id: moved.source.id, month, from: moved.to, to: category, cents: moved.cents });
+      await moveSpending({
+        kind: moved.source.kind,
+        id: moved.source.id,
+        month,
+        from: moved.to,
+        to: category,
+        cents: moved.cents,
+      });
       setMoved(null);
       await onMoved();
     } catch (err) {
@@ -488,7 +532,10 @@ function CategoryDetail({
             details: [{ value: v < 0 ? `−${fmt(v)}` : fmt(v), label: monthLong(m) }],
           }))}
         />
-        <ChartTable head={["Month", catName(category)]} rows={year.map(({ m, v }) => [monthLong(m), v < 0 ? `−${fmt(v)}` : fmt(v)])} />
+        <ChartTable
+          head={["Month", catName(category)]}
+          rows={year.map(({ m, v }) => [monthLong(m), v < 0 ? `−${fmt(v)}` : fmt(v)])}
+        />
 
         {moved && (
           <p className="preview small" role="status">
@@ -514,7 +561,14 @@ function CategoryDetail({
           />
         ) : (
           sources.length > 0 && (
-            <button onClick={() => { setMoved(null); setMoving(true); }}>Move money to another category</button>
+            <button
+              onClick={() => {
+                setMoved(null);
+                setMoving(true);
+              }}
+            >
+              Move money to another category
+            </button>
           )
         )}
 

@@ -59,8 +59,16 @@ USE_COLOR = sys.stdout.isatty() and "NO_COLOR" not in os.environ
 if USE_COLOR and os.name == "nt":
     os.system("")  # enables ANSI escape handling in the Windows console
 
-_CODES = {"bold": "1", "dim": "2", "red": "31", "green": "32",
-          "yellow": "33", "blue": "34", "magenta": "35", "cyan": "36"}
+_CODES = {
+    "bold": "1",
+    "dim": "2",
+    "red": "31",
+    "green": "32",
+    "yellow": "33",
+    "blue": "34",
+    "magenta": "35",
+    "cyan": "36",
+}
 
 
 def paint(text, *styles):
@@ -174,8 +182,10 @@ def clean_vendor(desc):
     return desc
 
 
-_ID_WORDS = (r"pmt|payment|pymt|bill|ref|reference|conf|confirmation|trace|trn|txn|trans|"
-             r"acct|account|inv|invoice|auth|cust|customer|id|no|num|number")
+_ID_WORDS = (
+    r"pmt|payment|pymt|bill|ref|reference|conf|confirmation|trace|trn|txn|trans|"
+    r"acct|account|inv|invoice|auth|cust|customer|id|no|num|number"
+)
 LABELED_ID_RE = re.compile(
     rf"\b(?:{_ID_WORDS})\b\s*(?:id|no|num|number)?\s*[:#.\-]?\s*[\w\-*]*\d[\w\-*]*",
     re.I,
@@ -192,11 +202,11 @@ def vendor_match_key(vendor):
     v = vendor.lower()
     # Labeled IDs: 'PMT ID: 123456', 'BILL ID 98765', 'REF# A123', 'CONF 4567' ...
     v = LABELED_ID_RE.sub(" ", v)
-    v = re.sub(r"#\s?\d+", " ", v)                    # '#1234' anywhere
+    v = re.sub(r"#\s?\d+", " ", v)  # '#1234' anywhere
     # Any remaining token with 3+ digits (long IDs, masked account numbers).
     v = " ".join(tok for tok in v.split() if len(re.findall(r"\d", tok)) < 3)
     v = re.sub(r"(?:[\s*\-]+\d[\d\-]*)+\s*$", "", v)  # trailing number tokens
-    v = DANGLING_LABEL_RE.sub("", v)                  # leftover 'pmt id' etc.
+    v = DANGLING_LABEL_RE.sub("", v)  # leftover 'pmt id' etc.
     v = re.sub(r"[\s:#*\-.,]+$", "", v)
     return re.sub(r"\s+", " ", v).strip() or vendor.lower()
 
@@ -281,6 +291,7 @@ def parse_pdf(path):
 # State (so re-running doesn't ask about the same transactions twice)
 # ---------------------------------------------------------------------------
 
+
 def txn_key(source, txn):
     """Stable id for a transaction. Ids of lines reviewed by older versions are unchanged."""
     kind, i = txn["_key_index"]
@@ -299,8 +310,10 @@ def load_state(path):
         return state
     except (json.JSONDecodeError, ValueError) as e:
         # Never quietly start over: that would review everything again and duplicate rows.
-        sys.exit(f"{path} can't be read ({e}). Restore it from a backup (e.g. in archive/), "
-                 f"or move it away to start with nothing reviewed and nothing remembered.")
+        sys.exit(
+            f"{path} can't be read ({e}). Restore it from a backup (e.g. in archive/), "
+            f"or move it away to start with nothing reviewed and nothing remembered."
+        )
 
 
 def write_atomic(path, text):
@@ -336,6 +349,7 @@ def getkey(prompt):
         ch = input()[:1]
     elif os.name == "nt":
         import msvcrt
+
         ch = msvcrt.getwch()
         if ch in ("\x00", "\xe0"):  # arrow and function keys come as two codes
             msvcrt.getwch()
@@ -344,6 +358,7 @@ def getkey(prompt):
         import select
         import termios
         import tty
+
         fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
         try:
@@ -379,7 +394,7 @@ def ask_category(title="Category"):
     items = [f"{paint(k, 'cyan')} {c:<14}" for k, c in zip(CATEGORY_KEYS, CATEGORIES, strict=True)]
     print(f"  {title}:   {paint('Esc', 'dim')} back")
     for i in range(0, len(items), 4):  # rows of four fit an 80-column terminal
-        print("    " + "".join(items[i:i + 4]).rstrip())
+        print("    " + "".join(items[i : i + 4]).rstrip())
     ch = ask_key("  > ", set(CATEGORY_KEYS[: len(CATEGORIES)]) | {ESC})
     return None if ch == ESC else CATEGORIES[CATEGORY_KEYS.index(ch.lower())]
 
@@ -391,22 +406,54 @@ def ask_category(title="Category"):
 # (direction, pattern, suggestion), checked in order. Only ever a suggestion: you press Enter to accept.
 KEYWORDS = [
     ("out", r"autopay|card payment|payment to|transfer|zelle|venmo|cash app", "exclude"),
-    ("out", r"uber ?eats|doordash|grubhub|starbucks|coffee|caf[eé]|restaurant|pizza|burger|taco|sushi|"
-            r"grill|bakery|chipotle|mcdonald|noodle|kitchen|diner|bistro", "dining"),
-    ("out", r"safeway|trader joe|whole foods|kroger|costco|aldi|wegmans|publix|sprouts|h-e-b|"
-            r"grocer|supermarket|food market", "groceries"),
-    ("out", r"netflix|spotify|hulu|disney|youtube|prime video|icloud|apple\.com/bill|patreon|nytimes|"
-            r"subscription|membership", "subscriptions"),
-    ("out", r"\buber\b|\blyft\b|shell|chevron|exxon|mobil|\bbp\b|\barco\b|sunoco|valero|parking|"
-            r"transit|metro|toll|gas station|fuel", "transport"),
-    ("out", r"\bcvs\b|walgreens|rite aid|pharmacy|dental|dentist|clinic|medical|hospital|optometr|"
-            r"doctor|health", "health"),
-    ("out", r"comcast|xfinity|verizon|at&t|t-mobile|spectrum|electric|edison|pg&e|con ed|"
-            r"water|utility|utilities|internet", "utilities"),
-    ("out", r"airline|airways|delta|united air|southwest|jetblue|hotel|marriott|hilton|hyatt|"
-            r"airbnb|expedia|booking\.com", "travel"),
-    ("out", r"cinema|theat(er|re)|\bamc\b|ticketmaster|steam|playstation|xbox|nintendo|bowling|"
-            r"museum|concert", "entertainment"),
+    (
+        "out",
+        r"uber ?eats|doordash|grubhub|starbucks|coffee|caf[eé]|restaurant|pizza|burger|taco|sushi|"
+        r"grill|bakery|chipotle|mcdonald|noodle|kitchen|diner|bistro",
+        "dining",
+    ),
+    (
+        "out",
+        r"safeway|trader joe|whole foods|kroger|costco|aldi|wegmans|publix|sprouts|h-e-b|"
+        r"grocer|supermarket|food market",
+        "groceries",
+    ),
+    (
+        "out",
+        r"netflix|spotify|hulu|disney|youtube|prime video|icloud|apple\.com/bill|patreon|nytimes|"
+        r"subscription|membership",
+        "subscriptions",
+    ),
+    (
+        "out",
+        r"\buber\b|\blyft\b|shell|chevron|exxon|mobil|\bbp\b|\barco\b|sunoco|valero|parking|"
+        r"transit|metro|toll|gas station|fuel",
+        "transport",
+    ),
+    (
+        "out",
+        r"\bcvs\b|walgreens|rite aid|pharmacy|dental|dentist|clinic|medical|hospital|optometr|"
+        r"doctor|health",
+        "health",
+    ),
+    (
+        "out",
+        r"comcast|xfinity|verizon|at&t|t-mobile|spectrum|electric|edison|pg&e|con ed|"
+        r"water|utility|utilities|internet",
+        "utilities",
+    ),
+    (
+        "out",
+        r"airline|airways|delta|united air|southwest|jetblue|hotel|marriott|hilton|hyatt|"
+        r"airbnb|expedia|booking\.com",
+        "travel",
+    ),
+    (
+        "out",
+        r"cinema|theat(er|re)|\bamc\b|ticketmaster|steam|playstation|xbox|nintendo|bowling|"
+        r"museum|concert",
+        "entertainment",
+    ),
     ("out", r"home depot|lowe'?s|ikea|hardware|wayfair|bed bath", "household"),
     ("out", r"\bfee\b|late fee|overdraft|interest charge|finance charge|annual fee|interest", "fees"),
     ("in", r"payroll|direct dep|salary|paycheck|interest", "income"),
@@ -414,8 +461,26 @@ KEYWORDS = [
 ]
 
 # Words that say nothing about the merchant, ignored when comparing names.
-NAME_NOISE = {"the", "sq", "tst", "pos", "debit", "purchase", "card", "pp", "paypal", "www",
-              "inc", "llc", "co", "com", "store", "online", "recurring", "payment"}
+NAME_NOISE = {
+    "the",
+    "sq",
+    "tst",
+    "pos",
+    "debit",
+    "purchase",
+    "card",
+    "pp",
+    "paypal",
+    "www",
+    "inc",
+    "llc",
+    "co",
+    "com",
+    "store",
+    "online",
+    "recurring",
+    "payment",
+}
 
 
 def name_tokens(vendor_key):
@@ -467,6 +532,7 @@ def suggest(vendor_key, direction, rules):
 # Writing answers (and taking them back)
 # ---------------------------------------------------------------------------
 
+
 def read_rows(csv_path):
     """Rows of an output CSV as dicts (older files without an id column get id "")."""
     if not csv_path.exists():
@@ -477,6 +543,7 @@ def read_rows(csv_path):
 
 def write_rows(csv_path, rows):
     import io
+
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=CSV_FIELDS, extrasaction="ignore")
     w.writeheader()
@@ -496,8 +563,9 @@ def record(paths, txn_id, target, txn=None, category=None, negative=False):
         kept = [r for r in rows if r["id"] != txn_id]
         if path == target:
             amount = f"-{txn['amount']}" if negative else txn["amount"]
-            kept.append({"date": txn["date"], "amount": amount, "vendor": txn["vendor"],
-                         "category": category, "id": txn_id})
+            kept.append(
+                {"date": txn["date"], "amount": amount, "vendor": txn["vendor"], "category": category, "id": txn_id}
+            )
         if len(kept) != len(rows) or path == target:
             write_rows(path, kept)
 
@@ -531,6 +599,7 @@ def restore(snap):
 #   money in,  key "in:<vendor>":   "income" | {"return": cat, "shared": bool} | "exclude"
 #   unclear,   key "dir:<vendor>":  "out" | "in" | "exclude"
 
+
 def apply_choice(choice, txn, txn_id, paths, counts):
     """Write one transaction where its choice says (replacing any earlier answer). Returns the counter name."""
     if choice == "exclude":
@@ -560,6 +629,7 @@ def apply_choice(choice, txn, txn_id, paths, counts):
 # ---------------------------------------------------------------------------
 # The review
 # ---------------------------------------------------------------------------
+
 
 def group_pending(pending):
     """Group what's left to review by merchant and direction, in order of first appearance."""
@@ -598,7 +668,7 @@ def ask_lines(n):
     for part in filter(None, re.split(r"[\s,]+", raw)):
         m = re.fullmatch(r"(\d+)(?:-(\d+))?", part)
         if not m:
-            print(paint(f"  \"{part}\" isn't a line number.", "red"))
+            print(paint(f'  "{part}" isn\'t a line number.', "red"))
             return []
         lo, hi = int(m[1]), int(m[2] or m[1])
         if not 1 <= lo <= hi <= n:
@@ -651,8 +721,13 @@ def group_line(n, total_groups, g):
     count = paint(f" ×{len(items)}", "magenta") if len(items) > 1 else ""
     when = dates[0] if dates[0] == dates[-1] else f"{dates[0]} – {dates[-1]}"
     return "{} {}  {}{}  {}  {}".format(
-        paint(f"[{n}/{total_groups}]", "dim"), arrow[g["direction"]], paint(first["vendor"], "bold"), count,
-        paint(f"${total:,.2f}", "bold", "cyan"), paint(f"{when} · {source}", "dim"))
+        paint(f"[{n}/{total_groups}]", "dim"),
+        arrow[g["direction"]],
+        paint(first["vendor"], "bold"),
+        count,
+        paint(f"${total:,.2f}", "bold", "cyan"),
+        paint(f"{when} · {source}", "dim"),
+    )
 
 
 def review(txns_by_file, paths, state_path):
@@ -671,15 +746,22 @@ def review(txns_by_file, paths, state_path):
         return
 
     groups = group_pending(pending)
-    print(f"\n{paint(len(pending), 'bold')} transaction(s) from {paint(len(groups), 'bold')} merchant(s) to review. "
-          "One answer covers every transaction from a merchant, and is remembered for next time.\n"
-          "A merchant with several transactions is listed so you can answer single lines differently.")
-    print(paint("  Money out: s self  p split  x exclude      Money in: i income  r return  x exclude\n"
-                "  Enter accept suggestion   Shift+key this time only\n"
-                "  c change some lines (e.g. a TV at Costco)   e answer each separately\n"
-                "  k skip for now   u undo   q quit\n"
-                "  Exclude = not spending or income: card payments, transfers between your own accounts, "
-                "money between the two of you.\n", "dim"))
+    print(
+        f"\n{paint(len(pending), 'bold')} transaction(s) from {paint(len(groups), 'bold')} merchant(s) to review. "
+        "One answer covers every transaction from a merchant, and is remembered for next time.\n"
+        "A merchant with several transactions is listed so you can answer single lines differently."
+    )
+    print(
+        paint(
+            "  Money out: s self  p split  x exclude      Money in: i income  r return  x exclude\n"
+            "  Enter accept suggestion   Shift+key this time only\n"
+            "  c change some lines (e.g. a TV at Costco)   e answer each separately\n"
+            "  k skip for now   u undo   q quit\n"
+            "  Exclude = not spending or income: card payments, transfers between your own accounts, "
+            "money between the two of you.\n",
+            "dim",
+        )
+    )
 
     counts = {"split": 0, "personal": 0, "income": 0, "returns": 0, "excluded": 0, "duplicates": 0}
     history = []  # one entry per applied group, newest last, so 'u' can take answers back
@@ -741,8 +823,10 @@ def review(txns_by_file, paths, state_path):
                 show()
                 asked = True
                 print(paint("  The statement doesn't say whether this was money out or in.", "yellow"))
-                ch = ask_key(f"  o out  n in  x exclude{each_key}  k skip  u undo  q quit > ",
-                             {"o", "n", "x", "k", "u", "q"} | ({"e"} if many else set()))
+                ch = ask_key(
+                    f"  o out  n in  x exclude{each_key}  k skip  u undo  q quit > ",
+                    {"o", "n", "x", "k", "u", "q"} | ({"e"} if many else set()),
+                )
                 low = ch.lower()
                 if low == "q":
                     break
@@ -754,7 +838,7 @@ def review(txns_by_file, paths, state_path):
                     gi = gi if back is None else back
                     continue
                 if low == "e":
-                    groups[gi:gi + 1] = [dict(g, items=[item], each=True) for item in g["items"]]
+                    groups[gi : gi + 1] = [dict(g, items=[item], each=True) for item in g["items"]]
                     continue
                 once = once or ch != low
                 direction = {"o": "out", "n": "in", "x": "exclude"}[low]
@@ -788,12 +872,17 @@ def review(txns_by_file, paths, state_path):
             if hint:
                 label = "Remembered" if hint is remembered else "Suggested"
                 reason = "" if hint is remembered else "  " + paint("(" + hint[1] + ")", "dim")
-                print(f"  {label}: {paint(describe_choice(hint[0]), 'bold', 'green')}{reason}   "
-                      f"Enter to accept{' for the rest' if overrides else ''}")
+                print(
+                    f"  {label}: {paint(describe_choice(hint[0]), 'bold', 'green')}{reason}   "
+                    f"Enter to accept{' for the rest' if overrides else ''}"
+                )
             change_key = "  c change lines" if many else ""
             choice, picked_once, result = ask_choice(
-                direction, hint, f"{change_key}{each_key}  k skip  u undo  q quit",
-                {"k", "u", "q"} | ({"e", "c"} if many else set()))
+                direction,
+                hint,
+                f"{change_key}{each_key}  k skip  u undo  q quit",
+                {"k", "u", "q"} | ({"e", "c"} if many else set()),
+            )
             if result == "c":
                 lines = ask_lines(len(g["items"]))
                 if lines:
@@ -819,7 +908,7 @@ def review(txns_by_file, paths, state_path):
             gi = gi if back is None else back
             continue
         if result == "e":
-            groups[gi:gi + 1] = [dict(g, items=[item], each=True) for item in g["items"]]
+            groups[gi : gi + 1] = [dict(g, items=[item], each=True) for item in g["items"]]
             continue
 
         # 3. Anything that looks already recorded under another id (same date, amount
@@ -831,22 +920,32 @@ def review(txns_by_file, paths, state_path):
         skip_dups = set()
         if any(choice_for(i) != "exclude" for i in range(len(g["items"]))):
             ids, looks = recorded_index(paths)
-            dups = [k for i, (k, _, t) in enumerate(g["items"])
-                    if choice_for(i) != "exclude" and k not in ids
-                    and (t["date"], t["amount"], t["vendor"]) in looks]
+            dups = [
+                k
+                for i, (k, _, t) in enumerate(g["items"])
+                if choice_for(i) != "exclude" and k not in ids and (t["date"], t["amount"], t["vendor"]) in looks
+            ]
             if dups:
                 show()
                 asked = True
-                print(paint(f"  {len(dups)} of these look already recorded (same date, amount and merchant).",
-                            "yellow"))
+                print(
+                    paint(f"  {len(dups)} of these look already recorded (same date, amount and merchant).", "yellow")
+                )
                 ans = ask_key("  s skip those (recommended)  a add anyway > ", {"s", "a"})
                 if ans.lower() == "s":
                     skip_dups = set(dups)
 
         # 4. Apply it to every transaction in the group, and remember it unless told not to.
-        action = {"index": gi, "asked": asked, "files": snapshot(paths), "keys": [], "counts": {},
-                  "rules": changed, "note": f"{g['items'][0][2]['vendor']} → {describe_choice(choice)}"
-                  + (f" ({len(overrides)} line(s) answered differently)" if overrides else "")}
+        action = {
+            "index": gi,
+            "asked": asked,
+            "files": snapshot(paths),
+            "keys": [],
+            "counts": {},
+            "rules": changed,
+            "note": f"{g['items'][0][2]['vendor']} → {describe_choice(choice)}"
+            + (f" ({len(overrides)} line(s) answered differently)" if overrides else ""),
+        }
         for i, (k, _, t) in enumerate(g["items"]):
             if k in skip_dups:
                 name = "duplicates"
@@ -871,10 +970,12 @@ def review(txns_by_file, paths, state_path):
             print(paint(f"  → {describe_choice(choice)}{times}{tail}{more}\n", "green"))
         gi += 1
 
-    print("\n" + paint("Done for now:", "green", "bold"),
-          f"{counts['split']} split, {counts['personal']} personal, {counts['income']} income, "
-          f"{counts['returns']} return(s), {counts['excluded']} excluded"
-          + (f", {counts['duplicates']} skipped as already recorded." if counts["duplicates"] else "."))
+    print(
+        "\n" + paint("Done for now:", "green", "bold"),
+        f"{counts['split']} split, {counts['personal']} personal, {counts['income']} income, "
+        f"{counts['returns']} return(s), {counts['excluded']} excluded"
+        + (f", {counts['duplicates']} skipped as already recorded." if counts["duplicates"] else "."),
+    )
     print(paint(f"Shared: {paths['split']}   Personal: {paths['personal']}", "dim"))
 
 
@@ -882,22 +983,31 @@ def review(txns_by_file, paths, state_path):
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     ap = argparse.ArgumentParser(
-        description="Go through statement transactions: self, split, income, return or exclude.")
+        description="Go through statement transactions: self, split, income, return or exclude."
+    )
     ap.add_argument("directory", type=Path, help="Directory containing statement PDFs")
     ap.add_argument("--person", help="Keep this person's files in data/<person>/ (e.g. --person sam)")
-    ap.add_argument("-o", "--output", type=Path,
-                    help="CSV for split transactions (default: split_transactions.csv)")
-    ap.add_argument("--personal-output", type=Path,
-                    help="CSV for your own spending and income (default: personal_transactions.csv)")
+    ap.add_argument("-o", "--output", type=Path, help="CSV for split transactions (default: split_transactions.csv)")
+    ap.add_argument(
+        "--personal-output", type=Path, help="CSV for your own spending and income (default: personal_transactions.csv)"
+    )
     ap.add_argument("--state", type=Path, help="State file tracking reviewed transactions")
-    ap.add_argument("--dump", action="store_true",
-                    help="Only print parsed transactions; don't prompt (useful to check parsing)")
-    ap.add_argument("--reset", action="store_true",
-                    help="Review everything again (keeps remembered merchants; answers replace their old rows)")
-    ap.add_argument("--clear-rules", action="store_true",
-                    help="Forget remembered vendor choices (keeps reviewed-transaction history)")
+    ap.add_argument(
+        "--dump", action="store_true", help="Only print parsed transactions; don't prompt (useful to check parsing)"
+    )
+    ap.add_argument(
+        "--reset",
+        action="store_true",
+        help="Review everything again (keeps remembered merchants; answers replace their old rows)",
+    )
+    ap.add_argument(
+        "--clear-rules",
+        action="store_true",
+        help="Forget remembered vendor choices (keeps reviewed-transaction history)",
+    )
     ap.add_argument("--no-color", action="store_true", help="Disable colored output")
     args = ap.parse_args()
 
@@ -939,9 +1049,14 @@ def main():
             print(f"Could not read {pdf.name}: {e}", file=sys.stderr)
             continue
         by_dir = Counter(t["direction"] for t in txns)
-        print("{}: {} out, {} in, {} unclear".format(
-            paint(pdf.name, "bold"), paint(by_dir["out"], "cyan"), paint(by_dir["in"], "cyan"),
-            paint(by_dir["unknown"], "yellow" if by_dir["unknown"] else "cyan")))
+        print(
+            "{}: {} out, {} in, {} unclear".format(
+                paint(pdf.name, "bold"),
+                paint(by_dir["out"], "cyan"),
+                paint(by_dir["in"], "cyan"),
+                paint(by_dir["unknown"], "yellow" if by_dir["unknown"] else "cyan"),
+            )
+        )
         txns_by_file.append((pdf.name, txns))
 
     if args.dump:
@@ -949,8 +1064,11 @@ def main():
             print("\n" + paint(f"== {source} ==", "bold"))
             for t in txns:
                 amount_txt = "{:>10}".format(t["amount"])
-                print("{}  {:<7}  {}  {}".format(
-                    paint(t["date"], "dim"), t["direction"], paint(amount_txt, "cyan"), t["vendor"]))
+                print(
+                    "{}  {:<7}  {}  {}".format(
+                        paint(t["date"], "dim"), t["direction"], paint(amount_txt, "cyan"), t["vendor"]
+                    )
+                )
         return
 
     try:

@@ -199,7 +199,8 @@ export async function registerOptions(request: Request, env: Env): Promise<Respo
   const existing = await env.DB.prepare("SELECT id, transports FROM passkeys WHERE user_id = ?")
     .bind(session.user.id)
     .all<{ id: string; transports: string | null }>();
-  if (existing.results.length >= MAX_PASSKEYS) throw new HttpError(409, `You can have at most ${MAX_PASSKEYS} passkeys.`);
+  if (existing.results.length >= MAX_PASSKEYS)
+    throw new HttpError(409, `You can have at most ${MAX_PASSKEYS} passkeys.`);
 
   const { rpID } = relyingParty(request);
   const options = await generateRegistrationOptions({
@@ -315,7 +316,10 @@ export async function confirmOptions(request: Request, env: Env): Promise<Respon
   const options = await generateAuthenticationOptions({
     rpID,
     // Only this person's own passkeys can confirm.
-    allowCredentials: mine.results.map((p) => ({ id: p.id, transports: p.transports ? JSON.parse(p.transports) : undefined })),
+    allowCredentials: mine.results.map((p) => ({
+      id: p.id,
+      transports: p.transports ? JSON.parse(p.transports) : undefined,
+    })),
     userVerification: "required",
     challenge: isoBase64URL.toBuffer(await issueChallenge(env, "confirm", session.user.id)),
   });
@@ -363,7 +367,9 @@ export async function deletePasskey(request: Request, env: Env, id: string): Pro
     .bind(id, session.user.id)
     .run();
   if (!res.meta.changes) {
-    const exists = await env.DB.prepare("SELECT 1 FROM passkeys WHERE id = ? AND user_id = ?").bind(id, session.user.id).first();
+    const exists = await env.DB.prepare("SELECT 1 FROM passkeys WHERE id = ? AND user_id = ?")
+      .bind(id, session.user.id)
+      .first();
     if (exists) throw new HttpError(409, "That's your only way to sign in. Turn password sign-in back on first.");
     throw new HttpError(404, "Passkey not found.");
   }

@@ -1,14 +1,6 @@
 import { useEffect, useId, useState, type InputHTMLAttributes, type ReactNode } from "react";
 
-export function Modal({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: ReactNode;
-}) {
+export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -22,13 +14,7 @@ export function Modal({
 
   return (
     <div className="backdrop" onClick={onClose}>
-      <div
-        className="sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="sheet" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
         <div className="sheet-head">
           <h2>{title}</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close">
@@ -172,7 +158,15 @@ export function Toast({ toast, onDone }: { toast: ToastState | null; onDone: () 
 }
 
 /** One printed line of a tally: label, dotted leader, amount. */
-export function TallyLine({ label, children, className = "" }: { label: string; children: ReactNode; className?: string }) {
+export function TallyLine({
+  label,
+  children,
+  className = "",
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
   return (
     <div className={`tally-line ${className}`}>
       <span>{label}</span>

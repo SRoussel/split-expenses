@@ -3,7 +3,17 @@
 import { INCOME_CATEGORY, isPersonalCategory, isSpendingCategory } from "../shared/categories";
 import { owedCents, pctToBasisPoints } from "../shared/owed";
 import { requireMembership, requireUser } from "./auth";
-import { type Env, HttpError, isUniqueViolation, json, MAX_AMOUNT_CENTS, readBody, str, todayFor, validDate } from "./http";
+import {
+  type Env,
+  HttpError,
+  isUniqueViolation,
+  json,
+  MAX_AMOUNT_CENTS,
+  readBody,
+  str,
+  todayFor,
+  validDate,
+} from "./http";
 
 const MAX_MONTHS = 13;
 const MAX_CATEGORIES_PER_MONTH = 13;
@@ -25,13 +35,15 @@ function validateMonths(
 ): TotalRow[] {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new HttpError(400, `${label}: invalid months.`);
   const months = Object.entries(raw as Record<string, unknown>);
-  if (months.length === 0 || months.length > MAX_MONTHS) throw new HttpError(400, `${label}: invalid number of months.`);
+  if (months.length === 0 || months.length > MAX_MONTHS)
+    throw new HttpError(400, `${label}: invalid number of months.`);
   const rows: TotalRow[] = [];
   for (const [month, cats] of months) {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || month < start.slice(0, 7) || month > end.slice(0, 7)) {
       throw new HttpError(400, `${label}: month ${month} is outside the statement's dates.`);
     }
-    if (!cats || typeof cats !== "object" || Array.isArray(cats)) throw new HttpError(400, `${label}: invalid month ${month}.`);
+    if (!cats || typeof cats !== "object" || Array.isArray(cats))
+      throw new HttpError(400, `${label}: invalid month ${month}.`);
     const entries = Object.entries(cats as Record<string, unknown>);
     if (entries.length === 0 || entries.length > MAX_CATEGORIES_PER_MONTH) {
       throw new HttpError(400, `${label}: invalid categories in ${month}.`);
@@ -41,7 +53,8 @@ function validateMonths(
       if (!Number.isInteger(cents) || Math.abs(cents as number) > MAX_AMOUNT_CENTS) {
         throw new HttpError(400, `${label}: invalid amount for ${category} in ${month}.`);
       }
-      if (category === INCOME_CATEGORY && (cents as number) < 0) throw new HttpError(400, `${label}: income can't be negative.`);
+      if (category === INCOME_CATEGORY && (cents as number) < 0)
+        throw new HttpError(400, `${label}: income can't be negative.`);
       rows.push({ month, category, cents: cents as number });
     }
   }
@@ -49,7 +62,13 @@ function validateMonths(
 }
 
 /** INSERT ... VALUES (...), (...) in chunks small enough for D1. */
-function insertTotals(env: Env, table: "entry_breakdown" | "spending_totals", ownerColumn: string, ownerId: string, rows: TotalRow[]) {
+function insertTotals(
+  env: Env,
+  table: "entry_breakdown" | "spending_totals",
+  ownerColumn: string,
+  ownerId: string,
+  rows: TotalRow[],
+) {
   const statements: D1PreparedStatement[] = [];
   for (let i = 0; i < rows.length; i += ROWS_PER_INSERT) {
     const chunk = rows.slice(i, i + ROWS_PER_INSERT);
@@ -81,7 +100,9 @@ export async function importStatement(request: Request, env: Env): Promise<Respo
   const isMember = async (id: unknown) =>
     typeof id === "string" &&
     Boolean(
-      await env.DB.prepare("SELECT 1 FROM members WHERE household_id = ? AND user_id = ?").bind(household_id, id).first(),
+      await env.DB.prepare("SELECT 1 FROM members WHERE household_id = ? AND user_id = ?")
+        .bind(household_id, id)
+        .first(),
     );
 
   const statements: D1PreparedStatement[] = [];
@@ -92,7 +113,12 @@ export async function importStatement(request: Request, env: Env): Promise<Respo
     const shared = body.shared as Record<string, unknown>;
     const rows = validateMonths(shared.months, start, end, isSpendingCategory, "Shared");
     const total = rows.reduce((sum, r) => sum + r.cents, 0);
-    if (!Number.isInteger(shared.total_cents) || shared.total_cents !== total || total <= 0 || total > MAX_AMOUNT_CENTS) {
+    if (
+      !Number.isInteger(shared.total_cents) ||
+      shared.total_cents !== total ||
+      total <= 0 ||
+      total > MAX_AMOUNT_CENTS
+    ) {
       throw new HttpError(400, "Shared: the categories don't add up to the total.");
     }
     const bp = typeof shared.payer_share_pct === "number" ? pctToBasisPoints(shared.payer_share_pct) : null;
@@ -103,8 +129,17 @@ export async function importStatement(request: Request, env: Env): Promise<Respo
         `INSERT INTO entries
            (id, household_id, kind, entry_date, name, amount_cents, payer_id, payer_share_pct, owed_cents, created_by)
          VALUES (?, ?, 'expense', ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(entryId, household_id, todayFor(request, body), name, total, shared.payer_id, bp / 100,
-        owedCents("expense", total, bp / 100), user.id),
+      ).bind(
+        entryId,
+        household_id,
+        todayFor(request, body),
+        name,
+        total,
+        shared.payer_id,
+        bp / 100,
+        owedCents("expense", total, bp / 100),
+        user.id,
+      ),
       ...insertTotals(env, "entry_breakdown", "entry_id", entryId!, rows),
     );
   }
@@ -182,8 +217,12 @@ export async function moveSpending(request: Request, env: Env): Promise<Response
   // Only an upload in this household, or an active imported entry in it.
   const owner =
     kind === "upload"
-      ? await env.DB.prepare("SELECT id FROM spending_batches WHERE id = ? AND household_id = ?").bind(id, household_id).first()
-      : await env.DB.prepare("SELECT id FROM entries WHERE id = ? AND household_id = ? AND voided_at IS NULL").bind(id, household_id).first();
+      ? await env.DB.prepare("SELECT id FROM spending_batches WHERE id = ? AND household_id = ?")
+          .bind(id, household_id)
+          .first()
+      : await env.DB.prepare("SELECT id FROM entries WHERE id = ? AND household_id = ? AND voided_at IS NULL")
+          .bind(id, household_id)
+          .first();
   if (!owner) throw new HttpError(404, kind === "upload" ? "Upload not found." : "Entry not found or voided.");
 
   const [table, col] = kind === "upload" ? ["spending_totals", "batch_id"] : ["entry_breakdown", "entry_id"];
@@ -192,21 +231,33 @@ export async function moveSpending(request: Request, env: Env): Promise<Response
     .first<{ cents: number }>();
   const have = row?.cents ?? 0;
   if (have < (cents as number)) {
-    throw new HttpError(400, `There's only $${(Math.max(0, have) / 100).toFixed(2)} in ${from} for that month to move.`);
+    throw new HttpError(
+      400,
+      `There's only $${(Math.max(0, have) / 100).toFixed(2)} in ${from} for that month to move.`,
+    );
   }
 
   // One transaction. The take only happens if the amount is still what we read, and
   // the give only if the take happened, so two people moving at once can't double up.
   const left = have - (cents as number);
   const [taken] = await env.DB.batch([
-    env.DB.prepare(`UPDATE ${table} SET cents = ? WHERE ${col} = ? AND month = ? AND category = ? AND cents = ?`)
-      .bind(left, id, month, from, have),
+    env.DB.prepare(`UPDATE ${table} SET cents = ? WHERE ${col} = ? AND month = ? AND category = ? AND cents = ?`).bind(
+      left,
+      id,
+      month,
+      from,
+      have,
+    ),
     env.DB.prepare(
       `INSERT INTO ${table} (${col}, month, category, cents)
        SELECT ?, ?, ?, ? WHERE changes() = 1
        ON CONFLICT (${col}, month, category) DO UPDATE SET cents = cents + excluded.cents`,
     ).bind(id, month, to, cents),
-    env.DB.prepare(`DELETE FROM ${table} WHERE ${col} = ? AND month = ? AND category = ? AND cents = 0`).bind(id, month, from),
+    env.DB.prepare(`DELETE FROM ${table} WHERE ${col} = ? AND month = ? AND category = ? AND cents = 0`).bind(
+      id,
+      month,
+      from,
+    ),
   ]);
   if (!taken.meta.changes) throw new HttpError(409, "That changed in the meantime. Try again.");
   return json({ ok: true });

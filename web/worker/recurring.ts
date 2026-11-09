@@ -51,8 +51,18 @@ export async function addDueRecurring(env: Env, householdId: string, today: stri
            VALUES (?, ?, 'expense', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (recurring_id, occurrence_date) WHERE recurring_id IS NOT NULL DO NOTHING`,
         ).bind(
-          crypto.randomUUID(), householdId, o.date, r.name, r.amount_cents, r.payer_id, r.payer_share_pct, owed,
-          r.created_by, r.id, o.date, r.category,
+          crypto.randomUUID(),
+          householdId,
+          o.date,
+          r.name,
+          r.amount_cents,
+          r.payer_id,
+          r.payer_share_pct,
+          owed,
+          r.created_by,
+          r.id,
+          o.date,
+          r.category,
         ),
       );
     }
@@ -60,7 +70,10 @@ export async function addDueRecurring(env: Env, householdId: string, today: stri
     const nextDate = occurrenceDate(r.start_date, r.frequency, next);
     statements.push(
       env.DB.prepare("UPDATE recurring SET next_index = ?, next_date = ? WHERE id = ? AND next_index = ?").bind(
-        next, nextDate, r.id, r.next_index,
+        next,
+        nextDate,
+        r.id,
+        r.next_index,
       ),
     );
   }

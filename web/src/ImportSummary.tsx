@@ -17,7 +17,12 @@ import type { Entry, Member } from "./types";
 import { ErrorText, Segmented } from "./ui";
 
 const shortDate = (iso: string) =>
-  new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 
 function CategoryList({ totals }: { totals: Record<string, number> }) {
   return (
@@ -95,7 +100,8 @@ export default function ImportSummary({
   const doShared = Boolean(summary?.shared && includeShared);
   const doPersonal = Boolean(summary?.personal && includePersonal);
   const duplicate = doShared && entries.some((e) => !e.voided_at && e.name === name.trim());
-  const owed = summary?.shared && payerShare !== null ? owedCents("expense", summary.shared.totalCents, payerShare) : null;
+  const owed =
+    summary?.shared && payerShare !== null ? owedCents("expense", summary.shared.totalCents, payerShare) : null;
 
   const personalTotals = summary?.personal ? totalsByCategory(summary.personal.months) : null;
   const income = personalTotals?.[INCOME_CATEGORY] ?? 0;
@@ -117,7 +123,9 @@ export default function ImportSummary({
       await importStatement(
         summaryToImport(summary, {
           name: name.trim(),
-          shared: doShared ? { payerId: payer === "me" ? me.user_id : partner.user_id, payerSharePct: payerShare! } : null,
+          shared: doShared
+            ? { payerId: payer === "me" ? me.user_id : partner.user_id, payerSharePct: payerShare! }
+            : null,
           personId: doPersonal ? person : null,
         }),
       );

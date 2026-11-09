@@ -88,9 +88,14 @@ class EffectTests(unittest.TestCase):
     def test_expenses(self):
         self.assertEqual(self.effect(type="expense", payer="me", amount="100.00", my_share="50"), Decimal("50.00"))
         self.assertEqual(self.effect(type="expense", payer="me", amount="100.00", my_share="70"), Decimal("30.00"))
-        self.assertEqual(self.effect(type="expense", payer="partner", amount="100.00", my_share="70"), Decimal("-70.00"))
-        self.assertEqual(self.effect(type="expense", payer="me", amount="100.00", my_share=""), Decimal("50.00"),
-                         "a blank share means 50/50")
+        self.assertEqual(
+            self.effect(type="expense", payer="partner", amount="100.00", my_share="70"), Decimal("-70.00")
+        )
+        self.assertEqual(
+            self.effect(type="expense", payer="me", amount="100.00", my_share=""),
+            Decimal("50.00"),
+            "a blank share means 50/50",
+        )
 
     def test_odd_half_cent_goes_to_the_payer(self):
         # $1.01 split evenly: the other person owes 51¢ (half up), the payer covers 50¢.
@@ -112,8 +117,19 @@ class CommandTests(InTempDir):
     def test_add(self):
         out = self.run_ledger("add", "84.20", "me", "groceries", "and", "stuff", "--date", "2026-01-15")
         self.assertIn("Partner owes you $42.10", out)
-        self.assertEqual(self.rows(), [{"date": "2026-01-15", "type": "expense", "payer": "me", "amount": "84.20",
-                                        "my_share": "50", "name": "groceries and stuff"}])
+        self.assertEqual(
+            self.rows(),
+            [
+                {
+                    "date": "2026-01-15",
+                    "type": "expense",
+                    "payer": "me",
+                    "amount": "84.20",
+                    "my_share": "50",
+                    "name": "groceries and stuff",
+                }
+            ],
+        )
         self.run_ledger("add", "120", "partner", "power bill", "--my-share", "70")
         self.assertEqual(self.balance(), Decimal("42.10") - Decimal("84.00"))
         self.assertEqual(Path("ledger.csv").read_text().splitlines()[0], ",".join(sl.FIELDS), "one header only")
@@ -150,8 +166,11 @@ class CommandTests(InTempDir):
         self.run_ledger("add", "1.01", "partner", "coffee")
         self.run_ledger("settle")
         row = self.rows()[-1]
-        self.assertEqual((row["type"], row["payer"], row["amount"]), ("settlement", "me", "0.51"),
-                         "whoever owes pays the whole balance")
+        self.assertEqual(
+            (row["type"], row["payer"], row["amount"]),
+            ("settlement", "me", "0.51"),
+            "whoever owes pays the whole balance",
+        )
         self.assertEqual(self.balance(), 0)
         self.run_ledger("settle", "100", "partner", "--name", "Venmo")
         self.assertEqual(self.rows()[-1]["name"], "Venmo")
@@ -193,8 +212,7 @@ class CommandTests(InTempDir):
 
 class ArchiveTests(InTempDir):
     def test_archive_moves_the_batch_and_keeps_the_history(self):
-        for name in ("split_transactions.csv", "personal_transactions.csv", "split_summary.json",
-                     ".split_state.json"):
+        for name in ("split_transactions.csv", "personal_transactions.csv", "split_summary.json", ".split_state.json"):
             Path(name).write_text("x")
         args = Namespace(person=None)
         with mock.patch("builtins.print"):
@@ -217,8 +235,10 @@ class ArchiveTests(InTempDir):
         with mock.patch("builtins.print"):
             sl.cmd_finish(args, None)
         [dest] = list(Path("archive").iterdir())
-        self.assertEqual(json.loads((dest / "split_summary.json").read_text()),
-                         json.loads((FIXTURES / "expected_summary_v2.json").read_text()))
+        self.assertEqual(
+            json.loads((dest / "split_summary.json").read_text()),
+            json.loads((FIXTURES / "expected_summary_v2.json").read_text()),
+        )
         self.assertTrue((dest / "split_transactions.csv").exists())
         self.assertFalse(Path("split_summary.json").exists())
         with self.assertRaises(SystemExit), mock.patch("builtins.print"):
@@ -235,9 +255,14 @@ class ArchiveTests(InTempDir):
 
 class SummaryTests(unittest.TestCase):
     def summarize(self, out, **kw):
-        args = Namespace(csv=str(FIXTURES / "sample_split_transactions.csv"),
-                         personal=str(FIXTURES / "sample_personal_transactions.csv"),
-                         person=None, no_personal=False, output=str(out), name=None)
+        args = Namespace(
+            csv=str(FIXTURES / "sample_split_transactions.csv"),
+            personal=str(FIXTURES / "sample_personal_transactions.csv"),
+            person=None,
+            no_personal=False,
+            output=str(out),
+            name=None,
+        )
         for k, v in kw.items():
             setattr(args, k, v)
         with mock.patch("builtins.print"):

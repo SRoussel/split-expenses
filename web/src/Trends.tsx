@@ -2,14 +2,7 @@ import { useMemo, useState } from "react";
 import { ChartTable, ColumnChart, signed, Sparkline } from "./charts";
 import { saveTextFile } from "./files";
 import { fmt } from "./ledger";
-import {
-  rangeMonths,
-  rangeReport,
-  reportCsv,
-  type Range,
-  type SpendingIndex,
-  type View,
-} from "./spending";
+import { rangeMonths, rangeReport, reportCsv, type Range, type SpendingIndex, type View } from "./spending";
 import type { SpendingBatch } from "./types";
 import { TallyLine } from "./ui";
 

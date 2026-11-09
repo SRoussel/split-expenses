@@ -110,7 +110,13 @@ function ShareField({ me, value, onChange }: { me: Member; value: string; onChan
             </button>
           );
         })}
-        <button type="button" role="radio" aria-checked={custom} className={custom ? "chip on" : "chip"} onClick={() => setCustom(true)}>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={custom}
+          className={custom ? "chip on" : "chip"}
+          onClick={() => setCustom(true)}
+        >
           Custom…
         </button>
       </span>
@@ -142,7 +148,17 @@ function CategoryField({ value, onChange }: { value: string; onChange: (v: strin
 }
 
 /** "Sam will owe you $42.10" / "You will owe Sam $42.10" */
-function OwedPreview({ owed, payer, partner, suffix = "" }: { owed: number | null; payer: "me" | "partner"; partner: Member; suffix?: string }) {
+function OwedPreview({
+  owed,
+  payer,
+  partner,
+  suffix = "",
+}: {
+  owed: number | null;
+  payer: "me" | "partner";
+  partner: Member;
+  suffix?: string;
+}) {
   if (owed === null) return null;
   return (
     <p className="preview">
@@ -378,7 +394,12 @@ export function OpeningForm({ me, partner, save, onSaved, initial }: EntryFormPr
 
 const EVERY = { weekly: "week", monthly: "month", yearly: "year" } as const;
 const shortDate = (iso: string) =>
-  new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 
 /** Create a recurring expense, or change one (`initial`). The schedule is fixed once created. */
 export function RecurringForm({
@@ -428,7 +449,9 @@ export function RecurringForm({
       category: category || null,
     };
     void run(() =>
-      initial ? updateRecurring(initial.id, { ...fields, paused }) : createRecurring({ ...fields, frequency, start_date: start }),
+      initial
+        ? updateRecurring(initial.id, { ...fields, paused })
+        : createRecurring({ ...fields, frequency, start_date: start }),
     );
   }
 
@@ -478,14 +501,19 @@ export function RecurringForm({
           </label>
           {start >= today && (
             <p className="preview">
-              {describeSchedule(start, frequency)}: {shortDate(start)}, then {shortDate(occurrenceDate(start, frequency, 1))}, and
-              so on.
+              {describeSchedule(start, frequency)}: {shortDate(start)}, then{" "}
+              {shortDate(occurrenceDate(start, frequency, 1))}, and so on.
             </p>
           )}
         </>
       )}
 
-      <OwedPreview owed={owed} payer={payer} partner={partner} suffix={` each ${EVERY[initial?.frequency ?? frequency]}`} />
+      <OwedPreview
+        owed={owed}
+        payer={payer}
+        partner={partner}
+        suffix={` each ${EVERY[initial?.frequency ?? frequency]}`}
+      />
       <p className="muted small">
         Each one is added to the ledger automatically when either of you opens the app on or after its date.
         {initial && " Changes apply from the next one; ones already added stay as they are."}
@@ -521,15 +549,20 @@ export function DefaultSplitForm({ me, partner, onSaved }: { me: Member; partner
   return (
     <form onSubmit={submit} className="stack">
       <p className="muted">
-        The share you normally pay. New expenses and statement imports start with it, and you can still
-        change it on any single expense. It's the same setting for both of you.
+        The share you normally pay. New expenses and statement imports start with it, and you can still change it on any
+        single expense. It's the same setting for both of you.
       </p>
       <label>
         Your share (%)
         <input inputMode="decimal" value={myShare} onChange={(e) => setMyShare(e.target.value)} autoFocus />
         <span className="chips">
           {["50", "60", "40"].map((v) => (
-            <button key={v} type="button" className={myShare.trim() === v ? "chip on" : "chip"} onClick={() => setMyShare(v)}>
+            <button
+              key={v}
+              type="button"
+              className={myShare.trim() === v ? "chip on" : "chip"}
+              onClick={() => setMyShare(v)}
+            >
               {v === "50" ? "50/50" : `${v}/${100 - Number(v)}`}
             </button>
           ))}

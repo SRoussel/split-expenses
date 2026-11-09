@@ -96,7 +96,15 @@ export function buildIndex(entries: Entry[], data: SpendingData, memberIds: stri
       for (const id of memberIds) shares[id] = id === e.payer_id ? r.cents - other : other;
       addTo(sharedFull, r.month, r.category, r.cents);
       for (const [id, part] of Object.entries(shares)) addTo(nested(sharedShare, id), r.month, r.category, part);
-      sharedItems.push({ entryId: e.id, name: e.name, date: e.entry_date, month: r.month, category: r.category, cents: r.cents, shares });
+      sharedItems.push({
+        entryId: e.id,
+        name: e.name,
+        date: e.entry_date,
+        month: r.month,
+        category: r.category,
+        cents: r.cents,
+        shares,
+      });
       months.add(r.month);
     }
   }
@@ -118,14 +126,29 @@ function merge(into: Cats, from: Cats | undefined) {
   for (const [c, v] of Object.entries(from)) into[c] = (into[c] ?? 0) + v;
 }
 
-export function summarize(index: SpendingIndex, view: View, month: string, me: string, partner: string | null): MonthSummary {
+export function summarize(
+  index: SpendingIndex,
+  view: View,
+  month: string,
+  me: string,
+  partner: string | null,
+): MonthSummary {
   const all: Cats = {};
-  const people = view === "me" ? [me] : view === "partner" ? (partner ? [partner] : []) : view === "household" ? [me, partner].filter(Boolean) as string[] : [];
+  const people =
+    view === "me"
+      ? [me]
+      : view === "partner"
+        ? partner
+          ? [partner]
+          : []
+        : view === "household"
+          ? ([me, partner].filter(Boolean) as string[])
+          : [];
   for (const p of people) merge(all, index.personal.get(p)?.get(month));
   if (view === "shared" || view === "household") merge(all, index.sharedFull.get(month));
   else for (const p of people) merge(all, index.sharedShare.get(p)?.get(month));
 
-  const income = view === "shared" ? null : all[INCOME_CATEGORY] ?? 0;
+  const income = view === "shared" ? null : (all[INCOME_CATEGORY] ?? 0);
   delete all[INCOME_CATEGORY];
   for (const [c, v] of Object.entries(all)) if (v === 0) delete all[c];
   const spent = Object.values(all).reduce((a, b) => a + b, 0);
@@ -187,10 +210,13 @@ export function coverage(batches: SpendingBatch[], personId: string, month: stri
   const last = `${month}-${String(days).padStart(2, "0")}`;
   const spans = batches
     .filter((b) => b.person_id === personId && b.start_date <= last && b.end_date >= first)
-    .map((b) => [
-      b.start_date < first ? 1 : Number(b.start_date.slice(8)),
-      b.end_date > last ? days : Number(b.end_date.slice(8)),
-    ] as [number, number])
+    .map(
+      (b) =>
+        [
+          b.start_date < first ? 1 : Number(b.start_date.slice(8)),
+          b.end_date > last ? days : Number(b.end_date.slice(8)),
+        ] as [number, number],
+    )
     .sort((a, b) => a[0] - b[0]);
   const ranges: [number, number][] = [];
   for (const [s, e] of spans) {
@@ -202,12 +228,19 @@ export function coverage(batches: SpendingBatch[], personId: string, month: stri
 }
 
 /** Shared expenses in a month and category, with the part that counts for the view. */
-export function sharedItemsFor(index: SpendingIndex, view: View, month: string, category: string, me: string, partner: string | null) {
+export function sharedItemsFor(
+  index: SpendingIndex,
+  view: View,
+  month: string,
+  category: string,
+  me: string,
+  partner: string | null,
+) {
   return index.sharedItems
     .filter((i) => i.month === month && i.category === category)
     .map((i) => ({
       ...i,
-      counted: view === "me" ? i.shares[me] ?? 0 : view === "partner" && partner ? i.shares[partner] ?? 0 : i.cents,
+      counted: view === "me" ? (i.shares[me] ?? 0) : view === "partner" && partner ? (i.shares[partner] ?? 0) : i.cents,
     }));
 }
 

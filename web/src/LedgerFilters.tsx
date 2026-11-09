@@ -85,11 +85,21 @@ export default function LedgerFilters({
           <div className="date-pair">
             <label>
               From
-              <input type="date" value={filter.from} max={filter.to || undefined} onChange={(e) => set("from", e.target.value)} />
+              <input
+                type="date"
+                value={filter.from}
+                max={filter.to || undefined}
+                onChange={(e) => set("from", e.target.value)}
+              />
             </label>
             <label>
               To
-              <input type="date" value={filter.to} min={filter.from || undefined} onChange={(e) => set("to", e.target.value)} />
+              <input
+                type="date"
+                value={filter.to}
+                min={filter.from || undefined}
+                onChange={(e) => set("to", e.target.value)}
+              />
             </label>
           </div>
         </div>
@@ -101,8 +111,15 @@ export default function LedgerFilters({
             {totals.count} {totals.count === 1 ? "entry" : "entries"}
             {totals.spent > 0 && (
               <>
-                {" "}· <span className="nowrap"><strong>{fmt(totals.spent)}</strong> spent</span> ·{" "}
-                <span className="nowrap">your share <strong>{fmt(totals.mine)}</strong></span>
+                {" "}
+                ·{" "}
+                <span className="nowrap">
+                  <strong>{fmt(totals.spent)}</strong> spent
+                </span>{" "}
+                ·{" "}
+                <span className="nowrap">
+                  your share <strong>{fmt(totals.mine)}</strong>
+                </span>
               </>
             )}
           </span>

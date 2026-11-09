@@ -1,12 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": [
-      "ES2022"
-    ],
-    "types": [
-      "@cloudflare/workers-types"
-    ],
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
@@ -17,8 +13,5 @@
     "noEmit": true,
     "resolveJsonModule": true
   },
-  "include": [
-    ".",
-    "../shared"
-  ]
+  "include": [".", "../shared"]
 }

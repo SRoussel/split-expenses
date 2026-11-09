@@ -151,9 +151,11 @@ export function nameSuggestions(entries: Entry[], typed: string, limit = 4): Nam
   }
   return [...seen.entries()]
     .filter(([key]) => (q ? key.includes(q) && key !== q : true))
-    .sort(([ka, a], [kb, b]) =>
-      // Names that start with what's typed come first, then the most used, then the most recent.
-      Number(kb.startsWith(q)) - Number(ka.startsWith(q)) || b.count - a.count || b.last.localeCompare(a.last))
+    .sort(
+      ([ka, a], [kb, b]) =>
+        // Names that start with what's typed come first, then the most used, then the most recent.
+        Number(kb.startsWith(q)) - Number(ka.startsWith(q)) || b.count - a.count || b.last.localeCompare(a.last),
+    )
     .slice(0, limit)
     .map(([, v]) => v.s);
 }
@@ -212,17 +214,22 @@ const SUMMARIZE_HINT =
   "Run `uv run split-ledger summarize` on your computer and choose the split_summary.json it makes.";
 
 const isDay = (v: unknown): v is string =>
-  typeof v === "string" &&
-  /^\d{4}-\d{2}-\d{2}$/.test(v) &&
-  new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+  typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
 function onlyKeys(o: Record<string, unknown>, allowed: string[], where: string) {
   const extra = Object.keys(o).filter((k) => !allowed.includes(k));
-  if (extra.length) throw new Error(`The summary has unexpected fields${where} (${extra.join(", ")}), so it wasn't imported.`);
+  if (extra.length)
+    throw new Error(`The summary has unexpected fields${where} (${extra.join(", ")}), so it wasn't imported.`);
 }
 
-function checkMonths(raw: unknown, start: string, end: string, allowed: (c: string) => boolean, label: string): MonthTotals {
+function checkMonths(
+  raw: unknown,
+  start: string,
+  end: string,
+  allowed: (c: string) => boolean,
+  label: string,
+): MonthTotals {
   if (!isObject(raw)) throw new Error(`The summary's ${label} totals aren't valid.`);
   const months = Object.entries(raw);
   if (months.length === 0 || months.length > 13) throw new Error(`The summary's ${label} totals aren't valid.`);
@@ -269,14 +276,16 @@ export function parseSummary(text: string): ImportSummary {
     }
     throw new Error(`That isn't a statement summary. ${SUMMARIZE_HINT}`);
   }
-  if (!isObject(data) || data.format !== "split-summary") throw new Error(`That isn't a statement summary. ${SUMMARIZE_HINT}`);
+  if (!isObject(data) || data.format !== "split-summary")
+    throw new Error(`That isn't a statement summary. ${SUMMARIZE_HINT}`);
   if (data.version !== 1 && data.version !== 2) {
     throw new Error("This summary was made by a newer version of split-ledger. Update the app.");
   }
 
   const name = typeof data.name === "string" ? data.name.trim() : "";
   if (!name || name.length > 200) throw new Error("The summary's name is missing or too long.");
-  if (!isDay(data.start) || !isDay(data.end) || data.start > data.end) throw new Error("The summary's dates aren't valid.");
+  if (!isDay(data.start) || !isDay(data.end) || data.start > data.end)
+    throw new Error("The summary's dates aren't valid.");
   const { start, end } = data;
   const isCount = (v: unknown) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 100_000;
 
@@ -292,8 +301,15 @@ export function parseSummary(text: string): ImportSummary {
       ? Object.fromEntries(Object.entries(data.categories).map(([c, v]) => [c === "uncategorized" ? "other" : c, v]))
       : { other: total };
     const months = checkMonths({ [start.slice(0, 7)]: cats }, start, end, isSpendingCategory, "shared");
-    if (sumMonths(months) !== total) throw new Error("The summary's categories don't add up to its total, so it wasn't imported.");
-    return { name, start, end, shared: { count: data.count as number, totalCents: total as number, months }, personal: null };
+    if (sumMonths(months) !== total)
+      throw new Error("The summary's categories don't add up to its total, so it wasn't imported.");
+    return {
+      name,
+      start,
+      end,
+      shared: { count: data.count as number, totalCents: total as number, months },
+      personal: null,
+    };
   }
 
   onlyKeys(data, ["format", "version", "name", "start", "end", "shared", "personal"], "");
@@ -314,7 +330,10 @@ export function parseSummary(text: string): ImportSummary {
     if (!isObject(data.personal)) throw new Error("The summary's personal part isn't valid.");
     onlyKeys(data.personal, ["count", "months"], " in its personal part");
     if (!isCount(data.personal.count)) throw new Error("The summary's transaction count isn't valid.");
-    personal = { count: data.personal.count as number, months: checkMonths(data.personal.months, start, end, isPersonalCategory, "personal") };
+    personal = {
+      count: data.personal.count as number,
+      months: checkMonths(data.personal.months, start, end, isPersonalCategory, "personal"),
+    };
   }
   if (!shared && !personal) throw new Error("The summary is empty.");
   return { name, start, end, shared, personal };
@@ -388,16 +407,7 @@ export function exportLedgerCsv(entries: Entry[], userId: string): string {
       payer = "";
     }
 
-    lines.push(
-      [
-        e.entry_date,
-        type,
-        payer,
-        (e.amount_cents / 100).toFixed(2),
-        myShare,
-        csvField(e.name),
-      ].join(","),
-    );
+    lines.push([e.entry_date, type, payer, (e.amount_cents / 100).toFixed(2), myShare, csvField(e.name)].join(","));
   }
   return lines.join("\n") + "\n";
 }

@@ -78,7 +78,6 @@ test("the same expense gives the same amount no matter who is looking", () => {
   assert.equal(owedCents("expense", 101, 100 - 50), 51);
 });
 
-
 test("balance: the CLI walkthrough gives the same numbers", () => {
   // init --i-owe 500  ->  partner is owed 500
   // add 84.20 me       ->  partner owes me 42.10
@@ -122,7 +121,11 @@ test("parseSummary reads what `split-ledger summarize` writes (v2)", () => {
   assert.deepEqual(s.shared?.months["2026-02"], { groceries: 2025 }, "the shared return reduced groceries");
   assert.equal(s.personal?.months["2026-01"].income, 325042);
   assert.deepEqual(totalsByCategory(s.personal!.months), {
-    dining: 1840, entertainment: 4499, fees: 3500, income: 650042, transport: 5230,
+    dining: 1840,
+    entertainment: 4499,
+    fees: 3500,
+    income: 650042,
+    transport: 5230,
   });
 });
 
@@ -141,7 +144,11 @@ test("parseSummary refuses the detailed CSVs and anything unexpected", () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   type D = Record<string, any>;
   const bad: [string, (d: D) => void, RegExp][] = [
-    ["extra field (e.g. transactions)", (d) => (d.transactions = [{ vendor: "X" }]), /unexpected fields \(transactions\)/],
+    [
+      "extra field (e.g. transactions)",
+      (d) => (d.transactions = [{ vendor: "X" }]),
+      /unexpected fields \(transactions\)/,
+    ],
     ["extra field inside personal", (d) => (d.personal.vendors = ["X"]), /unexpected fields in its personal part/],
     ["wrong format", (d) => (d.format = "x"), /isn't a statement summary/],
     ["newer version", (d) => (d.version = 3), /newer version/],
@@ -152,7 +159,14 @@ test("parseSummary refuses the detailed CSVs and anything unexpected", () => {
     ["dollars, not cents", (d) => (d.personal.months["2026-01"].dining = 18.4), /isn't valid/],
     ["month outside the dates", (d) => (d.personal.months["2026-05"] = { dining: 1 }), /outside its dates/],
     ["impossible date", (d) => (d.start = "2026-02-31"), /dates aren't valid/],
-    ["empty", (d) => { delete d.shared; delete d.personal; }, /empty/],
+    [
+      "empty",
+      (d) => {
+        delete d.shared;
+        delete d.personal;
+      },
+      /empty/,
+    ],
   ];
   for (const [label, mutate, message] of bad) {
     const d = good();
@@ -183,9 +197,24 @@ test("export uses the CLI ledger.csv format", () => {
   const entries = [
     entry({ kind: "opening", payer_id: PARTNER, amount_cents: 50000, owed_cents: 50000, name: "Starting balance" }),
     entry({ kind: "expense", payer_id: ME, amount_cents: 6000, payer_share_pct: 70, owed_cents: 1800, name: "dinner" }),
-    entry({ kind: "expense", payer_id: PARTNER, amount_cents: 12000, payer_share_pct: 30, owed_cents: 8400, name: "power, bill" }),
+    entry({
+      kind: "expense",
+      payer_id: PARTNER,
+      amount_cents: 12000,
+      payer_share_pct: 30,
+      owed_cents: 8400,
+      name: "power, bill",
+    }),
     entry({ kind: "settlement", payer_id: ME, amount_cents: 10000, owed_cents: 10000, name: "Venmo" }),
-    entry({ kind: "expense", payer_id: ME, amount_cents: 999, payer_share_pct: 50, owed_cents: 500, name: "voided", voided_at: "2026-01-03T00:00:00Z" }),
+    entry({
+      kind: "expense",
+      payer_id: ME,
+      amount_cents: 999,
+      payer_share_pct: 50,
+      owed_cents: 500,
+      name: "voided",
+      voided_at: "2026-01-03T00:00:00Z",
+    }),
   ];
   const lines = exportLedgerCsv(entries, ME).trim().split("\n");
   assert.deepEqual(lines, [
@@ -249,11 +278,34 @@ test("schedule descriptions", () => {
 });
 
 test("search and filters", () => {
-  const groceries = entry({ kind: "expense", payer_id: ME, amount_cents: 8420, owed_cents: 4210, name: "Costco run", category: "groceries", entry_date: "2026-03-14" });
-  const rent = entry({ kind: "expense", payer_id: PARTNER, amount_cents: 200000, owed_cents: 100000, name: "Rent", entry_date: "2026-04-01" });
-  const paid = entry({ kind: "settlement", payer_id: ME, amount_cents: 5000, owed_cents: 5000, name: "Settlement", entry_date: "2026-04-02" });
+  const groceries = entry({
+    kind: "expense",
+    payer_id: ME,
+    amount_cents: 8420,
+    owed_cents: 4210,
+    name: "Costco run",
+    category: "groceries",
+    entry_date: "2026-03-14",
+  });
+  const rent = entry({
+    kind: "expense",
+    payer_id: PARTNER,
+    amount_cents: 200000,
+    owed_cents: 100000,
+    name: "Rent",
+    entry_date: "2026-04-01",
+  });
+  const paid = entry({
+    kind: "settlement",
+    payer_id: ME,
+    amount_cents: 5000,
+    owed_cents: 5000,
+    name: "Settlement",
+    entry_date: "2026-04-02",
+  });
   const all = [groceries, rent, paid];
-  const find = (f: Partial<EntryFilter>) => all.filter((e) => matchesFilter(e, { ...NO_FILTER, ...f }, ME)).map((e) => e.name);
+  const find = (f: Partial<EntryFilter>) =>
+    all.filter((e) => matchesFilter(e, { ...NO_FILTER, ...f }, ME)).map((e) => e.name);
 
   assert.deepEqual(find({}), ["Costco run", "Rent", "Settlement"]);
   assert.deepEqual(find({ text: "  COSTCO " }), ["Costco run"], "case and spaces don't matter");
@@ -272,9 +324,18 @@ test("search and filters", () => {
   assert.equal(activeFilterCount({ ...NO_FILTER, text: "x", payer: "me", from: "2026-01-01", to: "2026-02-01" }), 2);
   assert.equal(isFiltering({ ...NO_FILTER, text: " " }), false);
 
-  const voided = entry({ kind: "expense", payer_id: ME, amount_cents: 999, owed_cents: 500, voided_at: "2026-04-03T00:00:00Z" });
-  assert.deepEqual(filterTotals([...all, voided], ME), { count: 4, spent: 208420, mine: 4210 + 100000 },
-    "expenses only, not voided; my share is what I paid for myself plus what I owe");
+  const voided = entry({
+    kind: "expense",
+    payer_id: ME,
+    amount_cents: 999,
+    owed_cents: 500,
+    voided_at: "2026-04-03T00:00:00Z",
+  });
+  assert.deepEqual(
+    filterTotals([...all, voided], ME),
+    { count: 4, spent: 208420, mine: 4210 + 100000 },
+    "expenses only, not voided; my share is what I paid for myself plus what I owe",
+  );
 });
 
 test("name suggestions and remembered categories", () => {

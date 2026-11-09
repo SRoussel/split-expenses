@@ -1,7 +1,8 @@
-// Lint rules for the app, the Worker and the tests. Run with `npm run lint`.
+// Lint rules for the app, the Worker and the tests. Run with `npm run lint`; formatting is Prettier's.
 // Recommended sets only: real mistakes and React hook misuse, not style.
 import js from "@eslint/js";
 import reactHooks from "eslint-plugin-react-hooks";
+import prettier from "eslint-config-prettier";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
@@ -32,4 +33,6 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
     },
   },
+  // Formatting is Prettier's job (npm run format); turn off any lint rule that would fight it.
+  prettier,
 );

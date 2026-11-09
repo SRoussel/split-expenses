@@ -125,7 +125,16 @@ export function ColumnChart({
           const isSel = c.key === selected;
           return (
             <g key={c.key}>
-              {isSel && <rect className="sel" x={cx - slot / 2 + 1} y={pad.top - 6} width={slot - 2} height={plotH + 6} rx={6} />}
+              {isSel && (
+                <rect
+                  className="sel"
+                  x={cx - slot / 2 + 1}
+                  y={pad.top - 6}
+                  width={slot - 2}
+                  height={plotH + 6}
+                  rx={6}
+                />
+              )}
               <path
                 className={`bar ${c.value < 0 ? "neg" : "pos"}${c.partial ? " partial" : ""}${active && active !== c.key ? " dim" : ""}`}
                 d={barPath(cx - barW / 2, barW, base, y(c.value))}
@@ -229,7 +238,16 @@ export function Sparkline({ values, partial, label }: { values: number[]; partia
     <svg className="spark" viewBox={`0 0 ${n * 10} ${H}`} preserveAspectRatio="none" role="img" aria-label={label}>
       {values.map((v, i) => {
         const h = v > 0 ? Math.max(1.5, (v / max) * H) : 0;
-        return <rect key={i} className={partial?.[i] ? "partial" : undefined} x={i * 10 + 2} y={H - h} width={6} height={h} />;
+        return (
+          <rect
+            key={i}
+            className={partial?.[i] ? "partial" : undefined}
+            x={i * 10 + 2}
+            y={H - h}
+            width={6}
+            height={h}
+          />
+        );
       })}
       <line x1={0} x2={n * 10} y1={H - 0.5} y2={H - 0.5} />
     </svg>

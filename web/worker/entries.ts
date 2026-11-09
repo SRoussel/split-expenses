@@ -65,7 +65,16 @@ export async function addEntry(request: Request, env: Env): Promise<Response> {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
-        crypto.randomUUID(), household_id, e.kind, e.entryDate, e.name, e.amount, e.payerId, e.pct, e.owed, user.id,
+        crypto.randomUUID(),
+        household_id,
+        e.kind,
+        e.entryDate,
+        e.name,
+        e.amount,
+        e.payerId,
+        e.pct,
+        e.owed,
+        user.id,
         e.category,
       )
       .run();
@@ -101,8 +110,19 @@ export async function editEntry(request: Request, env: Env, id: string): Promise
        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        WHERE EXISTS (SELECT 1 FROM entries WHERE id = ? AND replaced_by = ?)`,
     ).bind(
-      newId, household_id, e.kind, e.entryDate, e.name, e.amount, e.payerId, e.pct, e.owed, user.id, e.category,
-      id, newId,
+      newId,
+      household_id,
+      e.kind,
+      e.entryDate,
+      e.name,
+      e.amount,
+      e.payerId,
+      e.pct,
+      e.owed,
+      user.id,
+      e.category,
+      id,
+      newId,
     ),
     // 3. An imported statement's month/category breakdown carries over if the total didn't change.
     env.DB.prepare(

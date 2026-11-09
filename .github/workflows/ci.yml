@@ -30,6 +30,8 @@ jobs:
       - run: npm ci
       - name: Lint
         run: npm run lint
+      - name: Formatting
+        run: npm run format:check
       - name: Ledger math
         run: npm test
       - name: Backend API (builds and type-checks first)
@@ -44,6 +46,8 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - name: Lint
         run: uv run ruff check
+      - name: Formatting
+        run: uv run ruff format --check
       - name: Commands start
         run: |
           uv run split-ledger --help > /dev/null

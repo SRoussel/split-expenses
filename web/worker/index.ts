@@ -67,7 +67,8 @@ export default {
       }
       throw new HttpError(404, "Not found.");
     } catch (err) {
-      if (err instanceof HttpError) return json({ error: err.message, ...(err.code && { code: err.code }) }, err.status);
+      if (err instanceof HttpError)
+        return json({ error: err.message, ...(err.code && { code: err.code }) }, err.status);
       console.error(err);
       return json({ error: "Something went wrong on the server." }, 500);
     }

@@ -1,6 +1,17 @@
 // Accounts and sessions: passwords, sign-in throttling, cookies, and the auth routes.
 
-import { clientIp, type Env, HttpError, isUniqueViolation, iterationsFor, json, maxUsersFor, rawStr, readBody, str } from "./http";
+import {
+  clientIp,
+  type Env,
+  HttpError,
+  isUniqueViolation,
+  iterationsFor,
+  json,
+  maxUsersFor,
+  rawStr,
+  readBody,
+  str,
+} from "./http";
 
 const SESSION_DAYS = 60;
 const RENEW_WHEN_DAYS_LEFT = 30; // sessions slide: opening the app renews them
@@ -17,15 +28,9 @@ export function randomHex(bytes: number): string {
 }
 
 async function hashPassword(password: string, saltHex: string, iterations: number): Promise<string> {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, [
-    "deriveBits",
-  ]);
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
   const salt = new Uint8Array(saltHex.match(/../g)!.map((h) => parseInt(h, 16)));
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations },
-    key,
-    256,
-  );
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, key, 256);
   return toHex(bits);
 }
 
@@ -273,7 +278,8 @@ export async function changePassword(request: Request, env: Env): Promise<Respon
   const row = await env.DB.prepare(`SELECT ${PASSWORD_COLUMNS} FROM users WHERE id = ?`)
     .bind(session.user.id)
     .first<PasswordRow>();
-  if (row?.password_disabled) throw new HttpError(409, "Password sign-in is turned off. Turn it back on in More first.");
+  if (row?.password_disabled)
+    throw new HttpError(409, "Password sign-in is turned off. Turn it back on in More first.");
   if (!(await verifyPassword(env, row, current))) throw new HttpError(400, "Your current password is wrong.");
   await clearAttempts(env, bucket);
 

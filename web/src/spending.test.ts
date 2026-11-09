@@ -1,6 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildIndex, compare, coverage, monthsEnding, moveSources, nonPayerPart, sharedItemsFor, summarize, UNCATEGORIZED } from "./spending.ts";
+import {
+  buildIndex,
+  compare,
+  coverage,
+  monthsEnding,
+  moveSources,
+  nonPayerPart,
+  sharedItemsFor,
+  summarize,
+  UNCATEGORIZED,
+} from "./spending.ts";
 import { owedCents } from "../shared/owed.ts";
 import type { Entry, SpendingData } from "./types.ts";
 
@@ -10,10 +20,24 @@ let n = 0;
 function entry(p: Partial<Entry>): Entry {
   n++;
   return {
-    id: `e${n}`, household_id: "h", kind: "expense", entry_date: "2026-01-10", name: `Entry ${n}`,
-    amount_cents: 10000, payer_id: A, payer_share_pct: 50, owed_cents: 5000, created_by: A,
-    created_at: "2026-01-10T00:00:00Z", voided_at: null, voided_by: null, replaced_by: null,
-    recurring_id: null, occurrence_date: null, category: null, ...p,
+    id: `e${n}`,
+    household_id: "h",
+    kind: "expense",
+    entry_date: "2026-01-10",
+    name: `Entry ${n}`,
+    amount_cents: 10000,
+    payer_id: A,
+    payer_share_pct: 50,
+    owed_cents: 5000,
+    created_by: A,
+    created_at: "2026-01-10T00:00:00Z",
+    voided_at: null,
+    voided_by: null,
+    replaced_by: null,
+    recurring_id: null,
+    occurrence_date: null,
+    category: null,
+    ...p,
   };
 }
 
@@ -28,9 +52,36 @@ const entries: Entry[] = [
 ];
 const data: SpendingData = {
   batches: [
-    { id: "b1", person_id: A, name: "Alex Jan", start_date: "2026-01-05", end_date: "2026-01-20", entry_id: null, created_by: A, created_at: "" },
-    { id: "b2", person_id: A, name: "Alex Jan 2", start_date: "2026-01-15", end_date: "2026-02-03", entry_id: null, created_by: A, created_at: "" },
-    { id: "b3", person_id: B, name: "Sam Feb", start_date: "2026-02-01", end_date: "2026-02-28", entry_id: null, created_by: A, created_at: "" },
+    {
+      id: "b1",
+      person_id: A,
+      name: "Alex Jan",
+      start_date: "2026-01-05",
+      end_date: "2026-01-20",
+      entry_id: null,
+      created_by: A,
+      created_at: "",
+    },
+    {
+      id: "b2",
+      person_id: A,
+      name: "Alex Jan 2",
+      start_date: "2026-01-15",
+      end_date: "2026-02-03",
+      entry_id: null,
+      created_by: A,
+      created_at: "",
+    },
+    {
+      id: "b3",
+      person_id: B,
+      name: "Sam Feb",
+      start_date: "2026-02-01",
+      end_date: "2026-02-28",
+      entry_id: null,
+      created_by: A,
+      created_at: "",
+    },
   ],
   totals: [
     { batch_id: "b1", month: "2026-01", category: "income", cents: 300000 },
@@ -50,7 +101,11 @@ const sum = (view: Parameters<typeof summarize>[1], month: string) => summarize(
 test("household view: everything, shared at full amount", () => {
   const jan = sum("household", "2026-01");
   assert.deepEqual(jan.categories, {
-    groceries: 10000, household: 80000, [UNCATEGORIZED]: 3000, dining: 5000, entertainment: -2000,
+    groceries: 10000,
+    household: 80000,
+    [UNCATEGORIZED]: 3000,
+    dining: 5000,
+    entertainment: -2000,
   });
   assert.equal(jan.income, 300000);
   assert.equal(jan.spent, 96000);
@@ -60,7 +115,11 @@ test("household view: everything, shared at full amount", () => {
 test("each person: their own uploads plus their share of shared expenses", () => {
   const alex = sum("me", "2026-01");
   assert.deepEqual(alex.categories, {
-    groceries: 5000, household: 40000, [UNCATEGORIZED]: 3000, dining: 5000, entertainment: -2000,
+    groceries: 5000,
+    household: 40000,
+    [UNCATEGORIZED]: 3000,
+    dining: 5000,
+    entertainment: -2000,
   });
   assert.equal(alex.income, 300000);
   const sam = sum("partner", "2026-01");
@@ -72,7 +131,11 @@ test("each person: their own uploads plus their share of shared expenses", () =>
 test("you + partner = household, every month and category", () => {
   for (const month of index.months) {
     const [me, them, both] = [sum("me", month), sum("partner", month), sum("household", month)];
-    const cats = new Set([...Object.keys(me.categories), ...Object.keys(them.categories), ...Object.keys(both.categories)]);
+    const cats = new Set([
+      ...Object.keys(me.categories),
+      ...Object.keys(them.categories),
+      ...Object.keys(both.categories),
+    ]);
     for (const c of cats) {
       assert.equal((me.categories[c] ?? 0) + (them.categories[c] ?? 0), both.categories[c] ?? 0, `${month} ${c}`);
     }
@@ -93,7 +156,12 @@ test("payments, starting balances and voided entries never count as spending", (
 });
 
 test("odd cents: the non-payer's part matches what the ledger says they owe", () => {
-  for (const [cents, payerPct] of [[101, 50], [5, 50], [1001, 33.33], [999, 70]]) {
+  for (const [cents, payerPct] of [
+    [101, 50],
+    [5, 50],
+    [1001, 33.33],
+    [999, 70],
+  ]) {
     assert.equal(nonPayerPart(cents, 100 - payerPct), owedCents("expense", cents, payerPct), `${cents} @ ${payerPct}`);
   }
   assert.equal(nonPayerPart(-101, 50), -51, "returns round the same way, mirrored");
@@ -107,10 +175,14 @@ test("coverage: overlapping uploads count once", () => {
 
 test("comparisons skip months with nothing in them", () => {
   const extra = buildIndex(
-    [entry({ entry_date: "2025-10-03", category: "groceries", amount_cents: 20000 }),
-     entry({ entry_date: "2025-12-03", category: "groceries", amount_cents: 40000 }),
-     ...entries],
-    data, [A, B]);
+    [
+      entry({ entry_date: "2025-10-03", category: "groceries", amount_cents: 20000 }),
+      entry({ entry_date: "2025-12-03", category: "groceries", amount_cents: 40000 }),
+      ...entries,
+    ],
+    data,
+    [A, B],
+  );
   const c = compare(extra, "shared", "2026-01", A, B, (s) => s.categories.groceries ?? 0);
   assert.equal(c.previous, 40000, "December");
   assert.equal(c.average, 30000, "October and December; November had nothing");
@@ -163,7 +235,11 @@ test("range report: totals, shares and averages over full months only", () => {
 
   const shared = rangeReport(index, data.batches, "shared", ["2026-01", "2026-02"], A, B);
   assert.equal(shared.income, null);
-  assert.equal(shared.categories.find((c) => c.category === "groceries")!.average, 15000, "shared months are always full");
+  assert.equal(
+    shared.categories.find((c) => c.category === "groceries")!.average,
+    15000,
+    "shared months are always full",
+  );
 });
 
 test("CSV: one row per month, totals only", () => {

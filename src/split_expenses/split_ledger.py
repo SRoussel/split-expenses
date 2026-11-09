@@ -53,8 +53,16 @@ USE_COLOR = sys.stdout.isatty() and "NO_COLOR" not in os.environ
 if USE_COLOR and os.name == "nt":
     os.system("")  # enables ANSI escape handling in the Windows console
 
-_CODES = {"bold": "1", "dim": "2", "red": "31", "green": "32",
-          "yellow": "33", "blue": "34", "magenta": "35", "cyan": "36"}
+_CODES = {
+    "bold": "1",
+    "dim": "2",
+    "red": "31",
+    "green": "32",
+    "yellow": "33",
+    "blue": "34",
+    "magenta": "35",
+    "cyan": "36",
+}
 
 
 def paint(text, *styles):
@@ -66,6 +74,7 @@ def paint(text, *styles):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def money(x):
     return Decimal(x).quantize(CENT, rounding=ROUND_HALF_UP)
@@ -107,8 +116,7 @@ def parse_name(s):
 
 def parse_payer(s):
     s = s.strip().lower()
-    aliases = {"me": "me", "i": "me", "you": "me", "m": "me",
-               "partner": "partner", "p": "partner"}
+    aliases = {"me": "me", "i": "me", "you": "me", "m": "me", "partner": "partner", "p": "partner"}
     if s not in aliases:
         raise ValueError("Payer must be 'me' or 'partner'.")
     return aliases[s]
@@ -129,6 +137,7 @@ def describe(balance):
 # ---------------------------------------------------------------------------
 # Ledger I/O and balance derivation
 # ---------------------------------------------------------------------------
+
 
 def load_ledger(path):
     if not path.exists():
@@ -179,6 +188,7 @@ def current_balance(rows):
 # Commands
 # ---------------------------------------------------------------------------
 
+
 def prompt(text, parser):
     while True:
         try:
@@ -192,8 +202,7 @@ def cmd_add(args, path):
         amount = parse_amount(args.amount) if args.amount else prompt("Amount: $", parse_amount)
         payer = parse_payer(args.payer) if args.payer else prompt("Who paid? [me/partner]: ", parse_payer)
         share = parse_percent(args.my_share)
-        name = parse_name(" ".join(args.name)) if args.name else prompt(
-            "Name (what was it for?): ", parse_name)
+        name = parse_name(" ".join(args.name)) if args.name else prompt("Name (what was it for?): ", parse_name)
         when = parse_date(args.date) if args.date else date.today().isoformat()
     except ValueError as e:
         sys.exit(f"Error: {e}")
@@ -209,8 +218,7 @@ def cmd_add(args, path):
     append_row(path, row)
 
     who = "You" if payer == "me" else "Partner"
-    print(f"{paint('Recorded:', 'green')} {who} paid {fmt(amount)} for {name} "
-          f"(your share {row['my_share']}%).")
+    print(f"{paint('Recorded:', 'green')} {who} paid {fmt(amount)} for {name} (your share {row['my_share']}%).")
     print(describe(current_balance(load_ledger(path))))
 
 
@@ -222,8 +230,9 @@ def cmd_init(args, path):
 
     rows = load_ledger(path)
     if any(r["type"] in (OPENING_ME, OPENING_PARTNER) for r in rows) and not args.force:
-        sys.exit("A starting balance already exists in this ledger. "
-                 "Use --force to add another, or edit the CSV directly.")
+        sys.exit(
+            "A starting balance already exists in this ledger. Use --force to add another, or edit the CSV directly."
+        )
 
     try:
         if args.i_owe is not None:
@@ -234,10 +243,17 @@ def cmd_init(args, path):
     except ValueError as e:
         sys.exit(f"Error: {e}")
 
-    append_row(path, {
-        "date": when, "type": kind, "payer": "", "amount": f"{amount:.2f}",
-        "my_share": "", "name": "Starting balance",
-    })
+    append_row(
+        path,
+        {
+            "date": when,
+            "type": kind,
+            "payer": "",
+            "amount": f"{amount:.2f}",
+            "my_share": "",
+            "name": "Starting balance",
+        },
+    )
     print(paint("Starting balance recorded.", "green"))
     print(describe(current_balance(load_ledger(path))))
 
@@ -247,8 +263,9 @@ def cmd_settle(args, path):
     try:
         if args.amount:
             amount = parse_amount(args.amount)
-            payer = parse_payer(args.payer) if args.payer else prompt(
-                "Who made the payment? [me/partner]: ", parse_payer)
+            payer = (
+                parse_payer(args.payer) if args.payer else prompt("Who made the payment? [me/partner]: ", parse_payer)
+            )
         else:
             if balance == 0:
                 sys.exit("Nothing to settle: balance is zero.")
@@ -260,10 +277,17 @@ def cmd_settle(args, path):
         sys.exit(f"Error: {e}")
 
     # Settlement effect: payer "me" -> +amount (balance rises toward zero from negative).
-    append_row(path, {
-        "date": when, "type": SETTLEMENT, "payer": payer, "amount": f"{amount:.2f}",
-        "my_share": "", "name": args.name or "Settlement",
-    })
+    append_row(
+        path,
+        {
+            "date": when,
+            "type": SETTLEMENT,
+            "payer": payer,
+            "amount": f"{amount:.2f}",
+            "my_share": "",
+            "name": args.name or "Settlement",
+        },
+    )
     who = "You paid partner" if payer == "me" else "Partner paid you"
     print(f"{paint('Recorded:', 'green')} {who} {fmt(amount)}.")
     print(describe(current_balance(load_ledger(path))))
@@ -304,15 +328,13 @@ def read_txn_csv(src, allowed):
             if cat in ("", "uncategorized"):
                 cat = "other"
             if cat not in allowed:
-                sys.exit(f"{src}, line {line_no}: unknown category {cat!r}. "
-                         f"Use one of: {', '.join(allowed)}.")
+                sys.exit(f"{src}, line {line_no}: unknown category {cat!r}. Use one of: {', '.join(allowed)}.")
             total += amt
             dates.append(d)
             by_category[cat] = by_category.get(cat, Decimal("0.00")) + amt
             month = by_month.setdefault(f"{d:%Y-%m}", {})
             month[cat] = month.get(cat, Decimal("0.00")) + amt
-    return {"total": total, "dates": dates, "by_category": by_category,
-            "by_month": by_month, "skipped": skipped}
+    return {"total": total, "dates": dates, "by_category": by_category, "by_month": by_month, "skipped": skipped}
 
 
 def default_name(dates):
@@ -395,7 +417,9 @@ def cmd_summarize(args, _path):
         return out
     print(f"Wrote {out}. That file is everything the web app will receive; open it to check.")
     person = f" --person {args.person}" if args.person else ""
-    print(paint(f"After importing it, run `uv run split-ledger archive{person}` so the next batch starts clean.", "dim"))
+    print(
+        paint(f"After importing it, run `uv run split-ledger archive{person}` so the next batch starts clean.", "dim")
+    )
     return out
 
 
@@ -432,8 +456,10 @@ def cmd_finish(args, _path):
     """
     base = person_dir(args.person) if args.person else Path(".")
     if (base / "split_summary.json").exists():
-        sys.exit(f"{base / 'split_summary.json'} is left over from an earlier summarize. "
-                 f"Import it and run `archive` first, or delete it.")
+        sys.exit(
+            f"{base / 'split_summary.json'} is left over from an earlier summarize. "
+            f"Import it and run `archive` first, or delete it."
+        )
     args.csv = args.personal = args.output = None
     args.then_archive = True
     summary = cmd_summarize(args, _path)
@@ -465,8 +491,10 @@ def cmd_import(args, path):
 
     rows = load_ledger(path)
     if any(r["name"] == name for r in rows) and not args.force:
-        sys.exit(f"The ledger already has an entry named '{name}'. "
-                 "Use --force to add it again, or --name to give it a different name.")
+        sys.exit(
+            f"The ledger already has an entry named '{name}'. "
+            "Use --force to add it again, or --name to give it a different name."
+        )
 
     row = {
         "date": when,
@@ -478,13 +506,15 @@ def cmd_import(args, path):
     }
     append_row(path, row)
 
-    print(f"Imported {len(dates)} transaction(s) from {src.name}"
-          + (f" ({skipped} skipped as invalid)" if skipped else "") + ":")
+    print(
+        f"Imported {len(dates)} transaction(s) from {src.name}"
+        + (f" ({skipped} skipped as invalid)" if skipped else "")
+        + ":"
+    )
     for cat in sorted(by_category):
         print(f"  {cat:<15}{paint(f'{fmt(by_category[cat]):>12}', 'cyan')}")
     who = "You" if payer == "me" else "Partner"
-    print(f"{paint('Recorded:', 'green')} {who} paid {fmt(total)} for {name} "
-          f"(your share {row['my_share']}%).")
+    print(f"{paint('Recorded:', 'green')} {who} paid {fmt(total)} for {name} (your share {row['my_share']}%).")
     print(describe(current_balance(load_ledger(path))))
 
 
@@ -502,8 +532,8 @@ def cmd_history(args, path):
         print("Ledger is empty.")
         return
     if args.limit:
-        shown = rows[-args.limit:]
-        running = current_balance(rows[:-args.limit])
+        shown = rows[-args.limit :]
+        running = current_balance(rows[: -args.limit])
     else:
         shown, running = rows, Decimal("0.00")
 
@@ -528,10 +558,12 @@ def cmd_history(args, path):
         label_color = "cyan" if kind == SETTLEMENT else "magenta" if kind.startswith("opening") else None
         label_txt = f"{label:<22}"
         date_txt = f"{r['date']:<11}"
-        print(f"{paint(date_txt, 'dim')}"
-              f"{paint(label_txt, label_color) if label_color else label_txt}"
-              f"{fmt(Decimal(r['amount'])):>11}  "
-              f"{paint(bal_txt, bal_color)}  {r['name']}")
+        print(
+            f"{paint(date_txt, 'dim')}"
+            f"{paint(label_txt, label_color) if label_color else label_txt}"
+            f"{fmt(Decimal(r['amount'])):>11}  "
+            f"{paint(bal_txt, bal_color)}  {r['name']}"
+        )
     print(paint("-" * 78, "dim"))
     print(describe(running))
     print(paint("(+ = partner owes you, - = you owe partner)", "dim"))
@@ -541,60 +573,52 @@ def cmd_history(args, path):
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--ledger", default=argparse.SUPPRESS,
-                        help="Ledger CSV file (default: ledger.csv)")
-    common.add_argument("--no-color", action="store_true", default=argparse.SUPPRESS,
-                        help="Disable colored output")
+    common.add_argument("--ledger", default=argparse.SUPPRESS, help="Ledger CSV file (default: ledger.csv)")
+    common.add_argument("--no-color", action="store_true", default=argparse.SUPPRESS, help="Disable colored output")
 
-    ap = argparse.ArgumentParser(description="Track shared expenses and who owes whom.",
-                                 parents=[common])
-    sub =ap.add_subparsers(dest="command", required=True)
+    ap = argparse.ArgumentParser(description="Track shared expenses and who owes whom.", parents=[common])
+    sub = ap.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("add", parents=[common], help="Record an expense")
     p.add_argument("amount", nargs="?", help="Amount paid (prompts if omitted)")
     p.add_argument("payer", nargs="?", help="'me' or 'partner' (prompts if omitted)")
-    p.add_argument("name", nargs="*",
-                   help="Name of the payment, e.g. groceries (prompts if omitted)")
+    p.add_argument("name", nargs="*", help="Name of the payment, e.g. groceries (prompts if omitted)")
     p.add_argument("--date", help="YYYY-MM-DD (default: today)")
-    p.add_argument("--my-share", default="50",
-                   help="Your percentage of this expense (default: 50)")
+    p.add_argument("--my-share", default="50", help="Your percentage of this expense (default: 50)")
     p.set_defaults(func=cmd_add)
 
     p = sub.add_parser("init", parents=[common], help="Set a starting deficit")
     p.add_argument("--i-owe", metavar="AMOUNT", help="You owe partner this much")
     p.add_argument("--partner-owes", metavar="AMOUNT", help="Partner owes you this much")
     p.add_argument("--date", help="YYYY-MM-DD (default: today)")
-    p.add_argument("--force", action="store_true",
-                   help="Allow adding a starting balance even if one exists")
+    p.add_argument("--force", action="store_true", help="Allow adding a starting balance even if one exists")
     p.set_defaults(func=cmd_init)
 
-    p = sub.add_parser("settle", parents=[common],
-                       help="Record a payment between you (omit amount to settle fully)")
+    p = sub.add_parser("settle", parents=[common], help="Record a payment between you (omit amount to settle fully)")
     p.add_argument("amount", nargs="?", help="Amount paid (default: full balance)")
     p.add_argument("payer", nargs="?", help="Who made the payment: 'me' or 'partner'")
     p.add_argument("--name", help="Name for the settlement (default: Settlement)")
     p.add_argument("--date", help="YYYY-MM-DD (default: today)")
     p.set_defaults(func=cmd_settle)
 
-    p = sub.add_parser("import", parents=[common],
-                       help="Add the total of a split_transactions.csv as one entry")
+    p = sub.add_parser("import", parents=[common], help="Add the total of a split_transactions.csv as one entry")
     p.add_argument("csv", help="CSV from split_statements.py")
-    p.add_argument("--payer", default="me",
-                   help="Who paid these expenses: 'me' (default) or 'partner'")
-    p.add_argument("--my-share", default="50",
-                   help="Your percentage of the total (default: 50)")
+    p.add_argument("--payer", default="me", help="Who paid these expenses: 'me' (default) or 'partner'")
+    p.add_argument("--my-share", default="50", help="Your percentage of the total (default: 50)")
     p.add_argument("--name", help="Override the entry name (default: Expenses mm/dd/yy-mm/dd/yy)")
     p.add_argument("--date", help="Ledger date YYYY-MM-DD (default: today)")
-    p.add_argument("--force", action="store_true",
-                   help="Allow importing even if an entry with the same name exists")
+    p.add_argument("--force", action="store_true", help="Allow importing even if an entry with the same name exists")
     p.set_defaults(func=cmd_import)
 
-    p = sub.add_parser("summarize", parents=[common],
-                       help="Write split_summary.json (totals only) for the web app's import")
-    p.add_argument("csv", nargs="?",
-                   help="Shared transactions CSV (default: split_transactions.csv, or data/<person>/...)")
+    p = sub.add_parser(
+        "summarize", parents=[common], help="Write split_summary.json (totals only) for the web app's import"
+    )
+    p.add_argument(
+        "csv", nargs="?", help="Shared transactions CSV (default: split_transactions.csv, or data/<person>/...)"
+    )
     p.add_argument("--personal", help="Personal transactions CSV (default: personal_transactions.csv)")
     p.add_argument("--person", help="Use the files in data/<person>/ (as written by split-statements --person)")
     p.add_argument("--no-personal", action="store_true", help="Leave out personal spending and income")
@@ -602,13 +626,15 @@ def main():
     p.add_argument("--name", help="Override the entry name (default: Expenses mm/dd/yy-mm/dd/yy)")
     p.set_defaults(func=cmd_summarize)
 
-    p = sub.add_parser("archive", parents=[common],
-                       help="Move this batch's transaction files and summary to archive/<date>/")
+    p = sub.add_parser(
+        "archive", parents=[common], help="Move this batch's transaction files and summary to archive/<date>/"
+    )
     p.add_argument("--person", help="Archive the files in data/<person>/")
     p.set_defaults(func=cmd_archive)
 
-    p = sub.add_parser("finish", parents=[common],
-                       help="Summarize this batch for the web app, then archive it (summarize + archive)")
+    p = sub.add_parser(
+        "finish", parents=[common], help="Summarize this batch for the web app, then archive it (summarize + archive)"
+    )
     p.add_argument("--person", help="Use the files in data/<person>/")
     p.add_argument("--no-personal", action="store_true", help="Leave out personal spending and income")
     p.add_argument("--name", help="Override the entry name (default: Expenses mm/dd/yy-mm/dd/yy)")

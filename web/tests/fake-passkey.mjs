@@ -73,7 +73,15 @@ export class FakePasskey {
   async create(options, { origin = this.origin, flags = UP | UV | AT } = {}) {
     this.userHandle = options.user.id; // base64url, as the server sent it
     const jwk = await subtle.exportKey("jwk", this.keys.publicKey);
-    const cose = cbor(new Map([[1, 2], [3, -7], [-1, 1], [-2, fromB64u(jwk.x)], [-3, fromB64u(jwk.y)]]));
+    const cose = cbor(
+      new Map([
+        [1, 2],
+        [3, -7],
+        [-1, 1],
+        [-2, fromB64u(jwk.x)],
+        [-3, fromB64u(jwk.y)],
+      ]),
+    );
     const authData = concat(
       await sha256(enc.encode(this.rpID)),
       new Uint8Array([flags]),
@@ -83,14 +91,24 @@ export class FakePasskey {
       this.credentialId,
       cose,
     );
-    const clientData = enc.encode(JSON.stringify({ type: "webauthn.create", challenge: options.challenge, origin, crossOrigin: false }));
+    const clientData = enc.encode(
+      JSON.stringify({ type: "webauthn.create", challenge: options.challenge, origin, crossOrigin: false }),
+    );
     return {
       id: this.id,
       rawId: this.id,
       type: "public-key",
       response: {
         clientDataJSON: b64u(clientData),
-        attestationObject: b64u(cbor(new Map([["fmt", "none"], ["attStmt", new Map()], ["authData", authData]]))),
+        attestationObject: b64u(
+          cbor(
+            new Map([
+              ["fmt", "none"],
+              ["attStmt", new Map()],
+              ["authData", authData],
+            ]),
+          ),
+        ),
         transports: ["internal", "hybrid"],
       },
       clientExtensionResults: {},
@@ -99,9 +117,14 @@ export class FakePasskey {
   }
 
   /** What navigator.credentials.get() would return, as JSON. */
-  async get(options, { origin = this.origin, flags = UP | UV, rpID = this.rpID, keys = this.keys, userHandle = this.userHandle } = {}) {
+  async get(
+    options,
+    { origin = this.origin, flags = UP | UV, rpID = this.rpID, keys = this.keys, userHandle = this.userHandle } = {},
+  ) {
     const authData = concat(await sha256(enc.encode(rpID)), new Uint8Array([flags]), u32(this.counter));
-    const clientData = enc.encode(JSON.stringify({ type: "webauthn.get", challenge: options.challenge, origin, crossOrigin: false }));
+    const clientData = enc.encode(
+      JSON.stringify({ type: "webauthn.get", challenge: options.challenge, origin, crossOrigin: false }),
+    );
     const signed = concat(authData, await sha256(clientData));
     const raw = new Uint8Array(await subtle.sign({ name: "ECDSA", hash: "SHA-256" }, keys.privateKey, signed));
     return {

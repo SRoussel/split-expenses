@@ -68,9 +68,9 @@ export async function getHousehold(request: Request, env: Env): Promise<Response
   const [members, household, entries, recurring] = await env.DB.batch([
     env.DB.prepare("SELECT user_id, display_name, share_pct FROM members WHERE household_id = ?").bind(household_id),
     env.DB.prepare("SELECT invite_code FROM households WHERE id = ?").bind(household_id),
-    env.DB.prepare(
-      "SELECT * FROM entries WHERE household_id = ? ORDER BY entry_date DESC, created_at DESC",
-    ).bind(household_id),
+    env.DB.prepare("SELECT * FROM entries WHERE household_id = ? ORDER BY entry_date DESC, created_at DESC").bind(
+      household_id,
+    ),
     env.DB.prepare(
       `SELECT id, name, amount_cents, payer_id, payer_share_pct, frequency, start_date, next_date, paused, created_by,
               category
@@ -139,7 +139,7 @@ export async function resetHousehold(request: Request, env: Env): Promise<Respon
   const user = await requireUser(request, env);
   const { household_id } = await requireMembership(env, user.id);
   if ((await readBody(request)).confirm !== "DELETE") {
-    throw new HttpError(400, 'Type DELETE to confirm.');
+    throw new HttpError(400, "Type DELETE to confirm.");
   }
   // Uploads and entries first: they point at entries and recurring rules.
   // RETURNING id counts the rows themselves, not the rows deleted along with them.

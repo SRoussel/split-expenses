@@ -50,11 +50,5 @@ export default function App() {
   if (!account.membership) {
     return <Onboarding onDone={() => void refresh()} />;
   }
-  return (
-    <LedgerScreen
-      userId={account.user.id}
-      email={account.user.email}
-      onSignedOut={() => void refresh()}
-    />
-  );
+  return <LedgerScreen userId={account.user.id} email={account.user.email} onSignedOut={() => void refresh()} />;
 }

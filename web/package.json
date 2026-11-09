@@ -1,7 +1,8 @@
 {
-  "name": "ledger-web",
+  "name": "split-web",
   "private": true,
   "version": "0.2.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web \"npm:dev:api\" \"npm:dev:web\"",
@@ -15,7 +16,9 @@
     "test:api": "npm run build && node --test tests/api.test.mjs",
     "deploy": "npm run build && wrangler deploy",
     "reset-password": "node scripts/reset-password.mjs",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "5.2.7",
@@ -34,8 +37,10 @@
     "@vitejs/plugin-react": "^6.2.1",
     "concurrently": "^9.0.0",
     "eslint": "^10.14.0",
+    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.14.0",
+    "prettier": "^3.9.10",
     "tsx": "^4.19.0",
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.72.1",

@@ -137,8 +137,7 @@ export default function AuthScreen({ onDone }: { onDone: () => void }) {
 
       {mode === "signin" && (
         <p className="muted small center">
-          Forgot your password? Whoever set up the app can reset it with{" "}
-          <code>npm run reset-password</code>.
+          Forgot your password? Whoever set up the app can reset it with <code>npm run reset-password</code>.
         </p>
       )}
     </main>
