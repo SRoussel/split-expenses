@@ -22,6 +22,7 @@ import ChangesView from "./ChangesView";
 import ExportDialog from "./ExportDialog";
 import MonthChart, { Sparkline } from "./MonthChart";
 import RecurringView from "./RecurringView";
+import YearView from "./YearView";
 
 const PRESETS: { id: Preset; label: string }[] = [
   { id: "12m", label: "Last 12 months" },
@@ -31,12 +32,13 @@ const PRESETS: { id: Preset; label: string }[] = [
 ];
 
 type Theme = "system" | "light" | "dark";
-type Screen = "overview" | "changes" | "recurring";
+type Screen = "overview" | "changes" | "recurring" | "year";
 
 const SCREENS: { id: Screen; label: string }[] = [
   { id: "overview", label: "Where the money goes" },
   { id: "changes", label: "What changed" },
   { id: "recurring", label: "Recurring charges" },
+  { id: "year", label: "Year in review" },
 ];
 
 function useTheme(): [Theme, (t: Theme) => void] {
@@ -106,7 +108,8 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
     [txns, me],
   );
 
-  const [preset, setPreset] = useState<Preset>("12m");
+  // null when the months shown aren't one of the presets (opened from Year in review).
+  const [preset, setPreset] = useState<Preset | null>("12m");
   const [screen, setScreen] = useState<Screen>("overview");
   const [f, setF] = useState<Filters>(() => ({
     ...presetRange("12m", first, last),
@@ -211,7 +214,15 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
   /** From another view to the overview, showing what was clicked across all time. */
   function openInOverview(patch: Partial<Filters>) {
     setScreen("overview");
-    setPreset("all");
+    const range = {
+      ...presetRange("all", first, last),
+      ...(patch.from && patch.to ? { from: patch.from, to: patch.to } : {}),
+    };
+    const match = PRESETS.find((p) => {
+      const r = presetRange(p.id, first, last);
+      return r.from === range.from && r.to === range.to;
+    });
+    setPreset(match?.id ?? null);
     setF((prev) => ({
       ...prev,
       ...presetRange("all", first, last),
@@ -323,6 +334,8 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
       <main className="main">
         {screen === "changes" ? (
           <ChangesView txns={scoped} income={income} onOpen={openInOverview} />
+        ) : screen === "year" ? (
+          <YearView txns={scoped} income={income} onOpen={openInOverview} />
         ) : screen === "recurring" ? (
           <RecurringView txns={scoped} income={income} today={txns[0].date} onOpen={openInOverview} />
         ) : (

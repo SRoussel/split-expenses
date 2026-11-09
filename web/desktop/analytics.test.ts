@@ -12,6 +12,7 @@ import {
   shiftMonth,
   similarNames,
   whatChanged,
+  yearInReview,
   findRecurring,
   totals,
   type Filters,
@@ -249,5 +250,57 @@ test("recurring: steady pace and amount, price changes, and ones that stopped", 
       [299, "monthly", true],
     ],
     "each plan at a store with several is found on its own",
+  );
+});
+
+test("year in review: totals, the year before when it's covered, records and new places", () => {
+  const rows = [
+    // 2025: two months of data (Nov, Dec).
+    txn("2025-11-03", 4000, "Freshway", "groceries", "shared"),
+    txn("2025-12-03", 6000, "Freshway", "groceries", "shared"),
+    // 2026: Jan to Mar, and the same months aren't in the files for 2025.
+    txn("2026-01-03", 5000, "Freshway", "groceries", "shared"),
+    txn("2026-01-15", 300000, "Payroll", "income"),
+    txn("2026-02-10", 120000, "Skyline Air", "travel"),
+    txn("2026-02-11", 900, "Cafe", "dining"),
+    txn("2026-02-12", 900, "Cafe", "dining"),
+    txn("2026-03-03", 7000, "Freshway", "groceries", "shared"),
+    txn("2026-03-12", 900, "Cafe", "dining"),
+  ];
+  const withRent = [...rows, txn("2026-03-01", 185000, "Landlord", "housing", "shared")];
+  assert.equal(yearInReview(withRent, "2026", "income").biggest?.merchant, "Skyline Air", "rent isn't a purchase");
+  const r = yearInReview(rows, "2026", "income");
+  assert.deepEqual(r.months, ["2026-01", "2026-02", "2026-03"]);
+  assert.deepEqual(r.totals, { spent: 134700, shared: 12000, personal: 122700, income: 300000, count: 6 });
+  assert.equal(r.previous, null, "Jan to Mar 2025 aren't in the files");
+  assert.equal(r.categories[0].before, null);
+  assert.equal(r.biggest?.merchant, "Skyline Air");
+  assert.equal(r.mostVisited?.merchant, "Cafe");
+  assert.equal(r.busiest?.month, "2026-02");
+  assert.equal(r.quietest?.month, "2026-01");
+  assert.deepEqual(
+    r.fresh.map((m) => m.merchant),
+    ["Skyline Air", "Cafe"],
+    "Freshway was already visited in 2025",
+  );
+
+  // With the year before covered, categories compare against it.
+  const later = yearInReview(
+    [
+      ...rows,
+      txn("2027-01-03", 9000, "Freshway", "groceries", "shared"),
+      txn("2027-02-01", 100, "Cafe", "dining"),
+      txn("2027-03-01", 100, "Cafe", "dining"),
+    ],
+    "2027",
+    "income",
+  );
+  assert.deepEqual(later.previous, { spent: 134700, shared: 12000, personal: 122700, income: 300000, count: 6 });
+  assert.deepEqual(
+    later.categories.map((c) => [c.category, c.total, c.before]),
+    [
+      ["groceries", 9000, 12000],
+      ["dining", 200, 2700],
+    ],
   );
 });

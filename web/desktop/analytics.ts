@@ -465,3 +465,71 @@ function detect(merchant: string, rows: Txn[], today: string): Recurring | null 
     charges: rows.map((t) => ({ date: t.date, cents: t.cents })),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Year in review
+// ---------------------------------------------------------------------------
+
+export interface YearReview {
+  year: string;
+  months: string[]; // the year's months the files cover
+  totals: Totals;
+  /** The same months a year earlier, when the files cover all of them. */
+  previous: Totals | null;
+  byMonth: MonthRow[];
+  categories: (CategoryRow & { before: number | null })[];
+  merchants: MerchantRow[];
+  mostVisited: MerchantRow | null;
+  biggest: Txn | null; // not counting rent and bills
+  busiest: MonthRow | null;
+  quietest: MonthRow | null;
+  /** Places visited for the first time ever this year. */
+  fresh: MerchantRow[];
+  recurring: { count: number; perYear: number };
+}
+
+export function yearInReview(txns: Txn[], year: string, income: string): YearReview {
+  const withData = new Set(txns.map((t) => monthOf(t.date)));
+  const months = monthRange(`${year}-01`, `${year}-12`).filter((m) => withData.has(m));
+  const inYear = txns.filter((t) => t.date.startsWith(year));
+  const spending = inYear.filter((t) => isSpending(t, income));
+
+  const earlier = months.map((m) => shiftMonth(m, -12));
+  const covered = earlier.length > 0 && earlier.every((m) => withData.has(m));
+  const earlierSet = new Set(earlier);
+  const before = covered ? txns.filter((t) => earlierSet.has(monthOf(t.date))) : [];
+  const beforeByCategory = new Map(byCategory(before, earlier, income).map((c) => [c.category, c.total]));
+
+  const rows = byMonth(inYear, months, income);
+  const ranked = [...rows].sort((a, b) => b.shared + b.personal - (a.shared + a.personal));
+  const merchants = byMerchant(inYear, income);
+  const seenBefore = new Set(txns.filter((t) => t.date < `${year}-01-01`).map((t) => t.merchant));
+  const lastDay = inYear.reduce((d, t) => (t.date > d ? t.date : d), `${year}-01-01`);
+  const recurring = findRecurring(
+    txns.filter((t) => t.date <= lastDay),
+    income,
+    lastDay,
+  ).filter((r) => r.active);
+
+  return {
+    year,
+    months,
+    totals: totals(inYear, income),
+    previous: covered ? totals(before, income) : null,
+    byMonth: rows,
+    categories: byCategory(inYear, months, income).map((c) => ({
+      ...c,
+      before: covered ? (beforeByCategory.get(c.category) ?? 0) : null,
+    })),
+    merchants,
+    mostVisited: [...merchants].sort((a, b) => b.count - a.count || b.total - a.total)[0] ?? null,
+    // Rent and bills would win every time and say nothing, so they're left out here.
+    biggest: spending
+      .filter((t) => !BILLS.has(t.category))
+      .reduce<Txn | null>((big, t) => (!big || t.cents > big.cents ? t : big), null),
+    busiest: ranked[0] ?? null,
+    quietest: ranked.length > 1 ? ranked[ranked.length - 1] : null,
+    fresh: merchants.filter((m) => !seenBefore.has(m.merchant)),
+    recurring: { count: recurring.length, perYear: recurring.reduce((n, r) => n + r.perYear, 0) },
+  };
+}
