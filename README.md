@@ -1,5 +1,13 @@
 # Split
 
+[![CI](https://github.com/SRoussel/split-expenses/actions/workflows/ci.yml/badge.svg)](https://github.com/SRoussel/split-expenses/actions/workflows/ci.yml)
+
+<p>
+  <img src="screenshots/ledger.png" alt="The ledger: who owes who, and each expense" width="260">
+  <img src="screenshots/add-expense.png" alt="Adding an expense, with suggestions from past names" width="260">
+  <img src="screenshots/trends.png" alt="Trends: a year of cash flow and spending by category" width="260">
+</p>
+
 My partner and I share a lot of expenses, and I wanted an easy way to keep track of who owes who without handing our bank statements to a budgeting app. This is what I ended up with.
 
 It has two parts:
