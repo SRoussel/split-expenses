@@ -20,6 +20,8 @@
   "dependencies": {
     "@fontsource/ibm-plex-mono": "5.2.7",
     "@fontsource/ibm-plex-sans": "5.2.8",
+    "@simplewebauthn/browser": "^14.0.0",
+    "@simplewebauthn/server": "^14.0.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

@@ -102,26 +102,35 @@ interface User {
   email: string;
 }
 
-interface Session {
+export interface Session {
   user: User;
   token: string;
   tokenHash: string;
   daysLeft: number;
+  /** Minutes since this session last proved who it is, or null if it never has. */
+  confirmedMinutesAgo: number | null;
 }
 
-async function currentSession(request: Request, env: Env): Promise<Session | null> {
+export async function currentSession(request: Request, env: Env): Promise<Session | null> {
   const token = sessionToken(request);
   if (!token || !/^[0-9a-f]{64}$/.test(token)) return null;
   const tokenHash = await sha256Hex(token);
   const row = await env.DB.prepare(
-    `SELECT u.id, u.email, julianday(s.expires_at) - julianday('now') AS days_left
+    `SELECT u.id, u.email, julianday(s.expires_at) - julianday('now') AS days_left,
+            (julianday('now') - julianday(s.confirmed_at)) * 1440 AS confirmed_minutes_ago
      FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > datetime('now')`,
   )
     .bind(tokenHash)
-    .first<{ id: string; email: string; days_left: number }>();
+    .first<{ id: string; email: string; days_left: number; confirmed_minutes_ago: number | null }>();
   if (!row) return null;
-  return { user: { id: row.id, email: row.email }, token, tokenHash, daysLeft: row.days_left };
+  return {
+    user: { id: row.id, email: row.email },
+    token,
+    tokenHash,
+    daysLeft: row.days_left,
+    confirmedMinutesAgo: row.confirmed_minutes_ago,
+  };
 }
 
 async function currentUser(request: Request, env: Env): Promise<User | null> {
@@ -146,18 +155,19 @@ export async function requireMembership(env: Env, userId: string) {
   return m;
 }
 
-async function startSession(request: Request, env: Env, userId: string): Promise<Response> {
+export async function startSession(request: Request, env: Env, userId: string): Promise<Response> {
   const token = randomHex(32);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')"),
     env.DB.prepare(
-      "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, datetime('now', ?))",
+      // Signing in counts as proving who you are, so the session starts out confirmed.
+      "INSERT INTO sessions (token_hash, user_id, expires_at, confirmed_at) VALUES (?, ?, datetime('now', ?), datetime('now'))",
     ).bind(await sha256Hex(token), userId, `+${SESSION_DAYS} days`),
   ]);
   return json({ ok: true }, 200, [["set-cookie", sessionCookie(request, token, SESSION_DAYS * 86400)]]);
 }
 
-function checkNewPassword(password: string) {
+export function checkNewPassword(password: string) {
   if (password.length < 8) throw new HttpError(400, "Password must be at least 8 characters.");
 }
 
@@ -192,15 +202,16 @@ export async function signup(request: Request, env: Env): Promise<Response> {
   return startSession(request, env, id);
 }
 
-interface PasswordRow {
+export interface PasswordRow {
   id: string;
   password_hash: string;
   password_salt: string;
   password_iterations: number;
+  password_disabled: number;
 }
 
 /** Checks a password; on success, quietly upgrades the stored hash if the work factor changed. */
-async function verifyPassword(env: Env, row: PasswordRow | null, password: string): Promise<boolean> {
+export async function verifyPassword(env: Env, row: PasswordRow | null, password: string): Promise<boolean> {
   // Hash even when the user doesn't exist so timing doesn't reveal which emails have accounts.
   const hash = await hashPassword(
     password,
@@ -212,17 +223,19 @@ async function verifyPassword(env: Env, row: PasswordRow | null, password: strin
   return true;
 }
 
-async function setPassword(env: Env, userId: string, password: string) {
+/** Sets a new password and turns password sign-in (back) on. */
+export async function setPassword(env: Env, userId: string, password: string) {
   const salt = randomHex(16);
   const iterations = iterationsFor(env);
   await env.DB.prepare(
-    "UPDATE users SET password_hash = ?, password_salt = ?, password_iterations = ? WHERE id = ?",
+    "UPDATE users SET password_hash = ?, password_salt = ?, password_iterations = ?, password_disabled = 0 WHERE id = ?",
   )
     .bind(await hashPassword(password, salt, iterations), salt, iterations, userId)
     .run();
 }
 
-const PASSWORD_COLUMNS = "id, password_hash, password_salt, password_iterations";
+export const PASSWORD_COLUMNS = "id, password_hash, password_salt, password_iterations, password_disabled";
+const PASSWORD_OFF = "Password sign-in is turned off for this account. Sign in with your passkey.";
 
 export async function login(request: Request, env: Env): Promise<Response> {
   const body = await readBody(request);
@@ -238,6 +251,10 @@ export async function login(request: Request, env: Env): Promise<Response> {
   const row = await env.DB.prepare(`SELECT ${PASSWORD_COLUMNS} FROM users WHERE email = ?`)
     .bind(email)
     .first<PasswordRow>();
+  // A passkey-only account has no usable password (its hash was replaced with random
+  // bytes), so say so instead of "wrong password". Learning that an email is passkey-only
+  // doesn't help an attacker: there's no password left to guess.
+  if (row?.password_disabled) throw new HttpError(401, PASSWORD_OFF);
   if (!(await verifyPassword(env, row, password))) throw new HttpError(401, "Wrong email or password.");
   await clearAttempts(env, emailBucket);
   return startSession(request, env, row!.id);
@@ -256,6 +273,7 @@ export async function changePassword(request: Request, env: Env): Promise<Respon
   const row = await env.DB.prepare(`SELECT ${PASSWORD_COLUMNS} FROM users WHERE id = ?`)
     .bind(session.user.id)
     .first<PasswordRow>();
+  if (row?.password_disabled) throw new HttpError(409, "Password sign-in is turned off. Turn it back on in More first.");
   if (!(await verifyPassword(env, row, current))) throw new HttpError(400, "Your current password is wrong.");
   await clearAttempts(env, bucket);
 

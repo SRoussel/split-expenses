@@ -1,5 +1,14 @@
-import { useState, type FormEvent } from "react";
-import { signIn, signUp } from "./api";
+import { useEffect, useState, type FormEvent } from "react";
+import {
+  ApiError,
+  cancelPasskeyRequest,
+  markPasskeyOffer,
+  passkeyAutofillSupported,
+  passkeySignIn,
+  passkeysSupported,
+  signIn,
+  signUp,
+} from "./api";
 import { ErrorText, PasswordInput, Segmented } from "./ui";
 
 export default function AuthScreen({ onDone }: { onDone: () => void }) {
@@ -8,6 +17,40 @@ export default function AuthScreen({ onDone }: { onDone: () => void }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const canPasskey = passkeysSupported();
+
+  // On the sign-in tab, iOS can offer your passkey right in the email field's suggestions.
+  // That request waits quietly in the background until you pick it (or leave this screen).
+  useEffect(() => {
+    if (mode !== "signin" || !canPasskey) return;
+    let live = true;
+    void passkeyAutofillSupported().then((ok) => {
+      if (!ok || !live) return;
+      passkeySignIn(true).then(
+        () => live && onDone(),
+        (err) => live && !(err instanceof ApiError && err.code === "cancelled") && setError(err.message),
+      );
+    });
+    return () => {
+      live = false;
+      cancelPasskeyRequest();
+    };
+  }, [mode, canPasskey, onDone]);
+
+  async function withPasskey() {
+    setBusy(true);
+    setError(null);
+    try {
+      await passkeySignIn();
+      onDone();
+    } catch (err) {
+      if (!(err instanceof ApiError && err.code === "cancelled")) {
+        setError(err instanceof Error ? err.message : "Something went wrong.");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -15,6 +58,7 @@ export default function AuthScreen({ onDone }: { onDone: () => void }) {
     setError(null);
     try {
       await (mode === "signin" ? signIn(email, password) : signUp(email, password));
+      if (canPasskey) markPasskeyOffer();
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -45,6 +89,17 @@ export default function AuthScreen({ onDone }: { onDone: () => void }) {
           ]}
         />
 
+        {mode === "signin" && canPasskey && (
+          <>
+            <button type="button" className="primary" disabled={busy} onClick={() => void withPasskey()}>
+              Sign in with passkey
+            </button>
+            <p className="or" aria-hidden="true">
+              or with your password
+            </p>
+          </>
+        )}
+
         <form onSubmit={submit} className="stack">
           <label>
             Email
@@ -52,7 +107,8 @@ export default function AuthScreen({ onDone }: { onDone: () => void }) {
               type="email"
               name="email"
               inputMode="email"
-              autoComplete="email"
+              // "webauthn" lets iOS suggest your passkey here, next to saved emails.
+              autoComplete={mode === "signin" ? "username webauthn" : "email"}
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
@@ -73,7 +129,7 @@ export default function AuthScreen({ onDone }: { onDone: () => void }) {
             onChange={(e) => setPassword(e.target.value)}
           />
           <ErrorText message={error} />
-          <button className="primary" disabled={busy}>
+          <button className={mode === "signin" && canPasskey ? "" : "primary"} disabled={busy}>
             {busy ? "One moment…" : mode === "signin" ? "Sign in" : "Create account"}
           </button>
         </form>

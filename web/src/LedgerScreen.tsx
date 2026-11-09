@@ -3,6 +3,10 @@ import { categoryLabel } from "../shared/categories";
 import { describeSchedule } from "../shared/recurring";
 import {
   addEntry,
+  addPasskey,
+  ApiError,
+  getAccount,
+  takePasskeyOffer,
   editEntry,
   loadHousehold,
   purgeVoided,
@@ -23,6 +27,7 @@ import {
 } from "./forms";
 import ImportSummary from "./ImportSummary";
 import { saveTextFile } from "./files";
+import SignInSettings from "./SignInSettings";
 import SpendingScreen from "./SpendingScreen";
 import { balanceFor, effectFor, exportLedgerCsv, filterTotals, fmt, isFiltering, matchesFilter, NO_FILTER } from "./ledger";
 import LedgerFilters from "./LedgerFilters";
@@ -37,6 +42,8 @@ type Panel =
   | "import"
   | "more"
   | "password"
+  | "signin"
+  | "passkey-offer"
   | "split"
   | "recurring"
   | "purge"
@@ -77,6 +84,14 @@ export default function LedgerScreen({
   const [voiding, setVoiding] = useState<Entry | null>(null);
   const [showVoided, setShowVoided] = useState(false);
   const [filter, setFilter] = useState(NO_FILTER);
+
+  // Right after a password sign-in, offer once to add a passkey (if there isn't one yet).
+  useEffect(() => {
+    if (!takePasskeyOffer()) return;
+    getAccount()
+      .then((a) => a.passkeys.length === 0 && setPanel((p) => p ?? "passkey-offer"))
+      .catch(() => undefined);
+  }, []);
   // Entries that weren't there on the previous load "print" in (see .printed in styles.css).
   const knownIds = useRef<Set<string> | null>(null);
   const [freshIds, setFreshIds] = useState<Set<string>>(() => new Set());
@@ -584,6 +599,14 @@ export default function LedgerScreen({
         </Modal>
       )}
 
+      {panel === "signin" && (
+        <Modal title="Passkeys and sign-in" onClose={closePanel}>
+          <SignInSettings onMessage={(message) => setToast({ message })} />
+        </Modal>
+      )}
+
+      {panel === "passkey-offer" && <PasskeyOffer onClose={closePanel} onAdded={() => saved("Passkey added")} />}
+
       {panel === "more" && (
         <Modal title="More" onClose={closePanel}>
           <div className="stack">
@@ -647,6 +670,7 @@ export default function LedgerScreen({
               )}
             </p>
             <div className="menu">
+              <button onClick={() => setPanel("signin")}>Passkeys and sign-in</button>
               <button onClick={() => setPanel("password")}>Change password</button>
               <button
                 onClick={() =>
@@ -662,6 +686,45 @@ export default function LedgerScreen({
         </Modal>
       )}
     </main>
+  );
+}
+
+/** Shown once after a password sign-in: one tap to set up Face ID sign-in. */
+function PasskeyOffer({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function add() {
+    setBusy(true);
+    setError(null);
+    try {
+      await addPasskey();
+      onAdded();
+    } catch (err) {
+      if (!(err instanceof ApiError && err.code === "cancelled")) {
+        setError(err instanceof Error ? err.message : "Something went wrong.");
+      }
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal title="Sign in with Face ID?" onClose={onClose}>
+      <div className="stack">
+        <p>
+          Add a passkey and next time you can sign in with Face ID or Touch ID, no password needed. It syncs to your
+          other Apple devices through iCloud Keychain.
+        </p>
+        <ErrorText message={error} />
+        <div className="actions-row">
+          <button onClick={onClose} disabled={busy}>
+            Not now
+          </button>
+          <button className="primary" onClick={() => void add()} disabled={busy}>
+            {busy ? "One moment…" : "Add a passkey"}
+          </button>
+        </div>
+        <p className="muted small">You can do this any time in More &gt; Passkeys and sign-in.</p>
+      </div>
+    </Modal>
   );
 }
 

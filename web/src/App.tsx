@@ -23,6 +23,8 @@ export default function App() {
     }
   }, []);
 
+  const signedIn = useCallback(() => void refresh(), [refresh]);
+
   useEffect(() => {
     void refresh();
     // If any later call finds we're signed out, re-check the account so the right screen shows.
@@ -41,7 +43,7 @@ export default function App() {
     return (
       <>
         <ErrorText message={error} />
-        <AuthScreen onDone={() => void refresh()} />
+        <AuthScreen onDone={signedIn} />
       </>
     );
   }

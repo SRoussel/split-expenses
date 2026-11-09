@@ -1,10 +1,22 @@
 // The whole backend: a small JSON API on top of D1. Static files are served by
 // Cloudflare before this runs; only /api/* reaches this Worker.
-// The routes live in auth.ts, household.ts, entries.ts, recurring.ts and spending.ts.
+// The routes live in auth.ts, passkeys.ts, household.ts, entries.ts, recurring.ts and spending.ts.
 
 import { changePassword, login, logout, me, signup } from "./auth";
 import { addEntry, editEntry, unvoidEntry, voidEntry } from "./entries";
 import { createHousehold, getHousehold, joinHousehold, purgeVoided, resetHousehold, setSplit } from "./household";
+import {
+  confirm,
+  confirmOptions,
+  deletePasskey,
+  disablePassword,
+  enablePassword,
+  getAccount,
+  loginOptions,
+  loginVerify,
+  registerOptions,
+  registerVerify,
+} from "./passkeys";
 import { assertSameOrigin, type Env, HttpError, json } from "./http";
 import { createRecurring, stopRecurring, updateRecurring } from "./recurring";
 import { deleteBatch, getSpending, importStatement, moveSpending } from "./spending";
@@ -17,12 +29,23 @@ export default {
       if (method === "GET" && pathname === "/api/me") return await me(request, env);
       if (method === "GET" && pathname === "/api/household") return await getHousehold(request, env);
       if (method === "GET" && pathname === "/api/spending") return await getSpending(request, env);
+      if (method === "GET" && pathname === "/api/account") return await getAccount(request, env);
       if (method === "POST") {
         assertSameOrigin(request);
         if (pathname === "/api/password") return await changePassword(request, env);
         if (pathname === "/api/signup") return await signup(request, env);
         if (pathname === "/api/login") return await login(request, env);
         if (pathname === "/api/logout") return await logout(request, env);
+        if (pathname === "/api/passkeys/register/options") return await registerOptions(request, env);
+        if (pathname === "/api/passkeys/register/verify") return await registerVerify(request, env);
+        if (pathname === "/api/passkeys/login/options") return await loginOptions(request, env);
+        if (pathname === "/api/passkeys/login/verify") return await loginVerify(request, env);
+        if (pathname === "/api/confirm/options") return await confirmOptions(request, env);
+        if (pathname === "/api/confirm") return await confirm(request, env);
+        if (pathname === "/api/password/disable") return await disablePassword(request, env);
+        if (pathname === "/api/password/enable") return await enablePassword(request, env);
+        const pk = pathname.match(/^\/api\/passkeys\/([\w-]+)\/delete$/);
+        if (pk) return await deletePasskey(request, env, pk[1]);
         if (pathname === "/api/household") return await createHousehold(request, env);
         if (pathname === "/api/household/join") return await joinHousehold(request, env);
         if (pathname === "/api/household/split") return await setSplit(request, env);
@@ -44,7 +67,7 @@ export default {
       }
       throw new HttpError(404, "Not found.");
     } catch (err) {
-      if (err instanceof HttpError) return json({ error: err.message }, err.status);
+      if (err instanceof HttpError) return json({ error: err.message, ...(err.code && { code: err.code }) }, err.status);
       console.error(err);
       return json({ error: "Something went wrong on the server." }, 500);
     }

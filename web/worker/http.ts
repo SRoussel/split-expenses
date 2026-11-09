@@ -12,6 +12,8 @@ export class HttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** A machine-readable reason the app can act on, e.g. "confirm" (prove it's you first). */
+    readonly code?: string,
   ) {
     super(message);
   }

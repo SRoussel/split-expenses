@@ -1,5 +1,6 @@
 // Reset someone's password from your computer (there's no email, so this is the
-// "forgot password" path). It also signs that person out everywhere.
+// "forgot password" path). It also signs that person out everywhere, and turns password
+// sign-in back on if they had turned it off (e.g. they lost every passkey). Passkeys stay.
 //
 //   npm run reset-password -- someone@example.com           # local database
 //   npm run reset-password -- someone@example.com --remote  # the deployed one
@@ -27,7 +28,7 @@ if (password.length < 8) {
   process.exit(1);
 }
 
-// Must match worker/index.ts: PBKDF2-SHA256, 16-byte salt, 32-byte hash, hex.
+// Must match hashPassword in worker/auth.ts: PBKDF2-SHA256, 16-byte salt, 32-byte hash, hex.
 // Use the same work factor the Worker is configured with, so the first sign-in doesn't rehash.
 const configured = /"PBKDF2_ITERATIONS"\s*:\s*"(\d+)"/.exec(
   readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
@@ -38,7 +39,7 @@ const hash = pbkdf2Sync(password, Buffer.from(salt, "hex"), iterations, 32, "sha
 const quoted = `'${email.replace(/'/g, "''")}'`;
 
 const sql =
-  `UPDATE users SET password_hash = '${hash}', password_salt = '${salt}', password_iterations = ${iterations} ` +
+  `UPDATE users SET password_hash = '${hash}', password_salt = '${salt}', password_iterations = ${iterations}, password_disabled = 0 ` +
   `WHERE email = ${quoted}; ` +
   `DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE email = ${quoted}); ` +
   `SELECT count(*) AS matched FROM users WHERE email = ${quoted};`;

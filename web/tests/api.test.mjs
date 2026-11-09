@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { FakePasskey } from "./fake-passkey.mjs";
 
 const PORT = 8800 + Math.floor(Math.random() * 100);
 const BASE = `http://localhost:${PORT}`;
@@ -727,5 +728,137 @@ describe("Split API", () => {
     }
     assert.deepEqual(codes.slice(0, 10), Array(10).fill(404));
     assert.equal(codes[10], 429);
+  });
+
+  describe("passkeys", () => {
+    const origin = BASE;
+    let alicePasskey;
+    const account = async (c) => (await c.get("/api/account")).data;
+    /** Run a whole passkey sign-in on a fresh client; returns [response status, client]. */
+    const passkeyLogin = async (pk, knobs) => {
+      const c = new Client();
+      const options = (await c.post("/api/passkeys/login/options")).data;
+      const res = await c.post("/api/passkeys/login/verify", { response: await pk.get(options, knobs) });
+      return [res.status, c, res];
+    };
+    const addPasskey = async (c, pk, knobs) => {
+      const options = (await c.post("/api/passkeys/register/options")).data;
+      return c.post("/api/passkeys/register/verify", { response: await pk.create(options, knobs), name: "Test phone" });
+    };
+
+    test("an account starts with a password and no passkeys", async () => {
+      assert.deepEqual(await account(alice), { passwordEnabled: true, passkeys: [] });
+      assert.equal((await new Client().get("/api/account")).status, 401);
+    });
+
+    test("adding a passkey stores only the public key, once", async () => {
+      alicePasskey = await new FakePasskey({ origin }).init();
+      const options = (await alice.post("/api/passkeys/register/options")).data;
+      assert.equal(options.rp.id, "localhost");
+      assert.equal(options.authenticatorSelection.userVerification, "required");
+      assert.equal(options.authenticatorSelection.residentKey, "required");
+      const response = await alicePasskey.create(options);
+      assert.equal((await alice.post("/api/passkeys/register/verify", { response, name: "Test phone" })).status, 201);
+      assert.equal((await alice.post("/api/passkeys/register/verify", { response, name: "Again" })).status, 400,
+        "the same response can't be used twice: its challenge is gone");
+      const { passkeys } = await account(alice);
+      assert.equal(passkeys.length, 1);
+      assert.equal(passkeys[0].id, alicePasskey.id);
+      assert.equal(passkeys[0].name, "Test phone");
+      // The next options exclude it, so the same device isn't registered twice.
+      const again = (await alice.post("/api/passkeys/register/options")).data;
+      assert.deepEqual(again.excludeCredentials.map((c) => c.id), [alicePasskey.id]);
+    });
+
+    test("adding a passkey refuses a wrong site, a missing Face ID, and signed-out callers", async () => {
+      const pk = await new FakePasskey({ origin }).init();
+      assert.equal((await addPasskey(alice, pk, { origin: "https://evil.example" })).status, 400, "phishing site");
+      assert.equal((await addPasskey(alice, pk, { flags: 0x01 | 0x40 })).status, 400, "no user verification");
+      assert.equal((await new Client().post("/api/passkeys/register/options")).status, 401);
+      assert.equal((await account(alice)).passkeys.length, 1, "nothing was added");
+    });
+
+    test("signing in with a passkey starts a normal session", async () => {
+      const [status, c] = await passkeyLogin(alicePasskey);
+      assert.equal(status, 200);
+      assert.equal((await c.get("/api/me")).data.user.id, aliceId);
+      assert.ok((await account(alice)).passkeys[0].last_used_at, "last use is recorded");
+    });
+
+    test("passkey sign-in refuses replays, forgeries and look-alikes", async () => {
+      const c = new Client();
+      const options = (await c.post("/api/passkeys/login/options")).data;
+      assert.deepEqual(options.allowCredentials, [], "no email needed: the phone offers its passkey");
+      const response = await alicePasskey.get(options);
+      assert.equal((await c.post("/api/passkeys/login/verify", { response })).status, 200);
+      assert.equal((await new Client().post("/api/passkeys/login/verify", { response })).status, 401, "replay");
+
+      assert.equal((await passkeyLogin(alicePasskey, { origin: "https://evil.example" }))[0], 401, "wrong site");
+      assert.equal((await passkeyLogin(alicePasskey, { rpID: "evil.example" }))[0], 401, "wrong domain hash");
+      assert.equal((await passkeyLogin(alicePasskey, { flags: 0x01 }))[0], 401, "no Face ID");
+      const stranger = await new FakePasskey({ origin }).init();
+      stranger.id = alicePasskey.id; // claims to be Alice's passkey, signs with another key
+      assert.equal((await passkeyLogin(stranger, { userHandle: alicePasskey.userHandle }))[0], 401, "wrong key");
+      const unknown = await new FakePasskey({ origin }).init();
+      assert.equal((await passkeyLogin(unknown))[0], 401, "a passkey this app never saw");
+      assert.equal((await passkeyLogin(alicePasskey, { userHandle: Buffer.from(bobId).toString("base64url") }))[0], 401,
+        "made for a different account");
+    });
+
+    test("an expired challenge doesn't work", async () => {
+      const c = new Client();
+      const options = (await c.post("/api/passkeys/login/options")).data;
+      sql(`UPDATE auth_challenges SET expires_at = datetime('now', '-1 minute') WHERE challenge = '${options.challenge}'`);
+      assert.equal((await c.post("/api/passkeys/login/verify", { response: await alicePasskey.get(options) })).status, 401);
+    });
+
+    test("sensitive changes need a recent confirmation, by password or passkey", async () => {
+      sql(`UPDATE sessions SET confirmed_at = datetime('now', '-10 minutes')`);
+      const res = await alice.post("/api/passkeys/register/options");
+      assert.equal(res.status, 403);
+      assert.equal(res.data.code, "confirm");
+      assert.equal((await alice.post("/api/password/disable")).status, 403);
+
+      assert.equal((await alice.post("/api/confirm", { password: "wrong" })).status, 400);
+      assert.equal((await alice.post("/api/confirm", { password: "  spaced pw  " })).status, 200);
+      assert.equal((await alice.post("/api/passkeys/register/options")).status, 200, "confirmed now");
+
+      sql(`UPDATE sessions SET confirmed_at = NULL`);
+      const options = (await alice.post("/api/confirm/options")).data;
+      assert.deepEqual(options.allowCredentials.map((c) => c.id), [alicePasskey.id], "only her own passkeys");
+      assert.equal((await alice.post("/api/confirm", { response: await alicePasskey.get(options) })).status, 200);
+      assert.equal((await alice.post("/api/passkeys/register/options")).status, 200);
+
+      // Bob can't confirm his session with Alice's passkey.
+      assert.equal((await bob.post("/api/confirm/options")).status, 409, "Bob has no passkey");
+      const bobOptions = { challenge: "AAAA" };
+      assert.equal((await bob.post("/api/confirm", { response: await alicePasskey.get(bobOptions) })).status, 401);
+    });
+
+    test("turning off password sign-in: needs a passkey, then passwords stop working", async () => {
+      sql(`UPDATE sessions SET confirmed_at = datetime('now')`);
+      assert.equal((await bob.post("/api/password/disable")).status, 409, "Bob has no passkey yet");
+
+      assert.equal((await alice.post("/api/password/disable")).status, 200);
+      assert.equal((await account(alice)).passwordEnabled, false);
+      const login = await new Client().post("/api/login", { email: "alice@x.com", password: "  spaced pw  " });
+      assert.equal(login.status, 401);
+      assert.match(login.data.error, /passkey/);
+      assert.equal((await alice.post("/api/password", { current: "  spaced pw  ", next: "whatever1" })).status, 409);
+      assert.equal((await alice.post("/api/confirm", { password: "  spaced pw  " })).status, 409, "can't confirm by password");
+      assert.equal((await passkeyLogin(alicePasskey))[0], 200, "the passkey still works");
+    });
+
+    test("the last way in can't be removed; turning the password back on works", async () => {
+      sql(`UPDATE sessions SET confirmed_at = datetime('now')`);
+      assert.equal((await alice.post(`/api/passkeys/${alicePasskey.id}/delete`)).status, 409, "only way to sign in");
+      assert.equal((await alice.post("/api/password/enable", { next: "short" })).status, 400);
+      assert.equal((await alice.post("/api/password/enable", { next: "a new password" })).status, 200);
+      assert.equal((await new Client().post("/api/login", { email: "alice@x.com", password: "a new password" })).status, 200);
+      assert.equal((await bob.post(`/api/passkeys/${alicePasskey.id}/delete`)).status, 404, "not Bob's to remove");
+      assert.equal((await alice.post(`/api/passkeys/${alicePasskey.id}/delete`)).status, 200);
+      assert.equal((await account(alice)).passkeys.length, 0);
+      assert.equal((await passkeyLogin(alicePasskey))[0], 401, "a removed passkey no longer signs in");
+    });
   });
 });

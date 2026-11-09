@@ -1,3 +1,12 @@
+import {
+  browserSupportsWebAuthn,
+  browserSupportsWebAuthnAutofill,
+  startAuthentication,
+  startRegistration,
+  WebAuthnAbortService,
+  type PublicKeyCredentialCreationOptionsJSON,
+  type PublicKeyCredentialRequestOptionsJSON,
+} from "@simplewebauthn/browser";
 import type { Frequency } from "../shared/recurring";
 import { todayLocal } from "./ledger";
 import type { StatementImport } from "./ledger";
@@ -19,8 +28,31 @@ export function setSessionLostHandler(fn: (() => void) | null) {
   onSessionLost = fn;
 }
 
+/** An error from the API, with the server's machine-readable code when it sends one. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+  }
+}
+
+/** The server wants this session to confirm it's you (password or passkey) before going on. */
+export const needsConfirm = (err: unknown) => err instanceof ApiError && err.code === "confirm";
+
 // The sign-in and account-check calls legitimately answer 401; everything else means the session is gone.
-const AUTH_PATHS = new Set(["/api/me", "/api/login", "/api/signup", "/api/logout"]);
+const AUTH_PATHS = new Set([
+  "/api/me",
+  "/api/login",
+  "/api/signup",
+  "/api/logout",
+  "/api/passkeys/login/options",
+  "/api/passkeys/login/verify",
+  "/api/confirm",
+  "/api/confirm/options",
+]);
 
 async function call<T = void>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -28,10 +60,11 @@ async function call<T = void>(method: "GET" | "POST", path: string, body?: unkno
     headers: body === undefined ? undefined : { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const data = (await res.json().catch(() => ({}))) as { error?: string };
+  const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
   if (!res.ok) {
-    if ((res.status === 401 || res.status === 403) && !AUTH_PATHS.has(path)) onSessionLost?.();
-    throw new Error(data.error ?? `Request failed (${res.status}).`);
+    const lost = (res.status === 401 || res.status === 403) && data.code !== "confirm" && !AUTH_PATHS.has(path);
+    if (lost) onSessionLost?.();
+    throw new ApiError(data.error ?? `Request failed (${res.status}).`, res.status, data.code);
   }
   return data as T;
 }
@@ -87,3 +120,88 @@ export const moveSpending = (move: {
   to: string;
   cents: number;
 }) => call("POST", "/api/spending/move", move);
+
+// ---------------------------------------------------------------------------
+// Passkeys. The browser library talks to Face ID / Touch ID; the server checks the result.
+// ---------------------------------------------------------------------------
+
+export interface Passkey {
+  id: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export const passkeysSupported = () => browserSupportsWebAuthn();
+/** Stops a passkey request that's still waiting (e.g. the autofill one when leaving the sign-in screen). */
+export const cancelPasskeyRequest = () => WebAuthnAbortService.cancelCeremony();
+
+// After a password sign-in, the app offers once to add a passkey (see LedgerScreen).
+const OFFER_KEY = "split.offerPasskey";
+export function markPasskeyOffer() {
+  try {
+    sessionStorage.setItem(OFFER_KEY, "1");
+  } catch {
+    /* storage blocked: just don't offer */
+  }
+}
+export function takePasskeyOffer(): boolean {
+  try {
+    const due = sessionStorage.getItem(OFFER_KEY) === "1";
+    sessionStorage.removeItem(OFFER_KEY);
+    return due;
+  } catch {
+    return false;
+  }
+}
+export const passkeyAutofillSupported = () => browserSupportsWebAuthnAutofill();
+
+export const getAccount = () => call<{ passwordEnabled: boolean; passkeys: Passkey[] }>("GET", "/api/account");
+
+/** A name for the passkey list, from the kind of device it was made on. */
+function deviceName(): string {
+  const ua = navigator.userAgent;
+  if (/iPhone/.test(ua)) return "iPhone";
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return "iPad";
+  if (/Macintosh/.test(ua)) return "Mac";
+  if (/Android/.test(ua)) return "Android phone";
+  if (/Windows/.test(ua)) return "Windows PC";
+  return "This device";
+}
+
+/** The device's own messages when you cancel are long and technical; this one isn't. */
+function friendly(err: unknown): never {
+  if (err instanceof Error && (err.name === "NotAllowedError" || err.name === "AbortError")) {
+    throw new ApiError("Cancelled. Nothing was changed.", 0, "cancelled");
+  }
+  if (err instanceof Error && err.name === "InvalidStateError") {
+    throw new ApiError("This device already has a passkey for your account.", 0);
+  }
+  throw err;
+}
+
+export async function addPasskey() {
+  const optionsJSON = await call<PublicKeyCredentialCreationOptionsJSON>("POST", "/api/passkeys/register/options", {});
+  const response = await startRegistration({ optionsJSON }).catch(friendly);
+  await call("POST", "/api/passkeys/register/verify", { response, name: deviceName() });
+}
+
+/**
+ * Sign in with a passkey. With `autofill`, it waits quietly for you to pick the passkey
+ * that iOS offers in the email field's suggestions, instead of opening a prompt.
+ */
+export async function passkeySignIn(autofill = false) {
+  const optionsJSON = await call<PublicKeyCredentialRequestOptionsJSON>("POST", "/api/passkeys/login/options", {});
+  const response = await startAuthentication({ optionsJSON, useBrowserAutofill: autofill }).catch(friendly);
+  await call("POST", "/api/passkeys/login/verify", { response });
+}
+
+export async function confirmWithPasskey() {
+  const optionsJSON = await call<PublicKeyCredentialRequestOptionsJSON>("POST", "/api/confirm/options", {});
+  const response = await startAuthentication({ optionsJSON }).catch(friendly);
+  await call("POST", "/api/confirm", { response });
+}
+export const confirmWithPassword = (password: string) => call("POST", "/api/confirm", { password });
+export const removePasskey = (id: string) => call("POST", `/api/passkeys/${encodeURIComponent(id)}/delete`, {});
+export const disablePassword = () => call("POST", "/api/password/disable", {});
+export const enablePassword = (next: string) => call("POST", "/api/password/enable", { next });

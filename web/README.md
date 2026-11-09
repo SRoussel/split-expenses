@@ -112,7 +112,18 @@ There's no email, so reset it from your computer:
     npm run reset-password -- someone@example.com            # local database
     npm run reset-password -- someone@example.com --remote   # the deployed one
 
-It asks for the new password and signs that person out everywhere.
+It asks for the new password and signs that person out everywhere. If that person had turned off password sign-in (say they lost every passkey), this turns it back on.
+
+### Passkeys
+
+You can sign in with Face ID or Touch ID instead of a password. Set it up in **More > Passkeys and sign-in > Add a passkey**, or tap **Add a passkey** in the offer that appears once after a password sign-in. On iPhone the passkey syncs to your other Apple devices through iCloud Keychain, and a computer without one can sign in by scanning a QR code with your phone.
+
+How it stays safe: your device keeps a private key and the app's database only stores the matching public key, which can check a sign-in but never make one. Each sign-in signs a fresh one-time challenge that expires in 5 minutes, together with the site's address, so a captured sign-in can't be replayed and a look-alike site gets nothing it can use. The server also requires Face ID or Touch ID to have happened.
+
+- **Turn off password sign-in** (same screen) once your passkey works. Your password then stops working and its stored hash is replaced with random bytes, so there's nothing left to guess, phish or crack. You can only do this with a passkey set up, and you can't remove your last passkey while it's off.
+- **Changes to how you sign in need a fresh confirmation**: adding or removing a passkey and turning password sign-in off or on. Signing in counts; otherwise the app asks you to confirm with your passkey or password. That way someone who gets hold of your session can't quietly add their own passkey.
+- **Passkeys belong to the address the app runs on** (your `workers.dev` one). If you ever move the app to another domain, existing passkeys won't work there: sign in with your password and add new ones. If password sign-in is off at that point, use `npm run reset-password` first.
+- If you lose every passkey with password sign-in off, `npm run reset-password` (above) gets you back in.
 
 Splitting rule: the person who didn't pay owes their share rounded half up to the cent, and the payer keeps the remainder. On an odd half-cent, the payer gets the one-cent discount. The Python ledger (`uv run split-ledger`) uses the same rule, so the two always agree to the cent. The rule lives in `shared/owed.ts` for the app and the Worker.
 
@@ -131,7 +142,7 @@ A household holds two people, and you can't add a third.
 
 Open the site in Safari, tap the share button, then **Add to Home Screen**. It opens full screen like a regular app. Do it from Safari itself, not from inside another app's browser.
 
-Sign in with email and password. That's deliberate, rather than emailed sign-in links: on iPhone, a link in Mail opens Safari instead of the home screen app, and the two don't share a login.
+Sign in with email and password the first time, then add a passkey when the app offers (see "Passkeys" above) and use **Sign in with passkey** from then on. There are no emailed sign-in links on purpose: on iPhone, a link in Mail opens Safari instead of the home screen app, and the two don't share a login. Passkeys don't have that problem, since they never leave the app.
 
 ## Using it
 
@@ -191,9 +202,11 @@ Also bump the `?v=` numbers on the other icon links, deploy, and remove and re-a
     public/_headers       security headers for the pages
     scripts/              reset-password helper
     tests/api.test.mjs    end-to-end backend tests (npm run test:api)
+    tests/fake-passkey.mjs  a software passkey for those tests
     worker/index.ts       the backend's front door: routes each /api/* request
     worker/http.ts        shared plumbing: JSON in and out, input checks, errors
     worker/auth.ts        accounts, passwords, sessions, sign-in throttling
+    worker/passkeys.ts    passkeys, "confirm it's you", turning password sign-in off and on
     worker/household.ts   create and join, load everything, default split, reset
     worker/entries.ts     add, edit, void and restore entries
     worker/recurring.ts   recurring expenses
@@ -208,6 +221,7 @@ Also bump the `?v=` numbers on the other icon links, deploy, and remove and re-a
     src/LedgerScreen.tsx  the main screen, including the refresh timer
     src/forms.tsx         add expense, settle up, starting balance
     src/LedgerFilters.tsx search and filters above the ledger
+    src/SignInSettings.tsx More > Passkeys and sign-in
     src/App.tsx           sign-in check and which screen to show
     src/AuthScreen.tsx    sign in and create account
     src/Onboarding.tsx    create or join a household
