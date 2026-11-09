@@ -4,7 +4,8 @@
 # dependencies = ["pdfplumber"]
 # ///
 """
-Parse bank statement PDFs and go through every transaction once:
+Read bank statements (PDFs, or the CSV and OFX/QFX files banks let you download)
+and go through every transaction once:
 
   money out:  self (your own spending), split (shared with your partner), or exclude
   money in:   income, a return (reduces the category it came from), or exclude
@@ -20,6 +21,10 @@ Usage:
     uv run split-statements /path/to/statements
     uv run split-statements /path/to/sams/statements --person sam   # keeps Sam's files in data/sam/
     uv run split-statements /path/to/statements --dump              # just show what was parsed
+
+CSV, OFX and QFX downloads are read too, and are more reliable than PDF text when your
+bank offers them. Don't put a PDF and a download of the same account and dates in the
+same folder: they'd be counted twice.
 """
 
 import argparse
@@ -39,9 +44,11 @@ except ImportError:
     sys.exit("Missing pdfplumber. Run this script with:  uv run split-statements ...")
 
 try:
+    from .bank_exports import SIGNS, is_export, read_export
     from .categories import INCOME, SPENDING, current
     from .people import person_dir
 except ImportError:  # run as a plain script
+    from bank_exports import SIGNS, is_export, read_export
     from categories import INCOME, SPENDING, current
     from people import person_dir
 
@@ -293,7 +300,13 @@ def parse_pdf(path):
 
 
 def txn_key(source, txn):
-    """Stable id for a transaction. Ids of lines reviewed by older versions are unchanged."""
+    """Stable id for a transaction. Ids of lines reviewed by older versions are unchanged.
+
+    Bank downloads carry their own `_key`, without the file name, so the same
+    transaction in two overlapping downloads gets the same id.
+    """
+    if "_key" in txn:
+        return hashlib.sha1(txn["_key"].encode()).hexdigest()
     kind, i = txn["_key_index"]
     index = str(i) if kind == "" else f"{txn['direction']}#{i}"
     raw = f"{source}|{index}|{txn['date']}|{txn['amount']}|{txn['vendor']}"
@@ -1002,7 +1015,7 @@ def main():
     ap = argparse.ArgumentParser(
         description="Go through statement transactions: self, split, income, return or exclude."
     )
-    ap.add_argument("directory", type=Path, help="Directory containing statement PDFs")
+    ap.add_argument("directory", type=Path, help="Directory containing statement PDFs, or CSV/OFX/QFX downloads")
     ap.add_argument("--person", help="Keep this person's files in data/<person>/ (e.g. --person sam)")
     ap.add_argument("-o", "--output", type=Path, help="CSV for split transactions (default: split_transactions.csv)")
     ap.add_argument(
@@ -1021,6 +1034,12 @@ def main():
         "--clear-rules",
         action="store_true",
         help="Forget remembered vendor choices (keeps reviewed-transaction history)",
+    )
+    ap.add_argument(
+        "--csv-sign",
+        choices=SIGNS,
+        default="auto",
+        help="In CSV downloads with one amount column, which sign is money out (default: whichever most rows have)",
     )
     ap.add_argument("--no-color", action="store_true", help="Disable colored output")
     args = ap.parse_args()
@@ -1051,27 +1070,32 @@ def main():
         save_state(state_path, st)
         print(paint("Forgot which transactions were reviewed (remembered merchants kept).", "green"))
 
-    pdfs = sorted(args.directory.glob("*.pdf")) + sorted(args.directory.glob("*.PDF"))
-    if not pdfs:
-        sys.exit(f"No PDF files found in {args.directory}")
+    files = sorted(p for p in args.directory.iterdir() if p.is_file() and (p.suffix.lower() == ".pdf" or is_export(p)))
+    if not files:
+        sys.exit(f"No statements (PDF, CSV, OFX or QFX) found in {args.directory}")
 
     txns_by_file = []
-    for pdf in pdfs:
+    for path in files:
+        note = ""
         try:
-            txns = parse_pdf(pdf)
-        except Exception as e:  # corrupt/encrypted PDFs shouldn't kill the run
-            print(f"Could not read {pdf.name}: {e}", file=sys.stderr)
+            if path.suffix.lower() == ".pdf":
+                txns = parse_pdf(path)
+            else:
+                txns, note = read_export(path, args.csv_sign)
+        except Exception as e:  # a corrupt file or an unknown layout shouldn't stop the run
+            print(f"Could not read {path.name}: {e}", file=sys.stderr)
             continue
         by_dir = Counter(t["direction"] for t in txns)
         print(
-            "{}: {} out, {} in, {} unclear".format(
-                paint(pdf.name, "bold"),
+            "{}: {} out, {} in, {} unclear{}".format(
+                paint(path.name, "bold"),
                 paint(by_dir["out"], "cyan"),
                 paint(by_dir["in"], "cyan"),
                 paint(by_dir["unknown"], "yellow" if by_dir["unknown"] else "cyan"),
+                paint(f"  ({note})", "dim") if note else "",
             )
         )
-        txns_by_file.append((pdf.name, txns))
+        txns_by_file.append((path.name, txns))
 
     if args.dump:
         for source, txns in txns_by_file:

@@ -20,9 +20,13 @@ To run the tests: `uv run python -m unittest discover -s tests -v`.
 
 ## split_statements.py
 
-Put your statement PDFs in a folder and point the script at it:
+Put your statements in a folder and point the script at it:
 
     uv run split-statements path/to/statements
+
+Statements can be PDFs, or the CSV and OFX/QFX files most banks let you download from their transaction history. The downloads are more reliable than reading text out of a PDF, and PDFs keep working the same as before; a folder can have both. Just don't put a PDF and a download of the same account and dates in together, or those transactions show up twice.
+
+CSV layouts differ from bank to bank. It finds the date, description and amount columns itself (or separate debit and credit columns). With one amount column it has to guess which sign is money out, so it goes with whichever sign most rows have (most rows are purchases) and says so next to the file name. If it guesses wrong, add `--csv-sign negative-out` or `--csv-sign positive-out`. Downloading an overlapping date range again is fine: transactions already reviewed aren't asked about again.
 
 It groups what's left to review **by merchant**, so "STARBUCKS ×12 · $54.20" is one question covering all twelve. Each question is a single keypress, no Enter:
 

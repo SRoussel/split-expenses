@@ -71,7 +71,7 @@ For the desktop page, build it once and start it from the repo root:
 
 ## A typical month
 
-1. Download the month's statements into `statements/`.
+1. Download the month's statements into `statements/`: PDFs, or the bank's CSV or OFX download.
 2. Run `uv run split-statements statements` and go through what's new. It remembers merchants, so after the first month it's mostly pressing Enter.
 3. Run `uv run split-ledger finish` (add `--person sam` if you're doing Sam's statements on the same computer). It writes the summary, moves the batch into `archive/`, and prints the path of the file to import.
 4. Get that file to your phone (AirDrop works) and import it in the app under **More > Import statement summary**, saying whose statement it is.
