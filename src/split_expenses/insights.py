@@ -21,6 +21,8 @@ import json
 import os
 import re
 import sys
+import urllib.error
+import urllib.request
 import webbrowser
 from collections import Counter
 from datetime import datetime
@@ -359,7 +361,8 @@ def sent(root):
             )
     for e in read_json(desktop_file(root, "exports.json")).get("exports", []):
         if isinstance(e, dict) and all(isinstance(e.get(k), str) for k in ("person", "name", "start", "end")):
-            out.append({**{k: e[k] for k in ("person", "name", "start", "end")}, "from": "exported here"})
+            how = "sent to the app" if e.get("how") == "app" else "exported here"
+            out.append({**{k: e[k] for k in ("person", "name", "start", "end")}, "from": how})
     return sorted(out, key=lambda e: e["end"], reverse=True)
 
 
@@ -401,8 +404,8 @@ def build_summary(txns, name=None, personal=True):
     return summary
 
 
-def export(root, body):
-    """Make the summary for one person's transactions between two dates, and note it was exported."""
+def summary_for(root, body):
+    """The summary for one person's transactions between two dates, from what this page shows."""
     if not isinstance(body, dict):
         raise ValueError("bad request")
     person, start, end = body.get("person"), body.get("start"), body.get("end")
@@ -420,20 +423,30 @@ def export(root, body):
     if not any(t["person"] == person for t in everything):
         raise ValueError("unknown person")
     txns = [t for t in everything if t["person"] == person and start <= t["date"] <= end]
-    summary = build_summary(txns, name, personal=body.get("personal", True) is not False)
+    return person, build_summary(txns, name, personal=body.get("personal", True) is not False)
 
+
+def note_sent(root, person, summary, how):
+    """Remember what went to the phone app, so the next export starts after it."""
     path = desktop_file(root, "exports.json")
-    log = read_json(path).get("exports", [])
-    log = [e for e in log if isinstance(e, dict)] + [
+    log = [e for e in read_json(path).get("exports", []) if isinstance(e, dict)]
+    log.append(
         {
             "person": person,
             "name": summary["name"],
             "start": summary["start"],
             "end": summary["end"],
+            "how": how,
             "exported": datetime.now().isoformat(timespec="seconds"),
         }
-    ]
+    )
     write_json(path, {"exports": log})
+
+
+def export(root, body):
+    """Make the summary as a file for the phone app to import, and note it was exported."""
+    person, summary = summary_for(root, body)
+    note_sent(root, person, summary, "file")
     filename = f"split_summary-{person}-{summary['start']}-to-{summary['end']}.json"
     saved = None
     if body.get("save") is True:  # the desktop app: no browser downloads, so save it here
@@ -443,6 +456,146 @@ def export(root, body):
         path.write_text(json.dumps(summary, indent=2) + "\n")
         saved = str(path)
     return {"summary": summary, "filename": filename, "saved": saved, "data": load(root)}
+
+
+# ---------------------------------------------------------------------------
+# Sending straight to the app, with a desktop key from `npm run desktop-key`
+# (desktop-data/app.json). The key stays here: the page never sees it.
+# ---------------------------------------------------------------------------
+
+APP_TIMEOUT = 20
+
+
+def safe_app_url(url):
+    """HTTPS only, so the key is never sent in the clear; plain HTTP just to this computer, for trying it out."""
+    return isinstance(url, str) and bool(
+        re.fullmatch(r"https://[^/\s]+/?", url) or re.fullmatch(r"http://(?:localhost|127\.0\.0\.1)(?::\d+)?/?", url)
+    )
+
+
+def app_config(root):
+    cfg = read_json(desktop_file(root, "app.json"))
+    url, key = cfg.get("url"), cfg.get("key")
+    if safe_app_url(url) and isinstance(key, str) and re.fullmatch(r"split_[\w-]{43}", key):
+        return {"url": url.rstrip("/"), "key": key}
+    return None
+
+
+class NoRedirects(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect: urllib would send the key along to wherever it points."""
+
+    def redirect_request(self, *_args, **_kwargs):
+        return None
+
+
+APP_OPENER = urllib.request.build_opener(NoRedirects)
+
+
+def app_call(cfg, method, path, body=None):
+    """One request to the app. Its error messages come back as ValueError, ready to show."""
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(cfg["url"] + path, data=data, method=method)
+    req.add_header("Authorization", f"Bearer {cfg['key']}")
+    req.add_header("User-Agent", "split-insights")
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with APP_OPENER.open(req, timeout=APP_TIMEOUT) as res:
+            return json.loads(res.read() or b"null")
+    except urllib.error.HTTPError as e:
+        try:
+            message = json.loads(e.read()).get("error")
+        except (ValueError, AttributeError):
+            message = None
+        if 300 <= e.code < 400:
+            message = f"the app's address redirects elsewhere; check the address in {DESKTOP}/app.json"
+        raise ValueError(message or f"the app said {e.code}") from None
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        reason = getattr(e, "reason", e)
+        raise ValueError(f"couldn't reach the app at {cfg['url']} ({reason})") from None
+
+
+def app_status(root):
+    """For the page: is a key set up, and if so, who's in the household and what's uploaded."""
+    cfg = app_config(root)
+    if not cfg:
+        return {"connected": False}
+    try:
+        household = app_call(cfg, "GET", "/api/desktop/household")
+    except ValueError as e:
+        return {"connected": True, "url": cfg["url"], "error": str(e)}
+    people = people_in_app(household)
+    uploads = [
+        {**u, "person": people.get(u.get("person_id"))}
+        for u in household.get("uploads", [])
+        if isinstance(u, dict) and people.get(u.get("person_id"))
+    ]
+    return {"connected": True, "url": cfg["url"], "uploads": uploads}
+
+
+def people_in_app(household):
+    """App user ids to the names this page uses: the key's owner is "me", the other is the partner.
+
+    The partner's files live in data/<name>/; whatever that name is, it's the one other
+    person, since the app holds exactly two.
+    """
+    me = household.get("me")
+    out = {}
+    for m in household.get("members", []):
+        if isinstance(m, dict):
+            out[m.get("user_id")] = ME if m.get("user_id") == me else "partner"
+    return out
+
+
+def send_to_app(root, body):
+    """Send the summary to the app, first taking out the uploads it replaces (if asked)."""
+    cfg = app_config(root)
+    if not cfg:
+        raise ValueError("no desktop key yet: run `npm run desktop-key` in web/ first")
+    if not isinstance(body, dict):
+        raise ValueError("bad request")
+    replace = body.get("replace") or []
+    if (
+        not isinstance(replace, list)
+        or len(replace) > 20
+        or not all(isinstance(i, str) and re.fullmatch(r"[\w-]{1,64}", i) for i in replace)
+    ):
+        raise ValueError("bad list of uploads to replace")
+    person, summary = summary_for(root, body)
+
+    household = app_call(cfg, "GET", "/api/desktop/household")
+    members = {m["user_id"]: m for m in household.get("members", []) if isinstance(m, dict) and "user_id" in m}
+    others = [i for i in members if i != household.get("me")]
+    person_id = household.get("me") if person == ME else (others[0] if len(others) == 1 else None)
+    if person_id not in members:
+        raise ValueError("the app's household doesn't have that person yet")
+
+    payload = {
+        "name": summary["name"],
+        "start": summary["start"],
+        "end": summary["end"],
+        "today": datetime.now().strftime("%Y-%m-%d"),
+    }
+    if "shared" in summary:
+        payload["shared"] = {
+            "total_cents": summary["shared"]["total_cents"],
+            "months": summary["shared"]["months"],
+            "payer_id": person_id,  # whoever's statement it is paid for these
+            "payer_share_pct": members[person_id]["share_pct"],  # their usual share
+        }
+    if "personal" in summary:
+        payload["personal"] = {"person_id": person_id, "months": summary["personal"]["months"]}
+
+    for upload_id in replace:
+        app_call(cfg, "POST", f"/api/desktop/uploads/{upload_id}/remove", {})
+    try:
+        app_call(cfg, "POST", "/api/desktop/import", payload)
+    except ValueError as e:
+        if replace:
+            raise ValueError(f"the old upload was taken out, but sending the new one failed: {e}") from None
+        raise
+    note_sent(root, person, summary, "app")
+    return {"summary": summary, "data": load(root), "app": app_status(root)}
 
 
 def downloads_dir():
@@ -585,8 +738,16 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if not self.addressed_here():
             return
+        # Another site can't read the answers, but it could make the browser ask, and
+        # /api/app then calls the app with the key. Browsers mark those requests.
+        if self.path.startswith("/api/") and self.headers.get("Sec-Fetch-Site") not in (None, "same-origin", "none"):
+            self.send_error(403)
+            return
         if self.path.split("?")[0] == "/api/data":
             self.send_json(200, load(self.root))
+            return
+        if self.path.split("?")[0] == "/api/app":
+            self.send_json(200, app_status(self.root))
             return
         super().do_GET()
 
@@ -606,6 +767,7 @@ class Handler(SimpleHTTPRequestHandler):
             "/api/classify": lambda b: classify(self.root, b.get("changes")),
             "/api/rules": lambda b: remember(self.root, b.get("rules")),
             "/api/export": lambda b: export(self.root, b),
+            "/api/app/send": lambda b: send_to_app(self.root, b),
         }
         if self.path not in routes:
             self.send_error(404)
@@ -619,7 +781,7 @@ class Handler(SimpleHTTPRequestHandler):
         except (ValueError, AttributeError) as e:
             self.send_json(400, {"error": str(e)})
             return
-        self.send_json(200, result if self.path == "/api/export" else load(self.root))
+        self.send_json(200, result if self.path in ("/api/export", "/api/app/send") else load(self.root))
 
     def end_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")

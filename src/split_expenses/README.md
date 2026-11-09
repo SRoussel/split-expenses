@@ -136,6 +136,8 @@ You can also refile transactions there: change the category or shared/personal r
 
 **Sending it to the phone app.** "Export for phone app" makes the same `split_summary.json` that `split-ledger finish` does, for one person and the dates you pick, with your refilings and renames applied. Import it on the phone under More > Import statement summary. It starts from the day after the last summary it knows about (the ones `finish` archived, and earlier exports), and warns when the dates overlap one, since importing the same days twice counts them twice. To fix something already in the app, delete that upload there and import the new file.
 
+With a desktop key (`npm run desktop-key`, see [web/README.md](../../web/README.md#desktop-keys)) there's also **Send to the app**, which skips the file: it sends the same summary straight to the app. It then knows exactly what's already there, starts after it, and when the dates overlap an upload, offers to take that one out first (its spending totals go, and its shared expense is voided, so the ledger still shows it crossed out).
+
 The page keeps its own files in `desktop-data/` (git-ignored): your renames and refilings. They change what this page shows and what it exports. The transaction CSVs and the ledger stay as they were; the only thing it writes outside its folder is a vendor rule, when you say yes to one. `desktop-data/exports.json` remembers what you exported.
 
 **As an app.** The same page also comes as a desktop app with its own window, built with [Tauri](https://tauri.app). It starts the server itself and stops it when you close the window. In the app, exports save straight to your Downloads folder (under WSL, the Windows one). Building it needs Rust and a couple of system packages, once:

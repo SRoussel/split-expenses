@@ -1,8 +1,10 @@
 // The whole backend: a small JSON API on top of D1. Static files are served by
 // Cloudflare before this runs; only /api/* reaches this Worker.
-// The routes live in auth.ts, passkeys.ts, household.ts, entries.ts, recurring.ts and spending.ts.
+// The routes live in auth.ts, passkeys.ts, household.ts, entries.ts, recurring.ts, spending.ts
+// and desktop.ts (the desktop app, with its own kind of key).
 
 import { changePassword, login, logout, me, signup } from "./auth";
+import { desktopHousehold, desktopImport, desktopRemove, revokeDesktopKey } from "./desktop";
 import { addEntry, editEntry, unvoidEntry, voidEntry } from "./entries";
 import { createHousehold, getHousehold, joinHousehold, purgeVoided, resetHousehold, setSplit } from "./household";
 import {
@@ -26,6 +28,14 @@ export default {
     const { pathname } = new URL(request.url);
     const method = request.method;
     try {
+      // The desktop app: a desktop key, never a cookie (see desktop.ts).
+      if (pathname.startsWith("/api/desktop/")) {
+        if (method === "GET" && pathname === "/api/desktop/household") return await desktopHousehold(request, env);
+        if (method === "POST" && pathname === "/api/desktop/import") return await desktopImport(request, env);
+        const u = pathname.match(/^\/api\/desktop\/uploads\/([\w-]+)\/remove$/);
+        if (method === "POST" && u) return await desktopRemove(request, env, u[1]);
+        throw new HttpError(404, "Not found.");
+      }
       if (method === "GET" && pathname === "/api/me") return await me(request, env);
       if (method === "GET" && pathname === "/api/household") return await getHousehold(request, env);
       if (method === "GET" && pathname === "/api/spending") return await getSpending(request, env);
@@ -44,6 +54,8 @@ export default {
         if (pathname === "/api/confirm") return await confirm(request, env);
         if (pathname === "/api/password/disable") return await disablePassword(request, env);
         if (pathname === "/api/password/enable") return await enablePassword(request, env);
+        const dk = pathname.match(/^\/api\/desktop-keys\/([\w-]+)\/delete$/);
+        if (dk) return await revokeDesktopKey(request, env, dk[1]);
         const pk = pathname.match(/^\/api\/passkeys\/([\w-]+)\/delete$/);
         if (pk) return await deletePasskey(request, env, pk[1]);
         if (pathname === "/api/household") return await createHousehold(request, env);

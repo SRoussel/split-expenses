@@ -35,6 +35,7 @@ import {
   throttle,
   verifyPassword,
 } from "./auth";
+import { listDesktopKeys } from "./desktop";
 import { clientIp, type Env, HttpError, json, readBody, rawStr } from "./http";
 
 const RP_NAME = "Split";
@@ -185,6 +186,7 @@ export async function getAccount(request: Request, env: Env): Promise<Response> 
   return json({
     passwordEnabled: !(user.results[0] as { password_disabled: number }).password_disabled,
     passkeys: passkeys.results,
+    desktopKeys: await listDesktopKeys(env, session.user.id),
   });
 }
 

@@ -1,6 +1,7 @@
 // Statement imports and spending totals: totals per (month, category) only.
 
 import { INCOME_CATEGORY, isPersonalCategory, isSpendingCategory } from "../shared/categories";
+import { MAX_UPLOAD_MONTHS } from "../shared/limits";
 import { owedCents, pctToBasisPoints } from "../shared/owed";
 import { requireMembership, requireUser } from "./auth";
 import {
@@ -15,7 +16,6 @@ import {
   validDate,
 } from "./http";
 
-const MAX_MONTHS = 13;
 const MAX_CATEGORIES_PER_MONTH = 13;
 const ROWS_PER_INSERT = 20; // 4 values per row; D1 allows about 100 values per statement
 
@@ -35,8 +35,9 @@ function validateMonths(
 ): TotalRow[] {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new HttpError(400, `${label}: invalid months.`);
   const months = Object.entries(raw as Record<string, unknown>);
-  if (months.length === 0 || months.length > MAX_MONTHS)
-    throw new HttpError(400, `${label}: invalid number of months.`);
+  if (months.length === 0) throw new HttpError(400, `${label}: no months.`);
+  if (months.length > MAX_UPLOAD_MONTHS)
+    throw new HttpError(400, `${label}: one upload can cover at most ${MAX_UPLOAD_MONTHS} months.`);
   const rows: TotalRow[] = [];
   for (const [month, cats] of months) {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || month < start.slice(0, 7) || month > end.slice(0, 7)) {
@@ -89,7 +90,18 @@ function insertTotals(
 export async function importStatement(request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
   const { household_id } = await requireMembership(env, user.id);
-  const body = await readBody(request);
+  return importFor(request, env, user.id, household_id, await readBody(request));
+}
+
+/** The import itself, for whoever is asking: a signed-in person, or a desktop key (desktop.ts). */
+export async function importFor(
+  request: Request,
+  env: Env,
+  userId: string,
+  household_id: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const user = { id: userId };
 
   const name = str(body, "name", 200);
   const start = str(body, "start", 10);

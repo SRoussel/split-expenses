@@ -21,6 +21,7 @@
     "test:api": "npm run build && node --test tests/api.test.mjs",
     "deploy": "npm run build && wrangler deploy",
     "reset-password": "node scripts/reset-password.mjs",
+    "desktop-key": "node scripts/desktop-key.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

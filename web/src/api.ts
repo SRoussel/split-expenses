@@ -155,7 +155,17 @@ export function takePasskeyOffer(): boolean {
 }
 export const passkeyAutofillSupported = () => browserSupportsWebAuthnAutofill();
 
-export const getAccount = () => call<{ passwordEnabled: boolean; passkeys: Passkey[] }>("GET", "/api/account");
+/** A key the desktop app uses to send statement summaries (made with `npm run desktop-key`). */
+export interface DesktopKey {
+  id: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string;
+}
+
+export const getAccount = () =>
+  call<{ passwordEnabled: boolean; passkeys: Passkey[]; desktopKeys: DesktopKey[] }>("GET", "/api/account");
 
 /** A name for the passkey list, from the kind of device it was made on. */
 function deviceName(): string {
@@ -202,5 +212,6 @@ export async function confirmWithPasskey() {
 }
 export const confirmWithPassword = (password: string) => call("POST", "/api/confirm", { password });
 export const removePasskey = (id: string) => call("POST", `/api/passkeys/${encodeURIComponent(id)}/delete`, {});
+export const revokeDesktopKey = (id: string) => call("POST", `/api/desktop-keys/${encodeURIComponent(id)}/delete`, {});
 export const disablePassword = () => call("POST", "/api/password/disable", {});
 export const enablePassword = (next: string) => call("POST", "/api/password/enable", { next });

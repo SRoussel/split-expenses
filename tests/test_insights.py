@@ -6,11 +6,21 @@ import tempfile
 import threading
 import unittest
 from functools import partial
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from split_expenses import insights
-from split_expenses.insights import classify, export, load, merchant_names, remember, rename, sent
+from split_expenses.insights import (
+    app_status,
+    classify,
+    export,
+    load,
+    merchant_names,
+    remember,
+    rename,
+    send_to_app,
+    sent,
+)
 
 
 def write(folder, name, rows, mtime):
@@ -409,6 +419,189 @@ class ExportTest(unittest.TestCase):
         self.assertEqual(load(self.root)["sent"], sent(self.root))
 
 
+class FakeApp(BaseHTTPRequestHandler):
+    """Stands in for the deployed app's desktop routes, and records what it was sent."""
+
+    KEY = "split_" + "k" * 43
+    calls = []
+    fail_import = False
+
+    def reply(self, status, data):
+        body = json.dumps(data).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def handle_any(self, method):
+        length = int(self.headers.get("Content-Length") or 0)
+        body = json.loads(self.rfile.read(length)) if length else None
+        FakeApp.calls.append((method, self.path, body, self.headers.get("Authorization")))
+        if self.headers.get("Authorization") != f"Bearer {self.KEY}":
+            return self.reply(401, {"error": "This desktop key was revoked or has expired."})
+        if self.path == "/api/desktop/household":
+            return self.reply(
+                200,
+                {
+                    "me": "u-me",
+                    "members": [
+                        {"user_id": "u-me", "display_name": "Alex", "share_pct": 60},
+                        {"user_id": "u-jo", "display_name": "Jordan", "share_pct": 40},
+                    ],
+                    "uploads": [
+                        {"id": "b1", "person_id": "u-me", "name": "Old", "start": "2026-01-15", "end": "2026-02-03"}
+                    ],
+                },
+            )
+        if self.path == "/api/desktop/import":
+            if FakeApp.fail_import:
+                return self.reply(400, {"error": "Shared: the categories don't add up to the total."})
+            return self.reply(201, {"ok": True})
+        if self.path.startswith("/api/desktop/uploads/"):
+            return self.reply(200, {"ok": True})
+        self.reply(404, {"error": "Not found."})
+
+    def do_GET(self):
+        self.handle_any("GET")
+
+    def do_POST(self):
+        self.handle_any("POST")
+
+    def log_message(self, *_args):
+        pass
+
+
+class SendToAppTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        for src, dest in (
+            ("sample_split_transactions.csv", "split_transactions.csv"),
+            ("sample_personal_transactions.csv", "personal_transactions.csv"),
+        ):
+            (self.root / dest).write_text((FIXTURES / src).read_text())
+        (self.root / "data" / "jordan").mkdir(parents=True)
+        write(self.root / "data" / "jordan", "split_transactions.csv", [["2026-01-20", "30.00", "CAFE", "dining"]], 100)
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), FakeApp)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        FakeApp.calls, FakeApp.fail_import = [], False
+        self.connect(FakeApp.KEY)
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.tmp.cleanup()
+
+    def connect(self, key):
+        (self.root / "desktop-data").mkdir(exist_ok=True)
+        url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        (self.root / "desktop-data" / "app.json").write_text(json.dumps({"url": url, "key": key}))
+
+    def test_not_set_up(self):
+        (self.root / "desktop-data" / "app.json").unlink()
+        self.assertEqual(app_status(self.root), {"connected": False})
+        with self.assertRaises(ValueError):
+            send_to_app(self.root, {"person": "me", "start": "2026-01-01", "end": "2026-12-31"})
+
+    def test_status_lists_uploads_without_giving_out_the_key(self):
+        status = app_status(self.root)
+        self.assertEqual(status["uploads"][0]["person"], "me")
+        self.assertNotIn(FakeApp.KEY, json.dumps(status))
+
+    def test_sends_the_same_summary_the_file_would_have(self):
+        out = send_to_app(self.root, {"person": "me", "start": "2000-01-01", "end": "2100-01-01"})
+        method, path, payload, auth = [c for c in FakeApp.calls if c[1] == "/api/desktop/import"][0]
+        self.assertEqual((method, auth), ("POST", f"Bearer {FakeApp.KEY}"))
+        expected = json.loads((FIXTURES / "expected_summary_v2.json").read_text())
+        self.assertEqual(payload["name"], expected["name"])
+        self.assertEqual(payload["shared"]["months"], expected["shared"]["months"])
+        self.assertEqual(payload["shared"]["total_cents"], expected["shared"]["total_cents"])
+        self.assertEqual(payload["shared"]["payer_id"], "u-me")
+        self.assertEqual(payload["shared"]["payer_share_pct"], 60, "the payer's usual share in the app")
+        self.assertEqual(payload["personal"], {"person_id": "u-me", "months": expected["personal"]["months"]})
+        self.assertEqual(out["summary"], expected)
+        self.assertIn(("me", "sent to the app"), [(e["person"], e["from"]) for e in sent(self.root)])
+
+    def test_the_partners_statement_goes_to_the_partner(self):
+        send_to_app(self.root, {"person": "jordan", "start": "2026-01-01", "end": "2026-01-31", "personal": False})
+        payload = [c for c in FakeApp.calls if c[1] == "/api/desktop/import"][0][2]
+        self.assertEqual((payload["shared"]["payer_id"], payload["shared"]["payer_share_pct"]), ("u-jo", 40))
+        self.assertNotIn("personal", payload)
+
+    def test_replacing_takes_the_old_one_out_first(self):
+        send_to_app(self.root, {"person": "me", "start": "2000-01-01", "end": "2100-01-01", "replace": ["b1"]})
+        paths = [c[1] for c in FakeApp.calls if c[0] == "POST"]
+        self.assertEqual(paths, ["/api/desktop/uploads/b1/remove", "/api/desktop/import"])
+        for bad in (["../x"], "b1", ["b"] * 21):
+            with self.assertRaises(ValueError):
+                send_to_app(self.root, {"person": "me", "start": "2000-01-01", "end": "2100-01-01", "replace": bad})
+
+    def test_the_apps_errors_come_through(self):
+        FakeApp.fail_import = True
+        with self.assertRaisesRegex(ValueError, "taken out, but sending the new one failed: Shared"):
+            send_to_app(self.root, {"person": "me", "start": "2000-01-01", "end": "2100-01-01", "replace": ["b1"]})
+        self.connect("split_" + "x" * 43)
+        self.assertIn("revoked", app_status(self.root)["error"])
+        self.assertFalse(any(e["from"] == "sent to the app" for e in sent(self.root)), "nothing noted when it failed")
+
+    def test_only_https_except_this_computer(self):
+        for url, ok in (
+            ("https://ledger.example.workers.dev", True),
+            ("http://localhost:8787", True),
+            ("http://127.0.0.1:8787/", True),
+            ("http://ledger.example.workers.dev", False),
+            ("http://localhost.evil.example", False),
+            ("https://example.com/path", False),
+            ("ftp://example.com", False),
+        ):
+            (self.root / "desktop-data" / "app.json").write_text(json.dumps({"url": url, "key": FakeApp.KEY}))
+            self.assertEqual(app_status(self.root)["connected"], ok, url)
+
+    def test_redirects_arent_followed_so_the_key_cant_leak(self):
+        leaked = []
+
+        class Elsewhere(BaseHTTPRequestHandler):
+            def do_GET(self):
+                leaked.append(self.headers.get("Authorization"))
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *_args):
+                pass
+
+        class Redirect(FakeApp):
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header("Location", f"http://127.0.0.1:{other.server_address[1]}/steal")
+                self.end_headers()
+
+        other = ThreadingHTTPServer(("127.0.0.1", 0), Elsewhere)
+        threading.Thread(target=other.serve_forever, daemon=True).start()
+        redirecting = ThreadingHTTPServer(("127.0.0.1", 0), Redirect)
+        threading.Thread(target=redirecting.serve_forever, daemon=True).start()
+        try:
+            url = f"http://127.0.0.1:{redirecting.server_address[1]}"
+            (self.root / "desktop-data" / "app.json").write_text(json.dumps({"url": url, "key": FakeApp.KEY}))
+            self.assertIn("redirects elsewhere", app_status(self.root)["error"])
+            self.assertEqual(leaked, [], "the other server never saw a request")
+        finally:
+            for srv in (other, redirecting):
+                srv.shutdown()
+                srv.server_close()
+
+    def test_unreachable(self):
+        import socket
+
+        with socket.socket() as sock:  # a port nothing listens on
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        (self.root / "desktop-data" / "app.json").write_text(
+            json.dumps({"url": f"http://127.0.0.1:{port}", "key": FakeApp.KEY})
+        )
+        self.assertIn("couldn't reach the app", app_status(self.root)["error"])
+
+
 class ServerTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -451,6 +644,14 @@ class ServerTest(unittest.TestCase):
         status, body = self.request("GET", "/api/data")
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["transactions"][0]["merchant"], "Freshway")
+
+    def test_other_sites_cant_make_the_browser_ask(self):
+        self.assertEqual(self.request("GET", "/api/data", **{"Sec-Fetch-Site": "cross-site"})[0], 403)
+        self.assertEqual(self.request("GET", "/api/app", **{"Sec-Fetch-Site": "same-site"})[0], 403)
+        self.assertEqual(self.request("GET", "/api/data", **{"Sec-Fetch-Site": "same-origin"})[0], 200)
+        self.assertEqual(
+            self.request("GET", "/", **{"Sec-Fetch-Site": "cross-site"})[0], 200, "the page itself is fine"
+        )
 
     def test_other_host_names_are_refused(self):
         self.assertEqual(self.request("GET", "/api/data", Host=f"evil.example:{self.port}")[0], 403)

@@ -114,6 +114,14 @@ There's no email, so reset it from your computer:
 
 It asks for the new password and signs that person out everywhere. If that person had turned off password sign-in (say they lost every passkey), this turns it back on.
 
+### Desktop keys
+
+The desktop page (`uv run split-insights`) can send statement summaries straight here instead of as a file. It needs a key, made from your computer with the same Cloudflare login you deploy with:
+
+    npm run desktop-key -- you@example.com --remote --url https://<the address you open on your phone>
+
+That saves the key in `desktop-data/app.json` (git-ignored, readable only by you). A key can only list, add and replace statement uploads: no expenses, no settings, no sign-in. It expires after a year. Keys show up in the app under More > Passkeys and sign-in, where you can revoke one, for example if you lose the computer. `npm run desktop-key -- you@example.com --remote --revoke` removes them from the computer too.
+
 ### Passkeys
 
 You can sign in with Face ID or Touch ID instead of a password. Set it up in **More > Passkeys and sign-in > Add a passkey**, or tap **Add a passkey** in the offer that appears once after a password sign-in. On iPhone the passkey syncs to your other Apple devices through iCloud Keychain, and a computer without one can sign in by scanning a QR code with your phone.

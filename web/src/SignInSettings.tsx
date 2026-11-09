@@ -10,6 +10,8 @@ import {
   needsConfirm,
   passkeysSupported,
   removePasskey,
+  revokeDesktopKey,
+  type DesktopKey,
   type Passkey,
 } from "./api";
 import { ConfirmDialog, ErrorText, PasswordInput } from "./ui";
@@ -19,7 +21,7 @@ const dayFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeri
 const day = (sqlTime: string) => dayFmt.format(new Date(`${sqlTime.replace(" ", "T")}Z`));
 const isCancel = (err: unknown) => err instanceof ApiError && err.code === "cancelled";
 
-type Account = { passwordEnabled: boolean; passkeys: Passkey[] };
+type Account = { passwordEnabled: boolean; passkeys: Passkey[]; desktopKeys: DesktopKey[] };
 
 /**
  * More > Sign-in: passkeys and password sign-in. Changes here need a recent sign-in or
@@ -33,6 +35,7 @@ export default function SignInSettings({ onMessage }: { onMessage: (message: str
   // What to do once you've confirmed it's you.
   const [pending, setPending] = useState<{ run: () => Promise<void>; done: string } | null>(null);
   const [confirmingRemove, setConfirmingRemove] = useState<Passkey | null>(null);
+  const [confirmingRevoke, setConfirmingRevoke] = useState<DesktopKey | null>(null);
   const [confirmingDisable, setConfirmingDisable] = useState(false);
   const [settingPassword, setSettingPassword] = useState(false);
   const supported = passkeysSupported();
@@ -92,7 +95,7 @@ export default function SignInSettings({ onMessage }: { onMessage: (message: str
     );
   }
 
-  const { passkeys, passwordEnabled } = account;
+  const { passkeys, passwordEnabled, desktopKeys } = account;
   return (
     <div className="stack">
       <p className="muted small">
@@ -155,6 +158,47 @@ export default function SignInSettings({ onMessage }: { onMessage: (message: str
         </>
       )}
 
+      {desktopKeys.length > 0 && (
+        <>
+          <h2 className="section-label">Desktop app</h2>
+          <p className="muted small">
+            These let the desktop app on your computer send statement summaries here. They can only add and replace
+            statement uploads. If you lose that computer, revoke its key.
+          </p>
+          <ul className="plain passkey-list">
+            {desktopKeys.map((k) => (
+              <li key={k.id} className="row">
+                <span>
+                  <strong>{k.name}</strong>
+                  <br />
+                  <span className="muted small">
+                    Added {day(k.created_at)}
+                    {k.last_used_at ? ` · last used ${day(k.last_used_at)}` : " · not used yet"} · expires{" "}
+                    {day(k.expires_at)}
+                  </span>
+                </span>
+                <button className="link" disabled={busy} onClick={() => setConfirmingRevoke(k)}>
+                  Revoke
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {confirmingRevoke && (
+        <ConfirmDialog
+          title="Revoke desktop key?"
+          message={`"${confirmingRevoke.name}" stops working right away. Make a new one on the computer with npm run desktop-key.`}
+          confirmLabel="Revoke"
+          danger
+          onConfirm={async () => {
+            const id = confirmingRevoke.id;
+            await change(() => revokeDesktopKey(id), "Desktop key revoked");
+          }}
+          onClose={() => setConfirmingRevoke(null)}
+        />
+      )}
       {confirmingRemove && (
         <ConfirmDialog
           title="Remove passkey?"

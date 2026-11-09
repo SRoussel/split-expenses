@@ -7,12 +7,15 @@
 // Your normal local database (.wrangler/) and the deployed one are never touched.
 
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { FakePasskey } from "./fake-passkey.mjs";
+import categories from "../shared/categories.json" with { type: "json" };
+
+const SPENDING_CATEGORIES = categories.spending;
 
 const PORT = 8800 + Math.floor(Math.random() * 100);
 const BASE = `http://localhost:${PORT}`;
@@ -525,6 +528,37 @@ describe("Split API", () => {
       assert.equal(mine.status, 201);
     });
 
+    test("an upload can cover up to 24 months, every category in every one", async () => {
+      const months = (n) =>
+        Object.fromEntries(
+          Array.from({ length: n }, (_, i) => {
+            const m = `${2024 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, "0")}`;
+            return [m, Object.fromEntries(SPENDING_CATEGORIES.map((c) => [c, 100]))];
+          }),
+        );
+      const upload = (n, name) => {
+        const shared = months(n);
+        const total = Object.values(shared).reduce((t, cats) => t + Object.values(cats).reduce((a, b) => a + b, 0), 0);
+        return body({
+          name,
+          start: "2024-01-01",
+          end: `${2024 + Math.floor((n - 1) / 12)}-${String(((n - 1) % 12) + 1).padStart(2, "0")}-28`,
+          shared: { total_cents: total, months: shared, payer_id: aliceId, payer_share_pct: 50 },
+          personal: { person_id: aliceId, months: months(n) },
+        });
+      };
+      const two = await alice.post("/api/statements/import", upload(24, "Two years"));
+      assert.equal(two.status, 201);
+      const rows = (await spending()).totals.filter((t) => t.batch_id === two.data.batchId);
+      assert.equal(rows.length, 24 * SPENDING_CATEGORIES.length, "every row written");
+      const more = await alice.post("/api/statements/import", upload(25, "Too long"));
+      assert.equal(more.status, 400);
+      assert.match(more.data.error, /at most 24 months/);
+      // Leave the household as the later tests expect it.
+      assert.equal((await alice.post(`/api/statements/${two.data.batchId}/delete`)).status, 200);
+      assert.equal((await alice.post(`/api/entries/${two.data.entryId}/void`)).status, 200);
+    });
+
     test("all or nothing: a bad personal part leaves no shared entry behind", async () => {
       const before = (await entries()).length;
       const bad = body({
@@ -789,6 +823,131 @@ describe("Split API", () => {
     });
   });
 
+  describe("desktop keys", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const summary = JSON.parse(readFileSync(new URL("./fixtures/expected_summary_v2.json", import.meta.url), "utf8"));
+    const keyFile = join(STATE, "app.json");
+    const script = (...args) =>
+      execFileSync("node", ["scripts/desktop-key.mjs", ...args, "--persist-to", STATE, "--out", keyFile], {
+        cwd: WEB,
+        encoding: "utf8",
+        stdio: "pipe",
+      });
+    let key;
+    /** What the desktop app does: a key in the Authorization header, no cookie, no Origin. */
+    const desk = async (method, path, body, k = key) => {
+      const res = await fetch(BASE + path, {
+        method,
+        headers: {
+          ...(k ? { authorization: `Bearer ${k}` } : {}),
+          ...(body ? { "content-type": "application/json" } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      return { status: res.status, data: await res.json().catch(() => null) };
+    };
+    const upload = (name) => ({
+      name,
+      start: summary.start,
+      end: summary.end,
+      today,
+      shared: {
+        total_cents: summary.shared.total_cents,
+        months: summary.shared.months,
+        payer_id: aliceId,
+        payer_share_pct: 50,
+      },
+      personal: { person_id: aliceId, months: summary.personal.months },
+    });
+
+    test("npm run desktop-key makes a key and saves it where only you can read it", () => {
+      script("alice@x.com", "--name", "Test laptop");
+      const saved = JSON.parse(readFileSync(keyFile, "utf8"));
+      assert.equal(saved.url, "http://localhost:8787");
+      assert.match(saved.key, /^split_[\w-]{43}$/);
+      assert.equal(statSync(keyFile).mode & 0o777, 0o600);
+      key = saved.key;
+      assert.throws(() => script("nobody@x.com"), "no account, no key");
+    });
+
+    test("with a key: who's in the household, and the uploads so far", async () => {
+      const res = await desk("GET", "/api/desktop/household");
+      assert.equal(res.status, 200);
+      assert.equal(res.data.me, aliceId);
+      assert.deepEqual(res.data.members.map((m) => m.user_id).sort(), [aliceId, bobId].sort());
+      assert.ok(Array.isArray(res.data.uploads));
+    });
+
+    test("import a summary, then take it back out to send a corrected one", async () => {
+      const res = await desk("POST", "/api/desktop/import", upload("From the desktop"));
+      assert.equal(res.status, 201);
+      const { batchId, entryId } = res.data;
+      const listed = (await desk("GET", "/api/desktop/household")).data.uploads.find((u) => u.id === batchId);
+      assert.equal(listed.name, "From the desktop");
+      assert.equal(listed.has_shared, true);
+      const entry = (await alice.get("/api/household")).data.entries.find((e) => e.id === entryId);
+      assert.equal(entry.created_by, aliceId, "made as the key's owner");
+
+      assert.equal((await desk("POST", `/api/desktop/uploads/${batchId}/remove`)).status, 200);
+      const sp = (await alice.get("/api/spending")).data;
+      assert.ok(!sp.batches.some((b) => b.id === batchId), "spending totals gone");
+      const voided = (await alice.get("/api/household")).data.entries.find((e) => e.id === entryId);
+      assert.ok(voided.voided_at, "the shared expense is voided, still visible");
+      assert.equal((await desk("POST", `/api/desktop/uploads/${batchId}/remove`)).status, 404);
+      // The same name can be sent again now.
+      assert.equal((await desk("POST", "/api/desktop/import", upload("From the desktop"))).status, 201);
+    });
+
+    test("removing can't touch ordinary expenses", async () => {
+      assert.equal((await alice.post("/api/entries", expense(aliceId, { name: "Not an import" }))).status, 201);
+      const plain = (await alice.get("/api/household")).data.entries.find((e) => e.name === "Not an import");
+      assert.equal((await desk("POST", `/api/desktop/uploads/${plain.id}/remove`)).status, 404);
+      const after = (await alice.get("/api/household")).data.entries.find((e) => e.id === plain.id);
+      assert.equal(after.voided_at, null);
+    });
+
+    test("a key only works on the desktop routes, and cookies don't work there", async () => {
+      assert.equal((await desk("GET", "/api/household")).status, 401);
+      assert.equal((await desk("GET", "/api/account")).status, 401);
+      assert.equal((await desk("POST", "/api/entries", expense(aliceId))).status, 401);
+      assert.equal((await desk("POST", "/api/household/split", { myShare: 10 })).status, 401);
+      assert.equal((await alice.get("/api/desktop/household")).status, 401, "a signed-in browser can't use them");
+      assert.equal((await alice.post("/api/desktop/import", upload("Via cookie"))).status, 401);
+    });
+
+    test("wrong, malformed and expired keys are refused", async () => {
+      assert.equal((await desk("GET", "/api/desktop/household", undefined, null)).status, 401);
+      assert.equal((await desk("GET", "/api/desktop/household", undefined, `split_${"A".repeat(43)}`)).status, 401);
+      assert.equal((await desk("GET", "/api/desktop/household", undefined, "not-a-key")).status, 401);
+      sql("UPDATE desktop_keys SET expires_at = datetime('now', '-1 day')");
+      assert.equal((await desk("GET", "/api/desktop/household")).status, 401);
+      sql("UPDATE desktop_keys SET expires_at = datetime('now', '+1 day')");
+      assert.equal((await desk("GET", "/api/desktop/household")).status, 200);
+    });
+
+    test("the app lists your keys; you can revoke yours, not someone else's", async () => {
+      const keys = (await alice.get("/api/account")).data.desktopKeys;
+      assert.equal(keys.length, 1);
+      assert.equal(keys[0].name, "Test laptop");
+      assert.ok(keys[0].last_used_at);
+      assert.equal((await bob.get("/api/account")).data.desktopKeys.length, 0);
+      assert.equal((await bob.post(`/api/desktop-keys/${keys[0].id}/delete`)).status, 404);
+      assert.equal((await alice.post(`/api/desktop-keys/${keys[0].id}/delete`)).status, 200);
+      assert.equal((await desk("GET", "/api/desktop/household")).status, 401, "revoked right away");
+    });
+
+    test("npm run desktop-key -- --revoke removes them and the saved file", async () => {
+      script("alice@x.com");
+      assert.equal(
+        (await desk("GET", "/api/desktop/household", undefined, JSON.parse(readFileSync(keyFile, "utf8")).key)).status,
+        200,
+      );
+      const said = script("alice@x.com", "--revoke");
+      assert.match(said, /Removed 1 desktop key/);
+      assert.equal(existsSync(keyFile), false);
+    });
+  });
+
   describe("reset", () => {
     const today = new Date().toISOString().slice(0, 10);
     const ours = async () => (await alice.get("/api/household")).data;
@@ -956,7 +1115,7 @@ describe("Split API", () => {
     };
 
     test("an account starts with a password and no passkeys", async () => {
-      assert.deepEqual(await account(alice), { passwordEnabled: true, passkeys: [] });
+      assert.deepEqual(await account(alice), { passwordEnabled: true, passkeys: [], desktopKeys: [] });
       assert.equal((await new Client().get("/api/account")).status, 401);
     });
 
