@@ -13,6 +13,9 @@
     "build": "tsc --noEmit && tsc --noEmit -p worker && vite build",
     "dev:desktop": "vite --config vite.desktop.config.ts",
     "build:desktop": "tsc --noEmit && vite build --config vite.desktop.config.ts",
+    "app": "tauri dev",
+    "app:build": "tauri build --no-bundle",
+    "app:install": "node scripts/install-app.mjs",
     "start": "npm run build && mkdir -p dist && wrangler dev --port 8787",
     "test": "node --import tsx --test src/ledger.test.ts src/spending.test.ts desktop/analytics.test.ts",
     "test:api": "npm run build && node --test tests/api.test.mjs",
@@ -33,6 +36,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261023.1",
     "@eslint/js": "^10.0.1",
+    "@tauri-apps/cli": "2.12.4",
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

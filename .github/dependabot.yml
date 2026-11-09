@@ -25,6 +25,16 @@ updates:
       python-minor-and-patch:
         update-types: [minor, patch]
 
+  - package-ecosystem: cargo
+    directory: /web/src-tauri
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      app-minor-and-patch:
+        update-types: [minor, patch]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

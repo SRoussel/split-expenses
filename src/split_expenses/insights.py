@@ -18,6 +18,7 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import re
 import sys
 import webbrowser
@@ -434,7 +435,31 @@ def export(root, body):
     ]
     write_json(path, {"exports": log})
     filename = f"split_summary-{person}-{summary['start']}-to-{summary['end']}.json"
-    return {"summary": summary, "filename": filename, "data": load(root)}
+    saved = None
+    if body.get("save") is True:  # the desktop app: no browser downloads, so save it here
+        folder = downloads_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / filename
+        path.write_text(json.dumps(summary, indent=2) + "\n")
+        saved = str(path)
+    return {"summary": summary, "filename": filename, "saved": saved, "data": load(root)}
+
+
+def downloads_dir():
+    """Where the desktop app saves exports: SPLIT_DOWNLOADS, else Windows' Downloads when
+    running under WSL (where the phone-transfer tools are), else ~/Downloads."""
+    if os.environ.get("SPLIT_DOWNLOADS"):
+        return Path(os.environ["SPLIT_DOWNLOADS"]).expanduser()
+    users = Path("/mnt/c/Users")
+    if users.is_dir():
+        found = [
+            d / "Downloads"
+            for d in users.iterdir()
+            if (d / "Downloads").is_dir() and d.name not in ("Public", "Default", "Default User", "All Users")
+        ]
+        if len(found) == 1:
+            return found[0]
+    return Path.home() / "Downloads"
 
 
 def rel(path, root):

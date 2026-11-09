@@ -1,0 +1,18 @@
+[package]
+name = "split-insights"
+version = "0.1.0"
+description = "Split Insights as a desktop app"
+edition = "2021"
+license = "MIT"
+publish = false
+
+# Pinned exactly, like the npm side: only versions that have been out a couple of weeks.
+[build-dependencies]
+tauri-build = { version = "=2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.5", features = [] }
+
+[profile.release]
+strip = true
+lto = true

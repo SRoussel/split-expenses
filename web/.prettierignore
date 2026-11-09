@@ -1,5 +1,6 @@
 dist/
 dist-desktop/
+src-tauri/
 .wrangler/
 node_modules/
 backups/

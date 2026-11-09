@@ -7,7 +7,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist/", "dist-desktop/", ".wrangler/", "node_modules/"] },
+  { ignores: ["dist/", "dist-desktop/", "src-tauri/", ".wrangler/", "node_modules/"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

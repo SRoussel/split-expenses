@@ -364,6 +364,17 @@ class ExportTest(unittest.TestCase):
         ]
         self.assertNotIn("personal", s)
 
+    def test_the_app_saves_the_file_itself(self):
+        downloads = self.root / "dl"
+        os.environ["SPLIT_DOWNLOADS"] = str(downloads)
+        try:
+            out = export(self.root, {"person": "me", "start": "2000-01-01", "end": "2100-01-01", "save": True})
+        finally:
+            del os.environ["SPLIT_DOWNLOADS"]
+        self.assertEqual(out["saved"], str(downloads / out["filename"]))
+        self.assertEqual(json.loads(Path(out["saved"]).read_text()), out["summary"])
+        self.assertIsNone(export(self.root, {"person": "me", "start": "2000-01-01", "end": "2100-01-01"})["saved"])
+
     def test_refusals(self):
         for body in (
             {"person": "me", "start": "2030-01-01", "end": "2030-12-31"},

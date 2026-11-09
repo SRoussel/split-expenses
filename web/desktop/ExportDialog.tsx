@@ -6,6 +6,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Data, Txn } from "./analytics";
 import { dayLabel, money, personLabel } from "./format";
 
+// The desktop app opens the page with ?app; there the server saves the file, since the
+// app's window doesn't do browser downloads.
+const IN_APP = new URLSearchParams(location.search).has("app");
+
 const nextDay = (d: string) => new Date(Date.parse(`${d}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
 const longDay = (d: string) => `${dayLabel(d)}, ${d.slice(0, 4)}`;
 const shortDate = (d: string) => `${d.slice(5, 7)}/${d.slice(8, 10)}/${d.slice(2, 4)}`;
@@ -43,7 +47,7 @@ export default function ExportDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The file just saved, and what it overlapped before it was saved (not counting itself).
-  const [saved, setSaved] = useState<{ filename: string; overlaps: Data["sent"] } | null>(null);
+  const [saved, setSaved] = useState<{ filename: string; path: string | null; overlaps: Data["sent"] } | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -85,18 +89,28 @@ export default function ExportDialog({
       const r = await fetch("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ person, start: range.from, end: range.to, personal, name: name.trim() || null }),
+        body: JSON.stringify({
+          person,
+          start: range.from,
+          end: range.to,
+          personal,
+          name: name.trim() || null,
+          save: IN_APP,
+        }),
       });
       const body = await r.json().catch(() => null);
       if (!r.ok) throw new Error(body?.error ?? `Couldn't export (the server said ${r.status}).`);
-      const blob = new Blob([JSON.stringify(body.summary, null, 2) + "\n"], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = body.filename;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
-      setSaved({ filename: body.filename, overlaps });
+      if (!body.saved) {
+        // In a browser: hand it over as a download.
+        const blob = new Blob([JSON.stringify(body.summary, null, 2) + "\n"], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = body.filename;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      }
+      setSaved({ filename: body.filename, path: body.saved, overlaps });
       onData(body.data as Data);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't export.");
@@ -117,7 +131,8 @@ export default function ExportDialog({
       {saved ? (
         <div className="export-body">
           <p>
-            Saved <code>{saved.filename}</code> to your downloads.
+            Saved <code>{saved.path ?? saved.filename}</code>
+            {saved.path ? "." : " to your downloads."}
           </p>
           <ol className="steps">
             <li>Get it to your phone (AirDrop works).</li>

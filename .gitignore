@@ -4,6 +4,8 @@ __pycache__/
 build/
 dist/
 dist-desktop/
+web/src-tauri/target/
+web/src-tauri/gen/
 wheels/
 *.egg-info
 

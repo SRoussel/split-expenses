@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Split Insights</title>
+    <style>
+      :root {
+        --bg: #f3f3f1;
+        --text: #121314;
+        --muted: #63666d;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0e0f11;
+          --text: #ecedef;
+          --muted: #8a8e96;
+        }
+      }
+      body {
+        margin: 0;
+        height: 100vh;
+        display: grid;
+        place-items: center;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      p {
+        margin: 0;
+        max-width: 60ch;
+        text-align: center;
+      }
+      #status {
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      <p><strong>Split Insights</strong></p>
+      <p id="status">Reading your transactions…</p>
+    </div>
+  </body>
+</html>

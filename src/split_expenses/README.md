@@ -134,4 +134,16 @@ You can also refile transactions there: change the category or shared/personal r
 
 The page keeps its own files in `desktop-data/` (git-ignored): your renames and refilings. They change what this page shows and what it exports. The transaction CSVs and the ledger stay as they were; the only thing it writes outside its folder is a vendor rule, when you say yes to one. `desktop-data/exports.json` remembers what you exported.
 
+**As an app.** The same page also comes as a desktop app with its own window, built with [Tauri](https://tauri.app). It starts the server itself and stops it when you close the window. In the app, exports save straight to your Downloads folder (under WSL, the Windows one). Building it needs Rust and a couple of system packages, once:
+
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    sudo apt install librsvg2-dev        # the other packages Tauri needs on Ubuntu were already there for me
+
+Then, from `web/`:
+
+    npm run app:build      # takes a few minutes the first time
+    npm run app:install    # adds it to the app menu; under WSL, the Windows Start menu
+
+`npm run app` runs it without installing. It reads the files in this repo folder; set `SPLIT_DIR` to use another one.
+
 To work on the page itself, run `uv run split-insights --no-open` and `npm run dev:desktop` in `web/` together, and open http://localhost:5174.
