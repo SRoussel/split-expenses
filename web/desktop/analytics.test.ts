@@ -13,6 +13,14 @@ import {
   similarNames,
   whatChanged,
   yearInReview,
+  balanceAt,
+  pointsFor,
+  savingsRate,
+  unlinked,
+  worthByMonth,
+  worthMonths,
+  withoutHome,
+  type Worth,
   findRecurring,
   totals,
   type Filters,
@@ -303,4 +311,96 @@ test("year in review: totals, the year before when it's covered, records and new
       ["dining", 200, 2700],
     ],
   );
+});
+
+test("net worth: statements fill in an account's history, typed balances win, debt counts against", () => {
+  const worth: Worth = {
+    me: "me",
+    people: ["jordan", "me"],
+    types: {
+      checking: { group: "cash", debt: false },
+      retirement: { group: "retirement", debt: false },
+      "credit card": { group: "debt", debt: true },
+    },
+    accounts: [
+      { id: "chk", name: "Checking", owner: "me", type: "checking", match: "3344", closed: false },
+      { id: "401k", name: "401k", owner: "jordan", type: "retirement", match: null, closed: false },
+      { id: "card", name: "Card", owner: "joint", type: "credit card", match: "8899", closed: false },
+    ],
+    balances: [
+      { account: "401k", date: "2026-01-31", cents: 5_000_000 },
+      { account: "chk", date: "2026-02-09", cents: 999 }, // typed over the statement's
+    ],
+    found: [
+      { ref: "3344", kind: "bank", date: "2026-01-09", cents: 200_000, person: "me", file: "a.pdf" },
+      { ref: "3344", kind: "bank", date: "2026-02-09", cents: 300_000, person: "me", file: "b.pdf" },
+      { ref: "3344", kind: "bank", date: "2026-02-09", cents: 777, person: "jordan", file: "c.pdf" }, // someone else's account
+      { ref: "8899", kind: "card", date: "2026-02-11", cents: 50_000, person: "jordan", file: "d.pdf" },
+      { ref: "1111", kind: "bank", date: "2026-02-01", cents: 1, person: "me", file: "e.pdf" },
+      { ref: "1111", kind: "bank", date: "2026-03-01", cents: 2, person: "me", file: "f.pdf" },
+    ],
+  };
+  const chk = pointsFor(worth.accounts[0], worth);
+  assert.deepEqual(
+    chk.map((p) => [p.date, p.cents, p.from]),
+    [
+      ["2026-01-09", 200_000, "statement"],
+      ["2026-02-09", 999, "typed"],
+    ],
+  );
+  assert.equal(balanceAt(chk, "2025-12"), null, "before the first balance");
+  assert.equal(balanceAt(chk, "2026-03"), 999, "carried forward");
+
+  assert.deepEqual(worthMonths(worth), ["2026-01", "2026-02", "2026-03"]);
+  const rows = worthByMonth(worth, worthMonths(worth));
+  assert.deepEqual(rows[0], {
+    month: "2026-01",
+    groups: { cash: 200_000, invested: 0, retirement: 5_000_000, property: 0, debt: 0 },
+    mortgage: 0,
+    net: 5_200_000,
+  });
+  assert.equal(rows[1].groups.debt, 50_000, "a joint card matches statements from either of you");
+  assert.equal(rows[1].net, 999 + 5_000_000 - 50_000);
+  assert.equal(worthByMonth(worth, ["2026-02"], "jordan")[0].net, 5_000_000, "just Jordan's");
+
+  assert.deepEqual(
+    unlinked(worth).map((u) => [u.ref, u.person, u.count, u.latest.cents]),
+    [
+      ["3344", "jordan", 1, 777],
+      ["1111", "me", 2, 2],
+    ],
+  );
+});
+
+test("savings rate: the share of income not spent", () => {
+  const rows = [
+    txn("2026-01-15", 500_000, "Payroll", "income"),
+    txn("2026-01-20", 300_000, "Rent", "housing", "shared"),
+    txn("2026-01-21", 50_000, "Cafe", "dining"),
+    txn("2026-02-15", 500_000, "Payroll", "income"),
+  ];
+  assert.deepEqual(savingsRate(rows, ["2026-01"], "income"), {
+    earned: 500_000,
+    spent: 350_000,
+    kept: 150_000,
+    rate: 0.3,
+  });
+  assert.equal(savingsRate(rows, ["2025-12"], "income").rate, null, "no income, no rate");
+});
+
+test("net worth without the home leaves out the house and its mortgage together, not other loans", () => {
+  const rows = [
+    {
+      month: "2026-01",
+      groups: { cash: 10_000, invested: 0, retirement: 0, property: 500_000, debt: 320_000 },
+      mortgage: 300_000,
+      net: 10_000 + 500_000 - 320_000,
+    },
+  ];
+  assert.deepEqual(withoutHome(rows)[0], {
+    month: "2026-01",
+    groups: { cash: 10_000, invested: 0, retirement: 0, property: 0, debt: 20_000 },
+    mortgage: 0,
+    net: 10_000 - 20_000,
+  });
 });

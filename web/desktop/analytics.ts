@@ -533,3 +533,149 @@ export function yearInReview(txns: Txn[], year: string, income: string): YearRev
     recurring: { count: recurring.length, perYear: recurring.reduce((n, r) => n + r.perYear, 0) },
   };
 }
+
+// ---------------------------------------------------------------------------
+// Net worth: accounts and their balances over time
+// ---------------------------------------------------------------------------
+
+export type Group = "cash" | "invested" | "retirement" | "property" | "debt";
+export const ASSET_GROUPS: Group[] = ["cash", "invested", "retirement", "property"];
+
+export interface Account {
+  id: string;
+  name: string;
+  owner: string; // a person, or "joint"
+  type: string;
+  match: string | null; // last four digits, to pick up statement balances
+  closed: boolean;
+}
+export interface Balance {
+  account: string;
+  date: string;
+  cents: number;
+}
+export interface FoundBalance {
+  ref: string;
+  kind: "bank" | "card";
+  date: string;
+  cents: number;
+  person: string;
+  file: string;
+}
+export interface Worth {
+  accounts: Account[];
+  balances: Balance[]; // typed in
+  found: FoundBalance[]; // read from statements
+  types: Record<string, { group: Group; debt: boolean }>;
+  people: string[];
+  me: string;
+}
+export interface Point extends Balance {
+  from: "typed" | "statement";
+}
+
+/** Every known balance of an account, oldest first: statements matched by the last four digits, and typed ones (which win on the same day). */
+export function pointsFor(acct: Account, worth: Worth): Point[] {
+  const byDate = new Map<string, Point>();
+  if (acct.match) {
+    for (const f of worth.found) {
+      if (f.ref !== acct.match) continue;
+      if (acct.owner !== "joint" && f.person !== acct.owner) continue;
+      byDate.set(f.date, { account: acct.id, date: f.date, cents: f.cents, from: "statement" });
+    }
+  }
+  for (const b of worth.balances) if (b.account === acct.id) byDate.set(b.date, { ...b, from: "typed" });
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+const monthEnd = (month: string) => {
+  const [y, m] = month.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+};
+
+/** The balance an account had at the end of a month: the latest one known by then, or null before the first. */
+export function balanceAt(points: Point[], month: string): number | null {
+  const end = monthEnd(month);
+  let found: number | null = null;
+  for (const p of points) {
+    if (p.date > end) break;
+    found = p.cents;
+  }
+  return found;
+}
+
+export interface WorthRow {
+  month: string;
+  groups: Record<Group, number>; // debt is the amount owed, positive
+  mortgage: number; // the part of debt that's a mortgage, so the home can be left out as a whole
+  net: number;
+}
+
+export function worthByMonth(worth: Worth, months: string[], owner: string | null = null): WorthRow[] {
+  const accounts = worth.accounts.filter((a) => !owner || a.owner === owner);
+  const points = new Map(accounts.map((a) => [a.id, pointsFor(a, worth)]));
+  return months.map((month) => {
+    const groups: Record<Group, number> = { cash: 0, invested: 0, retirement: 0, property: 0, debt: 0 };
+    let mortgage = 0;
+    for (const a of accounts) {
+      const value = balanceAt(points.get(a.id)!, month);
+      const group = worth.types[a.type]?.group;
+      if (value === null || !group) continue;
+      groups[group] += value;
+      if (a.type === "mortgage") mortgage += value;
+    }
+    const assets = ASSET_GROUPS.reduce((n, g) => n + groups[g], 0);
+    return { month, groups, mortgage, net: assets - groups.debt };
+  });
+}
+
+/** The same rows without the home: property and mortgages left out together. */
+export function withoutHome(rows: WorthRow[]): WorthRow[] {
+  return rows.map((r) => ({
+    ...r,
+    net: r.net - r.groups.property + r.mortgage,
+    groups: { ...r.groups, property: 0, debt: r.groups.debt - r.mortgage },
+    mortgage: 0,
+  }));
+}
+
+/** The months from the first balance anyone has to the latest. */
+export function worthMonths(worth: Worth): string[] {
+  const dates = [...worth.found.map((f) => f.date), ...worth.balances.map((b) => b.date)].sort();
+  if (!dates.length) return [];
+  return monthRange(monthOf(dates[0]), monthOf(dates[dates.length - 1]));
+}
+
+/** Statement accounts not linked to any account yet, one entry per account number and person. */
+export function unlinked(worth: Worth) {
+  const linked = new Set(worth.accounts.filter((a) => a.match).map((a) => `${a.match}|${a.owner}`));
+  const jointLinked = new Set(worth.accounts.filter((a) => a.match && a.owner === "joint").map((a) => a.match));
+  const groups = new Map<
+    string,
+    { ref: string; kind: "bank" | "card"; person: string; count: number; latest: FoundBalance }
+  >();
+  for (const f of worth.found) {
+    if (linked.has(`${f.ref}|${f.person}`) || jointLinked.has(f.ref)) continue;
+    const key = `${f.ref}|${f.person}`;
+    const g = groups.get(key);
+    if (!g) groups.set(key, { ref: f.ref, kind: f.kind, person: f.person, count: 1, latest: f });
+    else {
+      g.count++;
+      if (f.date > g.latest.date) g.latest = f;
+    }
+  }
+  return [...groups.values()];
+}
+
+/** Income, spending and the share of income kept, over the given months (household-wide: both of you). */
+export function savingsRate(txns: Txn[], months: string[], income: string) {
+  const inRange = new Set(months);
+  let earned = 0;
+  let spent = 0;
+  for (const t of txns) {
+    if (!inRange.has(monthOf(t.date))) continue;
+    if (t.category === income) earned += t.cents;
+    else spent += t.cents;
+  }
+  return { earned, spent, kept: earned - spent, rate: earned > 0 ? (earned - spent) / earned : null };
+}

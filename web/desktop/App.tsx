@@ -22,6 +22,7 @@ import ChangesView from "./ChangesView";
 import ExportDialog from "./ExportDialog";
 import MonthChart, { Sparkline } from "./MonthChart";
 import RecurringView from "./RecurringView";
+import WorthView from "./WorthView";
 import YearView from "./YearView";
 
 const PRESETS: { id: Preset; label: string }[] = [
@@ -32,13 +33,14 @@ const PRESETS: { id: Preset; label: string }[] = [
 ];
 
 type Theme = "system" | "light" | "dark";
-type Screen = "overview" | "changes" | "recurring" | "year";
+type Screen = "overview" | "changes" | "recurring" | "year" | "worth";
 
 const SCREENS: { id: Screen; label: string }[] = [
   { id: "overview", label: "Where the money goes" },
   { id: "changes", label: "What changed" },
   { id: "recurring", label: "Recurring charges" },
   { id: "year", label: "Year in review" },
+  { id: "worth", label: "Net worth" },
 ];
 
 function useTheme(): [Theme, (t: Theme) => void] {
@@ -274,7 +276,7 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
           </NavGroup>
         )}
 
-        {people.length > 1 && (
+        {people.length > 1 && screen !== "worth" && (
           <NavGroup title="Whose">
             <NavItem on={!f.person} onClick={() => set({ person: null })}>
               Both of you
@@ -287,17 +289,19 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
           </NavGroup>
         )}
 
-        <NavGroup title="Type">
-          <NavItem on={!f.kind} onClick={() => set({ kind: null })}>
-            Everything
-          </NavItem>
-          {(["shared", "personal"] as Kind[]).map((k) => (
-            <NavItem key={k} on={f.kind === k} onClick={() => set({ kind: k })}>
-              <span className={`swatch ${k}`} />
-              {k === "shared" ? "Shared" : "Personal"}
+        {screen !== "worth" && (
+          <NavGroup title="Type">
+            <NavItem on={!f.kind} onClick={() => set({ kind: null })}>
+              Everything
             </NavItem>
-          ))}
-        </NavGroup>
+            {(["shared", "personal"] as Kind[]).map((k) => (
+              <NavItem key={k} on={f.kind === k} onClick={() => set({ kind: k })}>
+                <span className={`swatch ${k}`} />
+                {k === "shared" ? "Shared" : "Personal"}
+              </NavItem>
+            ))}
+          </NavGroup>
+        )}
 
         <div className="side-foot">
           {refiled > 0 && (
@@ -334,6 +338,8 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
       <main className="main">
         {screen === "changes" ? (
           <ChangesView txns={scoped} income={income} onOpen={openInOverview} />
+        ) : screen === "worth" ? (
+          <WorthView txns={txns} income={income} />
         ) : screen === "year" ? (
           <YearView txns={scoped} income={income} onOpen={openInOverview} />
         ) : screen === "recurring" ? (

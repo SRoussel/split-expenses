@@ -17,6 +17,12 @@
   --bar-on: #2a78d6;
   --credit: #0f7a3f;
   --more: #e34948; /* spent more than usual (diverging: red) */
+  /* Net worth groups (a validated categorical set, apart from shared/personal) */
+  --g-cash: #1baf7a;
+  --g-invested: #6250d6;
+  --g-retirement: #eda100;
+  --g-property: #e87ba4;
+  --g-debt: #9a9ea6;
   --less: #2a78d6; /* spent less (diverging: blue) */
   --focus: #2a78d6;
   --side: #ebebe7;
@@ -41,6 +47,16 @@
     --bar-on: #3987e5;
     --credit: #4cc38a;
     --more: #e66767;
+    --g-cash: #199e70;
+    --g-invested: #9085e9;
+    --g-retirement: #c98500;
+    --g-property: #d55181;
+    --g-debt: #6b7079;
+    --g-cash: #199e70;
+    --g-invested: #9085e9;
+    --g-retirement: #c98500;
+    --g-property: #d55181;
+    --g-debt: #6b7079;
     --less: #3987e5;
     --focus: #5598e7;
     --side: #121316;
@@ -467,7 +483,7 @@ kbd {
   border-radius: 6px;
   box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
   padding: 8px 10px;
-  min-width: 170px;
+  min-width: 200px;
   font-size: 12px;
 }
 .tip-title {
@@ -1072,6 +1088,137 @@ button.fact:hover {
 .fact-sub {
   font-size: 12px;
   color: var(--text-2);
+}
+
+/* --- Net worth --- */
+
+.swatch.g-cash,
+.seg.g-cash,
+.month-chart .g-cash {
+  background: var(--g-cash);
+  fill: var(--g-cash);
+}
+.swatch.g-invested,
+.month-chart .g-invested {
+  background: var(--g-invested);
+  fill: var(--g-invested);
+}
+.swatch.g-retirement,
+.month-chart .g-retirement {
+  background: var(--g-retirement);
+  fill: var(--g-retirement);
+}
+.swatch.g-property,
+.month-chart .g-property {
+  background: var(--g-property);
+  fill: var(--g-property);
+}
+.swatch.g-debt,
+.month-chart .g-debt {
+  background: var(--g-debt);
+  fill: var(--g-debt);
+}
+.swatch.g-net {
+  background: var(--text);
+  height: 2px;
+  border-radius: 1px;
+}
+.net-line {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.net-dot {
+  fill: var(--text);
+  stroke: var(--panel);
+  stroke-width: 2;
+}
+.seg button {
+  border: 0;
+  background: none;
+  padding: 4px 12px;
+  cursor: pointer;
+  color: var(--text-2);
+  font: inherit;
+}
+.seg button.on {
+  background: var(--panel-2);
+  color: var(--text);
+  font-weight: 600;
+}
+.worth-start h2 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+.worth-start .hint {
+  margin: 0;
+  max-width: 70ch;
+}
+ul.found {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+ul.found li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+ul.found li:last-child {
+  border-bottom: 0;
+}
+ul.found li > span {
+  display: flex;
+  flex-direction: column;
+}
+ul.found .cell-sub,
+.grid-table td > .cell-sub {
+  margin-left: 0;
+}
+.grid-table td strong + .cell-sub {
+  display: block;
+}
+tr.closed td {
+  opacity: 0.55;
+}
+.field select,
+.balances input {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+.balances input {
+  width: 140px;
+  text-align: right;
+  font-family: var(--mono);
+}
+.balances input[aria-invalid="true"] {
+  border-color: var(--more);
+}
+.balances td {
+  padding: 6px 8px;
+}
+.balances .cell-sub {
+  display: block;
+}
+.check-row.small {
+  font-size: 12px;
+  margin-right: auto;
+  margin-left: 12px;
+}
+.btn.danger {
+  border-color: var(--more);
+  color: var(--more);
 }
 
 /* --- Narrower windows --- */

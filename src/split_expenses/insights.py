@@ -32,8 +32,10 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 try:
+    from . import balances
     from .categories import INCOME, SPENDING, current
 except ImportError:  # run as a plain script
+    import balances
     from categories import INCOME, SPENDING, current
 
 FILES = {"split_transactions.csv": "shared", "personal_transactions.csv": "personal"}
@@ -615,6 +617,30 @@ def downloads_dir():
     return Path.home() / "Downloads"
 
 
+# ---------------------------------------------------------------------------
+# Net worth: your accounts, their balances, and what statements say (balances.py)
+# ---------------------------------------------------------------------------
+
+
+def worth(root):
+    root = Path(root)
+    people = sorted({t["person"] for t in load(root)["transactions"]} | {ME})
+    data = balances.read_accounts(desktop_file(root, "accounts.json"))
+    return {
+        **data,
+        "found": balances.statement_balances(root, ME, desktop_file(root, "statement-balances.json")),
+        "types": {k: {"group": g, "debt": d} for k, (g, d) in balances.TYPES.items()},
+        "people": people,
+        "me": ME,
+    }
+
+
+def change_worth(root, body):
+    people = sorted({t["person"] for t in load(root)["transactions"]} | {ME})
+    balances.change_accounts(desktop_file(root, "accounts.json"), people, body)
+    return worth(root)
+
+
 def rel(path, root):
     try:
         return str(path.relative_to(root)) or "."
@@ -749,6 +775,9 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path.split("?")[0] == "/api/app":
             self.send_json(200, app_status(self.root))
             return
+        if self.path.split("?")[0] == "/api/worth":
+            self.send_json(200, worth(self.root))
+            return
         super().do_GET()
 
     def do_POST(self):
@@ -768,6 +797,7 @@ class Handler(SimpleHTTPRequestHandler):
             "/api/rules": lambda b: remember(self.root, b.get("rules")),
             "/api/export": lambda b: export(self.root, b),
             "/api/app/send": lambda b: send_to_app(self.root, b),
+            "/api/worth": lambda b: change_worth(self.root, b),
         }
         if self.path not in routes:
             self.send_error(404)
@@ -781,7 +811,7 @@ class Handler(SimpleHTTPRequestHandler):
         except (ValueError, AttributeError) as e:
             self.send_json(400, {"error": str(e)})
             return
-        self.send_json(200, result if self.path in ("/api/export", "/api/app/send") else load(self.root))
+        self.send_json(200, result if self.path in ("/api/export", "/api/app/send", "/api/worth") else load(self.root))
 
     def end_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")
