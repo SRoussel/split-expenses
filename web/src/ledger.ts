@@ -121,6 +121,55 @@ export function filterTotals(entries: Entry[], userId: string): { count: number;
   return { count: entries.length, spent, mine };
 }
 
+// ---------------------------------------------------------------------------
+// Name suggestions for the add form
+// ---------------------------------------------------------------------------
+
+export interface NameSuggestion {
+  name: string;
+  /** The category this name had the last time it was used, if any. */
+  category: string | null;
+}
+
+/**
+ * Past expense names matching what's typed, most used first (ties: most recent).
+ * With nothing typed, the most used names. Each name appears once, spelled as it was last used.
+ */
+export function nameSuggestions(entries: Entry[], typed: string, limit = 4): NameSuggestion[] {
+  const q = typed.trim().toLowerCase();
+  const seen = new Map<string, { s: NameSuggestion; count: number; last: string }>();
+  for (const e of entries) {
+    if (e.kind !== "expense" || e.voided_at) continue;
+    const key = e.name.trim().toLowerCase();
+    const when = e.entry_date + e.created_at;
+    const hit = seen.get(key);
+    if (!hit) seen.set(key, { s: { name: e.name.trim(), category: e.category }, count: 1, last: when });
+    else {
+      hit.count++;
+      if (when > hit.last) Object.assign(hit, { s: { name: e.name.trim(), category: e.category }, last: when });
+    }
+  }
+  return [...seen.entries()]
+    .filter(([key]) => (q ? key.includes(q) && key !== q : true))
+    .sort(([ka, a], [kb, b]) =>
+      // Names that start with what's typed come first, then the most used, then the most recent.
+      Number(kb.startsWith(q)) - Number(ka.startsWith(q)) || b.count - a.count || b.last.localeCompare(a.last))
+    .slice(0, limit)
+    .map(([, v]) => v.s);
+}
+
+/** The category last used for exactly this name (ignoring case), or null. */
+export function categoryForName(entries: Entry[], name: string): string | null {
+  const key = name.trim().toLowerCase();
+  if (!key) return null;
+  let best: Entry | null = null;
+  for (const e of entries) {
+    if (e.kind !== "expense" || e.voided_at || !e.category || e.name.trim().toLowerCase() !== key) continue;
+    if (!best || e.entry_date + e.created_at > best.entry_date + best.created_at) best = e;
+  }
+  return best?.category ?? null;
+}
+
 export function describeBalance(balanceCents: number, partnerName: string): string {
   if (balanceCents > 0) return `${partnerName} owes you ${fmt(balanceCents)}`;
   if (balanceCents < 0) return `You owe ${partnerName} ${fmt(balanceCents)}`;

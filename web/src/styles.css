@@ -2,7 +2,8 @@
    The app is a till receipt coming off a grey roll. The ledger is printed on it line by line,
    with dotted leaders from each name to its amount and a torn edge at the end. The spending tab
    is the same paper read as an adding-machine tape: tallies, subtotals and printed bars.
-   One monospace face for anything printed (numbers, names, labels); a plain sans for sentences. */
+   One monospace face for anything printed (numbers, labels, headings); a plain sans for names
+   people typed and for sentences, so a long list stays easy to read. */
 
 :root {
   --roll: #e2e6e3; /* the page behind the paper */
@@ -491,6 +492,21 @@ button.icon-btn {
   color: var(--warn-text);
 }
 
+.chips.suggestions button.chip {
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--sans);
+  font-size: 0.85rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+label.custom-share {
+  margin-top: 10px;
+}
+
 .preview {
   background: var(--paper-2);
   color: var(--ink);
@@ -755,11 +771,9 @@ button.entry-btn:active:not(:disabled) {
 
 .entry-name {
   grid-area: name;
-  font-family: var(--mono);
-  font-size: 0.9rem;
+  font-family: var(--sans);
+  font-size: 0.98rem;
   font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -787,6 +801,57 @@ button.entry-btn:active:not(:disabled) {
 .repeat {
   color: var(--stamp);
   font-weight: 700;
+}
+
+/* Payments between you: quieter than expenses, with a small PAID stamp. */
+.entries li.payment .entry-name {
+  color: var(--faded);
+}
+
+.entries li.payment .amount {
+  color: var(--faded);
+}
+
+.paid-stamp {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 0 5px;
+  border: 1.5px solid var(--stamp);
+  color: var(--stamp);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  line-height: 1.5;
+  text-transform: uppercase;
+  vertical-align: 2px;
+  transform: rotate(-3deg);
+}
+
+/* End of each month: the net change to the balance, like a receipt subtotal. */
+.entries li.subtotal {
+  display: grid;
+  grid-template-columns: auto minmax(14px, 1fr) auto;
+  column-gap: 6px;
+  align-items: baseline;
+  margin-top: 2px;
+  padding: 8px 2px 2px;
+  border-top: 1px dashed var(--rule);
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faded);
+}
+
+.entries li.subtotal .lead {
+  grid-area: auto;
+}
+
+.entries li.subtotal .amount {
+  font-size: 0.86rem;
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 .empty {
@@ -1029,6 +1094,15 @@ button.danger-link {
 }
 
 /* Who's covered: one printed line per person. */
+.coverage-title {
+  margin: 0 0 2px;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faded);
+}
+
 .coverage {
   margin: 10px 0 0;
   display: flex;
@@ -1549,6 +1623,22 @@ details.chart-table.wide table {
 @keyframes fade-in {
   from {
     opacity: 0;
+  }
+}
+
+/* A new entry comes out of the printer: revealed top to bottom in a few jerky steps. */
+.entries li.printed {
+  animation: print 420ms steps(5, end);
+}
+
+@keyframes print {
+  from {
+    clip-path: inset(0 0 100% 0);
+    transform: translateY(-6px);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    transform: none;
   }
 }
 

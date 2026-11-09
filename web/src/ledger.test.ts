@@ -5,9 +5,11 @@ import { readFileSync } from "node:fs";
 import {
   activeFilterCount,
   balanceFor,
+  categoryForName,
   filterTotals,
   isFiltering,
   matchesFilter,
+  nameSuggestions,
   NO_FILTER,
   type EntryFilter,
   describeBalance,
@@ -273,4 +275,30 @@ test("search and filters", () => {
   const voided = entry({ kind: "expense", payer_id: ME, amount_cents: 999, owed_cents: 500, voided_at: "2026-04-03T00:00:00Z" });
   assert.deepEqual(filterTotals([...all, voided], ME), { count: 4, spent: 208420, mine: 4210 + 100000 },
     "expenses only, not voided; my share is what I paid for myself plus what I owe");
+});
+
+test("name suggestions and remembered categories", () => {
+  const e = (name: string, category: string | null, entry_date: string, extra: Partial<Entry> = {}) =>
+    entry({ kind: "expense", payer_id: ME, amount_cents: 100, owed_cents: 50, name, category, entry_date, ...extra });
+  const all = [
+    e("Rent", null, "2026-01-01"),
+    e("rent", "household", "2026-02-01"),
+    e("Rent", "household", "2026-03-01"),
+    e("Costco run", "groceries", "2026-02-10"),
+    e("Costco run", "household", "2026-03-10"),
+    e("Trader Joe's", "groceries", "2026-03-12"),
+    e("Gone", "gift", "2026-03-13", { voided_at: "2026-03-14T00:00:00Z" }),
+    entry({ kind: "settlement", payer_id: ME, amount_cents: 100, owed_cents: 100, name: "Settlement" }),
+  ];
+  const names = (typed: string) => nameSuggestions(all, typed).map((s) => s.name);
+  assert.deepEqual(names(""), ["Rent", "Costco run", "Trader Joe's"], "most used first; no voided or payments");
+  assert.deepEqual(names("co"), ["Costco run"]);
+  assert.deepEqual(names("r"), ["Rent", "Costco run", "Trader Joe's"], "starts-with first, then most used");
+  assert.deepEqual(names("o"), ["Costco run", "Trader Joe's"], "contains, most used first");
+  assert.deepEqual(names("RENT"), [], "an exact match isn't suggested back");
+  assert.deepEqual(nameSuggestions(all, "cost")[0], { name: "Costco run", category: "household" }, "latest category");
+  assert.equal(categoryForName(all, " costco RUN "), "household");
+  assert.equal(categoryForName(all, "Rent"), "household");
+  assert.equal(categoryForName(all, "Gone"), null, "voided entries don't count");
+  assert.equal(categoryForName(all, "new thing"), null);
 });

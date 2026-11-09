@@ -77,6 +77,17 @@ export default function LedgerScreen({
   const [voiding, setVoiding] = useState<Entry | null>(null);
   const [showVoided, setShowVoided] = useState(false);
   const [filter, setFilter] = useState(NO_FILTER);
+  // Entries that weren't there on the previous load "print" in (see .printed in styles.css).
+  const knownIds = useRef<Set<string> | null>(null);
+  const [freshIds, setFreshIds] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!loaded) return;
+    const prev = knownIds.current;
+    knownIds.current = new Set(entries.map((e) => e.id));
+    if (!prev) return; // first load: nothing is new
+    const fresh = entries.filter((e) => !prev.has(e.id)).map((e) => e.id);
+    if (fresh.length) setFreshIds(new Set(fresh));
+  }, [entries, loaded]);
   const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const clearToast = useCallback(() => setToast(null), []);
@@ -292,11 +303,13 @@ export default function LedgerScreen({
                   key={e.id}
                   entry={e}
                   userId={userId}
-                  who={nameOf(e.payer_id)}
+                  partnerName={partnerName}
+                  fresh={freshIds.has(e.id)}
                   addedBy={e.created_by !== userId ? nameOf(e.created_by) : null}
                   onOpen={() => setSelectedId(e.id)}
                 />
               ))}
+              <MonthSubtotal entries={m.items} userId={userId} month={m.label} />
             </ul>
           </section>
         ))
@@ -399,7 +412,13 @@ export default function LedgerScreen({
 
       {panel === "add" && me && partner && (
         <Modal title="Add expense" onClose={closePanel}>
-          <AddExpenseForm me={me} partner={partner} save={addEntry} onSaved={() => saved("Expense added")} />
+          <AddExpenseForm
+            me={me}
+            partner={partner}
+            history={entries}
+            save={addEntry}
+            onSaved={() => saved("Expense added")}
+          />
         </Modal>
       )}
 
@@ -602,10 +621,12 @@ export default function LedgerScreen({
 
             <h2 className="section-label">Reset</h2>
             <div className="menu">
-              <button className="danger-item" disabled={voidedCount === 0} onClick={() => setPanel("purge")}>
-                Delete voided and edited history
-                <span className="menu-value">{voidedCount}</span>
-              </button>
+              {voidedCount > 0 && (
+                <button className="danger-item" onClick={() => setPanel("purge")}>
+                  Delete voided and edited history
+                  <span className="menu-value">{voidedCount}</span>
+                </button>
+              )}
               <button
                 className="danger-item"
                 disabled={entries.length === 0 && recurring.length === 0}
@@ -661,37 +682,47 @@ const myPctOf = (e: Entry, userId: string) => {
   return e.payer_id === userId ? payerPct : 100 - payerPct;
 };
 
+/** The second line of a row, in words: who paid, and who owes whom because of it. */
+function rowDetail(e: Entry, userId: string, partnerName: string): string {
+  const day = dayFmt.format(asDate(e.entry_date));
+  if (e.kind === "opening") return `${day} · Starting balance`;
+  const iPaid = e.payer_id === userId;
+  if (e.kind === "settlement") return `${day} · ${iPaid ? `You paid ${partnerName}` : `${partnerName} paid you`}`;
+  const paid = `${iPaid ? "You" : partnerName} paid ${fmt(e.amount_cents)}`;
+  if (e.owed_cents === 0) return `${day} · ${paid} · all ${iPaid ? "yours" : "theirs"}`;
+  // The amount owed is the number on the right; this line just says which way it goes.
+  return `${day} · ${paid} · ${iPaid ? `${partnerName} owes you` : `you owe ${partnerName}`}`;
+}
+
 function EntryRow({
   entry: e,
   userId,
-  who,
+  partnerName,
+  fresh,
   addedBy,
   onOpen,
 }: {
   entry: Entry;
   userId: string;
-  who: string;
+  partnerName: string;
+  fresh: boolean;
   addedBy: string | null;
   onOpen: () => void;
 }) {
-  const day = dayFmt.format(asDate(e.entry_date));
-
-  let detail: string;
-  if (e.kind === "opening") {
-    detail = `${day} · Starting balance`;
-  } else {
-    const myPct = myPctOf(e, userId);
-    detail =
-      `${day} · ${who} paid ${fmt(e.amount_cents)}` +
-      (e.kind === "expense" && myPct !== 50 ? ` · ${pctText(myPct)}% yours` : "");
-  }
+  let detail = rowDetail(e, userId, partnerName);
   if (addedBy) detail += ` · added by ${addedBy}`;
   if (e.voided_at) detail += e.replaced_by ? " · edited" : " · voided";
+  const payment = e.kind === "settlement";
 
   return (
-    <li className={e.voided_at ? "voided" : ""}>
-      <button className="entry-btn" onClick={onOpen} aria-label={`${e.name}, details`}>
+    <li className={[e.voided_at && "voided", payment && "payment", fresh && "printed"].filter(Boolean).join(" ") || undefined}>
+      <button className="entry-btn" onClick={onOpen} aria-label={`${e.name}, ${detail}. Details`}>
         <span className="entry-name">
+          {payment && (
+            <span className="paid-stamp" aria-hidden="true">
+              Paid
+            </span>
+          )}
           {e.recurring_id && (
             <span className="repeat" aria-label="Recurring: ">
               ↻{" "}
@@ -703,6 +734,23 @@ function EntryRow({
         <EffectAmount entry={e} userId={userId} />
         <span className="entry-detail">{detail}</span>
       </button>
+    </li>
+  );
+}
+
+/** The month's net change to the balance, printed like a receipt subtotal. Voided entries don't count. */
+function MonthSubtotal({ entries, userId, month }: { entries: Entry[]; userId: string; month: string }) {
+  const active = entries.filter((e) => !e.voided_at);
+  if (active.length < 2) return null;
+  const net = active.reduce((n, e) => n + effectFor(e, userId), 0);
+  return (
+    <li className="subtotal" aria-label={`${month}: the balance changed by ${net < 0 ? "minus " : ""}${fmt(net)}`}>
+      <span>Subtotal</span>
+      <span className="lead" aria-hidden="true" />
+      <span className={`amount ${net > 0 ? "pos" : net < 0 ? "neg" : "muted"}`}>
+        {net > 0 ? "+" : net < 0 ? "−" : ""}
+        {fmt(net)}
+      </span>
     </li>
   );
 }

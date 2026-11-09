@@ -135,7 +135,8 @@ Sign in with email and password. That's deliberate, rather than emailed sign-in 
 
 ## Using it
 
-- **Add expense**: amount, name, who paid, and your share. Your share starts at your default split (see below), and there are quick buttons for "Split evenly", "All theirs" and "All mine".
+- **Add expense**: amount, name, who paid, and your share. Under the name you get names you've used before; tap one and it also fills in the category you gave it last time (until you pick a category yourself). Your share is a row of quick picks starting at your default split (see below): "Split evenly", "All theirs", "All mine", or "Custom…" for any percentage.
+- **Reading the list**: each row says who paid and who owes whom, like "You paid $184.32 · Sam owes you", and the amount on the right is what that entry adds to the balance (green: owed to you, red: you owe). Payments between you are greyed out with a PAID stamp, and each month ends with a subtotal: how much that month moved the balance.
 - **Search and filters**, under the balance: type part of a name, a category or an exact amount (`84.20`). **Filters** narrows by type (expenses or payments), who paid, category and a date range. The line under them counts what matches, with what was spent and your share of it (expenses only, not voided ones), and **Clear** resets everything. Imported statements are split across categories, so the category filter doesn't find them; the Spending tab does.
 - **Tap any entry** to see the details: who paid, the split, who added it and when. Entries your partner added say "added by …" in the list.
 - **Edit**: from an entry's details. The original isn't overwritten. It's kept in the history, marked "edited", and the corrected copy takes its place. The type (expense, payment, starting balance) can't change in an edit.

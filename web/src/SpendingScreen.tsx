@@ -330,15 +330,20 @@ function CoverageStrips({
 }) {
   return (
     <div className="coverage" aria-label="Days covered by statement uploads">
+      <p className="coverage-title" aria-hidden="true">
+        Statements uploaded
+      </p>
       {people.map((p) => {
         const c = coverage(batches, p, month);
         const who = nameOf(p);
+        // In words: "whole month", "nothing yet", or the days covered, like "Nov 1–5, 12–20".
+        const monthName = new Date(`${month}-01T00:00:00Z`).toLocaleDateString(undefined, { month: "short", timeZone: "UTC" });
         const text =
           c.covered === 0
-            ? "none"
+            ? "nothing yet"
             : c.covered === c.days
               ? "whole month"
-              : `${c.ranges.map(([s, e]) => (s === e ? `${s}` : `${s}–${e}`)).join(", ")} · ${c.covered}/${c.days}`;
+              : `${monthName} ${c.ranges.map(([s, e]) => (s === e ? `${s}` : `${s}–${e}`)).join(", ")}`;
         return (
           <div key={p} className={`coverage-row${c.covered < c.days ? " partial" : ""}`}>
             <span className="coverage-who" title={who}>
@@ -354,7 +359,7 @@ function CoverageStrips({
               ))}
             </span>
             <span className="coverage-text">
-              <span className="visually-hidden">{who}'s statements cover: </span>
+              <span className="visually-hidden">{who}'s uploads cover: </span>
               {text}
             </span>
           </div>

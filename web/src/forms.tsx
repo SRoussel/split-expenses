@@ -1,14 +1,25 @@
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { categoryLabel, SPENDING_CATEGORIES } from "../shared/categories";
 import { describeSchedule, occurrenceDate, type Frequency } from "../shared/recurring";
 import { changePassword, createRecurring, setDefaultSplit, updateRecurring } from "./api";
-import { fmt, owedCents, parseDollars, payerSharePct, SHARE_ERROR, todayLocal } from "./ledger";
+import {
+  categoryForName,
+  fmt,
+  nameSuggestions,
+  owedCents,
+  parseDollars,
+  payerSharePct,
+  SHARE_ERROR,
+  todayLocal,
+} from "./ledger";
 import type { Entry, Member, NewEntry, Recurring } from "./types";
 import { ErrorText, MoneyInput, PasswordInput, Segmented } from "./ui";
 
 /** Shared by the entry forms: `save` adds a new entry or edits `initial`, depending on the caller. */
 interface EntryFormProps {
   me: Member;
+  /** Past entries, for name suggestions and remembered categories. */
+  history?: Entry[];
   partner: Member;
   save: (entry: NewEntry) => Promise<unknown>;
   onSaved: () => void;
@@ -64,7 +75,10 @@ function PayerToggle({
   );
 }
 
-/** "Your share (%)" with quick picks: your usual split first (if it isn't 50/50), then the common ones. */
+/**
+ * Your share, as quick picks: your usual split first (if it isn't 50/50), then the common ones.
+ * "Custom…" shows a box for anything else, and stays open when the value isn't one of the picks.
+ */
 function ShareField({ me, value, onChange }: { me: Member; value: string; onChange: (v: string) => void }) {
   const usual = pctText(me.share_pct);
   const chips: [string, string][] = [
@@ -73,18 +87,40 @@ function ShareField({ me, value, onChange }: { me: Member; value: string; onChan
     ["0", "All theirs"],
     ["100", "All mine"],
   ];
+  const [custom, setCustom] = useState(() => !chips.some(([v]) => v === value.trim()));
   return (
-    <label>
-      Your share (%)
-      <input inputMode="decimal" value={value} onChange={(e) => onChange(e.target.value)} />
-      <span className="chips">
-        {chips.map(([v, label]) => (
-          <button key={v} type="button" className={value.trim() === v ? "chip on" : "chip"} onClick={() => onChange(v)}>
-            {label}
-          </button>
-        ))}
+    <div>
+      <span className="label">Your share</span>
+      <span className="chips" role="radiogroup" aria-label="Your share">
+        {chips.map(([v, label]) => {
+          const on = !custom && value.trim() === v;
+          return (
+            <button
+              key={v}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              className={on ? "chip on" : "chip"}
+              onClick={() => {
+                setCustom(false);
+                onChange(v);
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
+        <button type="button" role="radio" aria-checked={custom} className={custom ? "chip on" : "chip"} onClick={() => setCustom(true)}>
+          Custom…
+        </button>
       </span>
-    </label>
+      {custom && (
+        <label className="custom-share">
+          Your share (%)
+          <input inputMode="decimal" value={value} autoFocus onChange={(e) => onChange(e.target.value)} />
+        </label>
+      )}
+    </div>
   );
 }
 
@@ -121,7 +157,7 @@ function OwedPreview({ owed, payer, partner, suffix = "" }: { owed: number | nul
 // Expense
 // ---------------------------------------------------------------------------
 
-export function AddExpenseForm({ me, partner, save, onSaved, initial }: EntryFormProps) {
+export function AddExpenseForm({ me, partner, save, onSaved, initial, history = [] }: EntryFormProps) {
   const initialPayer = initial ? (initial.payer_id === me.user_id ? "me" : "partner") : "me";
   // payer_share_pct is the payer's share; the field shows *your* share.
   const initialMyShare = initial
@@ -134,7 +170,18 @@ export function AddExpenseForm({ me, partner, save, onSaved, initial }: EntryFor
   const [myShare, setMyShare] = useState(initialMyShare);
   const [date, setDate] = useState(initial?.entry_date ?? todayLocal());
   const [category, setCategory] = useState(initial?.category ?? "");
+  // Once you pick a category yourself, the name stops changing it.
+  const [categoryTouched, setCategoryTouched] = useState(Boolean(initial));
+  const [nameFocused, setNameFocused] = useState(false);
   const { busy, error, setError, run } = useSubmit(onSaved);
+  const suggestions = useMemo(() => nameSuggestions(history, name), [history, name]);
+
+  function changeName(next: string, suggestedCategory?: string | null) {
+    setName(next);
+    if (categoryTouched) return;
+    const remembered = suggestedCategory !== undefined ? suggestedCategory : categoryForName(history, next);
+    setCategory(remembered ?? "");
+  }
 
   const cents = parseDollars(amount);
   const payerShare = payerSharePct(myShare, payer);
@@ -171,12 +218,37 @@ export function AddExpenseForm({ me, partner, save, onSaved, initial }: EntryFor
           value={name}
           maxLength={200}
           enterKeyHint="done"
-          onChange={(e) => setName(e.target.value)}
+          autoComplete="off"
+          onChange={(e) => changeName(e.target.value)}
+          onFocus={() => setNameFocused(true)}
+          onBlur={() => setNameFocused(false)}
         />
+        {!initial && (nameFocused || !name) && suggestions.length > 0 && (
+          <span className="chips suggestions" aria-label="Past names">
+            {suggestions.map((sg) => (
+              <button
+                key={sg.name}
+                type="button"
+                className="chip"
+                // Keep the field focused so the list doesn't vanish before the tap lands.
+                onPointerDown={(ev) => ev.preventDefault()}
+                onClick={() => changeName(sg.name, sg.category)}
+              >
+                {sg.name}
+              </button>
+            ))}
+          </span>
+        )}
       </label>
       <PayerToggle value={payer} onChange={setPayer} partner={partner} />
       <ShareField me={me} value={myShare} onChange={setMyShare} />
-      <CategoryField value={category} onChange={setCategory} />
+      <CategoryField
+        value={category}
+        onChange={(c) => {
+          setCategoryTouched(true);
+          setCategory(c);
+        }}
+      />
       <label>
         Date
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />

@@ -27,8 +27,8 @@ export default function LedgerFilters({
           type="search"
           value={filter.text}
           onChange={(e) => set("text", e.target.value)}
-          placeholder="Search name, category or amount"
-          aria-label="Search entries"
+          placeholder="Search"
+          aria-label="Search entries by name, category or amount"
           enterKeyHint="search"
         />
         <button
