@@ -3,6 +3,7 @@
 
 import { useMemo } from "react";
 import { findRecurring, type Filters, type Recurring, type Txn } from "./analytics";
+import Lede, { Fig } from "./Lede";
 import { categoryLabel, dayLabel, money, moneyRound } from "./format";
 import { Sparkline } from "./MonthChart";
 
@@ -27,42 +28,21 @@ export default function RecurringView({
 
   return (
     <>
-      <header className="top">
-        <div>
-          <h1>Recurring charges</h1>
-          <p className="sub">
-            Merchants that charge on a steady schedule. Subscriptions, memberships and bills, found from your
-            transactions.
-          </p>
-        </div>
-      </header>
-
-      <section className="kpis">
-        <div className="kpi">
-          <div className="kpi-label">Active</div>
-          <div className="kpi-value">{active.length}</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">A month, about</div>
-          <div className="kpi-value">{moneyRound(perYear / 12)}</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">A year, about</div>
-          <div className="kpi-value">{moneyRound(perYear)}</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">Price changes</div>
-          <div className="kpi-value">{changed.length}</div>
-          {changed.length > 0 && (
-            <div className="kpi-delta">
-              {changed
-                .slice(0, 2)
-                .map((r) => r.merchant)
-                .join(", ")}
-            </div>
-          )}
-        </div>
-      </section>
+      <Lede
+        eyebrow="Recurring charges · subscriptions, memberships and bills that come round on their own"
+        stats={[
+          `about ${moneyRound(perYear)} a year`,
+          changed.length > 0 &&
+            `price changed: ${changed
+              .slice(0, 3)
+              .map((r) => r.merchant)
+              .join(", ")}`,
+          stopped.length > 0 && `${stopped.length} stopped`,
+        ]}
+      >
+        <Fig>{active.length}</Fig> charge{active.length === 1 ? "" : "s"} come round on their own, about{" "}
+        <Fig>{moneyRound(perYear / 12)}</Fig> a month.
+      </Lede>
 
       <section className="panel">
         <div className="panel-head">

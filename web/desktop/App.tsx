@@ -20,7 +20,8 @@ import {
 import { categoryLabel, dayLabel, money, moneyRound, monthName, percent, personLabel, rangeLabel } from "./format";
 import ChangesView from "./ChangesView";
 import ExportDialog from "./ExportDialog";
-import MonthChart, { Sparkline } from "./MonthChart";
+import Lede, { Fig } from "./Lede";
+import MonthChart from "./MonthChart";
 import RecurringView from "./RecurringView";
 import WorthView from "./WorthView";
 import YearView from "./YearView";
@@ -172,11 +173,6 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
     () => byCategory(applyFilters(txns, f, "category"), months, income),
     [txns, f, months, income],
   );
-  // Sparklines show the whole period even when one month is picked.
-  const trend = useMemo(() => {
-    const rows = byCategory(applyFilters(txns, { ...f, month: null }, "category"), months, income);
-    return new Map(rows.map((r) => [r.category, r.perMonth]));
-  }, [txns, f, months, income]);
   // Every merchant name on the page, and the cleaned-up names each one covers.
   const autosByMerchant = useMemo(() => {
     const out = new Map<string, Set<string>>();
@@ -240,7 +236,18 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
   const refiled = useMemo(() => txns.filter((t) => t.original).length, [txns]);
   const scope = f.month ? monthName(f.month) : rangeLabel(f.from, f.to);
   const what = f.category ? categoryLabel(f.category) : f.merchant ? f.merchant : "Spending";
-  const vs = f.month ? "vs the month before" : "vs the period before";
+  const when = f.month
+    ? `in ${monthName(f.month)}`
+    : preset === "12m"
+      ? "in the last 12 months"
+      : preset === "ytd"
+        ? "so far this year"
+        : preset === "last-year"
+          ? "last year"
+          : preset === "all"
+            ? "in all"
+            : `from ${rangeLabel(f.from, f.to)}`;
+  const spentChange = delta("spent");
   const chips: { label: string; clear: () => void }[] = [
     f.month && { label: monthName(f.month), clear: () => set({ month: null }) },
     f.category && { label: categoryLabel(f.category), clear: () => set({ category: null }) },
@@ -254,54 +261,19 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
     <div className="shell">
       <aside className="side">
         <div className="brand">
-          <span className="logo" aria-hidden="true" />
-          Split <span className="brand-sub">Insights</span>
+          <span className="logo" aria-hidden="true">
+            S
+          </span>
+          SPLIT
         </div>
 
-        <NavGroup title="View">
+        <nav className="nav-group" aria-label="Views">
           {SCREENS.map((v) => (
             <NavItem key={v.id} on={screen === v.id} onClick={() => setScreen(v.id)}>
               {v.label}
             </NavItem>
           ))}
-        </NavGroup>
-
-        {screen === "overview" && (
-          <NavGroup title="Period">
-            {PRESETS.map((p) => (
-              <NavItem key={p.id} on={preset === p.id} onClick={() => choosePreset(p.id)}>
-                {p.label}
-              </NavItem>
-            ))}
-          </NavGroup>
-        )}
-
-        {people.length > 1 && screen !== "worth" && (
-          <NavGroup title="Whose">
-            <NavItem on={!f.person} onClick={() => set({ person: null })}>
-              Both of you
-            </NavItem>
-            {people.map((p) => (
-              <NavItem key={p} on={f.person === p} onClick={() => set({ person: p })}>
-                {personLabel(p, me)}
-              </NavItem>
-            ))}
-          </NavGroup>
-        )}
-
-        {screen !== "worth" && (
-          <NavGroup title="Type">
-            <NavItem on={!f.kind} onClick={() => set({ kind: null })}>
-              Everything
-            </NavItem>
-            {(["shared", "personal"] as Kind[]).map((k) => (
-              <NavItem key={k} on={f.kind === k} onClick={() => set({ kind: k })}>
-                <span className={`swatch ${k}`} />
-                {k === "shared" ? "Shared" : "Personal"}
-              </NavItem>
-            ))}
-          </NavGroup>
-        )}
+        </nav>
 
         <div className="side-foot">
           {refiled > 0 && (
@@ -336,180 +308,205 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
       </aside>
 
       <main className="main">
-        {screen === "changes" ? (
-          <ChangesView txns={scoped} income={income} onOpen={openInOverview} />
-        ) : screen === "worth" ? (
-          <WorthView txns={txns} income={income} />
-        ) : screen === "year" ? (
-          <YearView txns={scoped} income={income} onOpen={openInOverview} />
-        ) : screen === "recurring" ? (
-          <RecurringView txns={scoped} income={income} today={txns[0].date} onOpen={openInOverview} />
-        ) : (
-          <>
-            <header className="top">
-              <div>
-                <h1>Where the money goes</h1>
-                <p className="sub">{scope}</p>
-              </div>
-              <div className="top-actions">
-                <label className="search">
-                  <span className="sr-only">Search transactions</span>
-                  <input
-                    ref={search}
-                    type="search"
-                    placeholder="Search merchants, categories, amounts"
-                    value={f.query}
-                    onChange={(e) => set({ query: e.target.value })}
-                  />
-                  <kbd>/</kbd>
+        <div className="sheet">
+          {screen !== "worth" && (
+            <form className="filterbar" aria-label="Filters" onSubmit={(e) => e.preventDefault()}>
+              {screen === "overview" && (
+                <label>
+                  Period
+                  <select
+                    value={preset ?? "custom"}
+                    onChange={(e) => e.target.value !== "custom" && choosePreset(e.target.value as Preset)}
+                  >
+                    {PRESETS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}
+                      </option>
+                    ))}
+                    {preset === null && <option value="custom">{rangeLabel(f.from, f.to)}</option>}
+                  </select>
                 </label>
-                <button className="btn" onClick={() => setExporting(true)}>
-                  Export for phone app
-                </button>
-              </div>
-            </header>
+              )}
+              {people.length > 1 && (
+                <label>
+                  Whose
+                  <select value={f.person ?? ""} onChange={(e) => set({ person: e.target.value || null })}>
+                    <option value="">Both of you</option>
+                    {people.map((p) => (
+                      <option key={p} value={p}>
+                        {personLabel(p, me)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label>
+                Type
+                <select value={f.kind ?? ""} onChange={(e) => set({ kind: (e.target.value || null) as Kind | null })}>
+                  <option value="">Shared and personal</option>
+                  <option value="shared">Shared</option>
+                  <option value="personal">Personal</option>
+                </select>
+              </label>
+              {screen === "overview" && (
+                <label className="grow">
+                  Search
+                  <span className="search">
+                    <input
+                      ref={search}
+                      type="search"
+                      placeholder="merchant, category or amount"
+                      value={f.query}
+                      onChange={(e) => set({ query: e.target.value })}
+                    />
+                    <kbd>/</kbd>
+                  </span>
+                </label>
+              )}
+              <button type="button" className="btn primary" onClick={() => setExporting(true)}>
+                Export for the phone
+              </button>
+            </form>
+          )}
+          {screen === "changes" ? (
+            <ChangesView txns={scoped} income={income} onOpen={openInOverview} />
+          ) : screen === "worth" ? (
+            <WorthView txns={txns} income={income} />
+          ) : screen === "year" ? (
+            <YearView txns={scoped} income={income} onOpen={openInOverview} />
+          ) : screen === "recurring" ? (
+            <RecurringView txns={scoped} income={income} today={txns[0].date} onOpen={openInOverview} />
+          ) : (
+            <>
+              <Lede
+                eyebrow={`${scope} · ${f.person ? personLabel(f.person, me) : "both of you"}`}
+                stats={[
+                  !f.kind && `shared ${moneyRound(now.shared)}`,
+                  !f.kind && `personal ${moneyRound(now.personal)}`,
+                  now.income > 0 && `money in ${moneyRound(now.income)}`,
+                  now.income > 0 &&
+                    !f.category &&
+                    !f.merchant &&
+                    `kept ${percent((now.income - now.spent) / now.income)}`,
+                  `${now.count.toLocaleString()} purchases`,
+                ]}
+              >
+                {f.person && f.person !== me ? personLabel(f.person, me) : "You"} spent{" "}
+                <Fig>{moneyRound(now.spent)}</Fig>
+                {f.category
+                  ? ` on ${categoryLabel(f.category).toLowerCase()}`
+                  : f.merchant
+                    ? ` at ${f.merchant}`
+                    : ""}{" "}
+                {when}
+                {!f.month && months.length > 1 && (
+                  <>
+                    , <Fig>{moneyRound(now.spent / months.length)}</Fig> a month
+                  </>
+                )}
+                {spentChange !== null && (
+                  <>
+                    , <Fig>{percent(Math.abs(spentChange))}</Fig> {spentChange >= 0 ? "more" : "less"} than the{" "}
+                    {f.month ? "month" : "period"} before
+                  </>
+                )}
+                .
+              </Lede>
 
-            {chips.length > 0 && (
-              <div className="chips">
-                {chips.map((c) => (
-                  <button key={c.label} className="chip" onClick={c.clear} title="Remove this filter">
-                    {c.label} <span aria-hidden="true">×</span>
+              {chips.length > 0 && (
+                <div className="chips">
+                  {chips.map((c) => (
+                    <button key={c.label} className="chip" onClick={c.clear} title="Remove this filter">
+                      {c.label} <span aria-hidden="true">×</span>
+                    </button>
+                  ))}
+                  <button
+                    className="link"
+                    onClick={() =>
+                      set({ month: null, category: null, merchant: null, person: null, kind: null, query: "" })
+                    }
+                  >
+                    Clear all <kbd>Esc</kbd>
                   </button>
-                ))}
-                <button
-                  className="link"
-                  onClick={() =>
-                    set({ month: null, category: null, merchant: null, person: null, kind: null, query: "" })
-                  }
-                >
-                  Clear all <kbd>Esc</kbd>
-                </button>
-              </div>
-            )}
-
-            <section className="kpis">
-              <Kpi label="Spent" value={now.spent} delta={delta("spent")} vs={vs} />
-              <Kpi label="Shared" value={now.shared} delta={delta("shared")} vs={vs} swatch="shared" />
-              <Kpi label="Personal" value={now.personal} delta={delta("personal")} vs={vs} swatch="personal" />
-              {f.month ? (
-                <div className="kpi">
-                  <div className="kpi-label">Transactions</div>
-                  <div className="kpi-value">{now.count}</div>
                 </div>
-              ) : (
-                <Kpi label="Per month" value={Math.round(now.spent / months.length)} />
               )}
-              {f.category || f.merchant ? (
-                <Kpi label="Average transaction" value={now.count ? Math.round(now.spent / now.count) : 0} />
-              ) : (
-                <Kpi label="Money in" value={now.income} delta={delta("income")} vs={vs} />
-              )}
-            </section>
 
-            <section className="panel">
-              <div className="panel-head">
-                <h2>{what} by month</h2>
-                <div className="legend">
-                  <span>
-                    <span className="swatch shared" />
-                    Shared
-                  </span>
-                  <span>
-                    <span className="swatch personal" />
-                    Personal
-                  </span>
-                </div>
-              </div>
-              <MonthChart rows={monthRows} selected={f.month} onSelect={(month) => set({ month })} />
-            </section>
-
-            <div className="split">
               <section className="panel">
                 <div className="panel-head">
-                  <h2>Categories</h2>
-                  <span className="muted">click to filter</span>
+                  <h2>{what} by month</h2>
+                  <div className="legend">
+                    <span>
+                      <span className="swatch shared" />
+                      Shared
+                    </span>
+                    <span>
+                      <span className="swatch personal" />
+                      Personal
+                    </span>
+                  </div>
                 </div>
-                <table className="grid-table">
-                  <thead>
-                    <tr>
-                      <th>Category</th>
-                      <th className="bar-col" aria-label="Share" />
-                      <th className="num">Share</th>
-                      <th className="num">Amount</th>
-                      <th className="spark-col">Trend</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {categories.map((c) => (
-                      <tr
-                        key={c.category}
-                        className={`clickable${f.category === c.category ? " on" : ""}${f.category && f.category !== c.category ? " dim" : ""}`}
-                        onClick={() => set({ category: f.category === c.category ? null : c.category })}
-                      >
-                        <td>
-                          <button className="row-button" aria-pressed={f.category === c.category}>
-                            {categoryLabel(c.category)}
-                          </button>
-                        </td>
-                        <td className="bar-col">
-                          <span
-                            className="hbar"
-                            style={{
-                              width: `${(Math.max(0, c.total) / Math.max(1, categories[0]?.total ?? 1)) * 100}%`,
-                            }}
-                          />
-                        </td>
-                        <td className="num muted">{percent(c.share)}</td>
-                        <td className="num">{moneyRound(c.total)}</td>
-                        <td className="spark-col">
-                          <Sparkline values={trend.get(c.category) ?? []} />
-                        </td>
-                      </tr>
-                    ))}
-                    {categories.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="empty">
-                          Nothing here.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                <MonthChart rows={monthRows} selected={f.month} onSelect={(month) => set({ month })} />
               </section>
 
-              <MerchantsPanel
-                rows={merchants}
-                selected={f.merchant}
-                onSelect={(merchant) => set({ merchant })}
-                autosByMerchant={autosByMerchant}
-                onRename={rename}
-              />
-            </div>
+              <div className="split">
+                <section className="panel">
+                  <div className="panel-head">
+                    <h2>By category</h2>
+                  </div>
+                  <ul className="ledger">
+                    {categories.map((c) => (
+                      <li
+                        key={c.category}
+                        className={`${f.category === c.category ? "on" : ""}${f.category && f.category !== c.category ? " dim" : ""}`}
+                      >
+                        <button
+                          className="ledger-row"
+                          aria-pressed={f.category === c.category}
+                          onClick={() => set({ category: f.category === c.category ? null : c.category })}
+                        >
+                          <span className="ledger-name">{categoryLabel(c.category)}</span>
+                          <span className="leader" aria-hidden="true" />
+                          <span className="ledger-meta">{percent(c.share)}</span>
+                          <span className="ledger-amount">{moneyRound(c.total)}</span>
+                        </button>
+                      </li>
+                    ))}
+                    {categories.length === 0 && <li className="empty">Nothing here.</li>}
+                  </ul>
+                  {categories.length > 0 && (
+                    <div className="ledger-total">
+                      <span>Total</span>
+                      <span>{moneyRound(categories.reduce((n, c) => n + c.total, 0))}</span>
+                    </div>
+                  )}
+                </section>
 
-            <TransactionsPanel
-              txns={view}
-              all={txns}
-              me={me}
-              income={income}
-              categories={data.categories}
-              onMerchant={(merchant) => set({ merchant })}
-              onClassify={(changes) => post("/api/classify", { changes })}
-              onRemember={(rules) => post("/api/rules", { rules })}
-            />
-          </>
-        )}
+                <MerchantsPanel
+                  rows={merchants}
+                  selected={f.merchant}
+                  onSelect={(merchant) => set({ merchant })}
+                  autosByMerchant={autosByMerchant}
+                  onRename={rename}
+                />
+              </div>
+
+              <TransactionsPanel
+                txns={view}
+                all={txns}
+                me={me}
+                income={income}
+                categories={data.categories}
+                onMerchant={(merchant) => set({ merchant })}
+                onClassify={(changes) => post("/api/classify", { changes })}
+                onRemember={(rules) => post("/api/rules", { rules })}
+              />
+            </>
+          )}
+        </div>
+        <div className="torn" aria-hidden="true" />
       </main>
       {exporting && <ExportDialog data={data} onData={onData} onClose={() => setExporting(false)} />}
     </div>
-  );
-}
-
-function NavGroup({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <nav className="nav-group" aria-label={title}>
-      <div className="nav-title">{title}</div>
-      {children}
-    </nav>
   );
 }
 
@@ -518,42 +515,6 @@ function NavItem({ on, onClick, children }: { on: boolean; onClick: () => void; 
     <button className={`nav-item${on ? " on" : ""}`} aria-pressed={on} onClick={onClick}>
       {children}
     </button>
-  );
-}
-
-function Kpi({
-  label,
-  value,
-  delta,
-  vs,
-  swatch,
-}: {
-  label: string;
-  value: number;
-  delta?: number | null;
-  vs?: string;
-  swatch?: Kind;
-}) {
-  return (
-    <div className="kpi">
-      <div className="kpi-label">
-        {swatch && <span className={`swatch ${swatch}`} />}
-        {label}
-      </div>
-      <div className="kpi-value">{moneyRound(value)}</div>
-      {delta !== undefined && (
-        <div className="kpi-delta">
-          {delta === null ? (
-            <span className="muted">no earlier data to compare</span>
-          ) : (
-            <>
-              <span aria-hidden="true">{delta > 0 ? "▲" : delta < 0 ? "▼" : "•"}</span> {percent(Math.abs(delta))}{" "}
-              <span className="muted">{vs}</span>
-            </>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -572,54 +533,38 @@ function MerchantsPanel({
 }) {
   const [all, setAll] = useState(false);
   const shown = all ? rows : rows.slice(0, 12);
-  const top = Math.max(1, ...rows.map((r) => r.total));
   return (
     <section className="panel">
       <div className="panel-head">
-        <h2>Merchants</h2>
-        <span className="muted">{selected ? "" : "pick one to rename or merge it"}</span>
+        <h2>Top merchants</h2>
+        <span className="muted">{selected ? "" : "select one to rename or merge it"}</span>
       </div>
       {selected && autosByMerchant.has(selected) && (
         <MerchantEditor key={selected} name={selected} autosByMerchant={autosByMerchant} onRename={onRename} />
       )}
-      <table className="grid-table">
-        <thead>
-          <tr>
-            <th>Merchant</th>
-            <th className="bar-col" aria-label="Relative amount" />
-            <th className="num">Visits</th>
-            <th className="num">Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          {shown.map((m) => (
-            <tr
-              key={m.merchant}
-              className={`clickable${selected === m.merchant ? " on" : ""}${selected && selected !== m.merchant ? " dim" : ""}`}
+      <ul className="ledger">
+        {shown.map((m) => (
+          <li
+            key={m.merchant}
+            className={`${selected === m.merchant ? "on" : ""}${selected && selected !== m.merchant ? " dim" : ""}`}
+          >
+            <button
+              className="ledger-row"
+              aria-pressed={selected === m.merchant}
               onClick={() => onSelect(selected === m.merchant ? null : m.merchant)}
             >
-              <td>
-                <button className="row-button" aria-pressed={selected === m.merchant}>
-                  {m.merchant}
-                </button>
-                <span className="cell-sub">{categoryLabel(m.category)}</span>
-              </td>
-              <td className="bar-col">
-                <span className="hbar" style={{ width: `${(Math.max(0, m.total) / top) * 100}%` }} />
-              </td>
-              <td className="num muted">{m.count}</td>
-              <td className="num">{moneyRound(m.total)}</td>
-            </tr>
-          ))}
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={4} className="empty">
-                Nothing here.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+              <span className="ledger-name">
+                {m.merchant}
+                <span className="ledger-sub">{categoryLabel(m.category)}</span>
+              </span>
+              <span className="leader" aria-hidden="true" />
+              <span className="ledger-meta">×{m.count}</span>
+              <span className="ledger-amount">{moneyRound(m.total)}</span>
+            </button>
+          </li>
+        ))}
+        {rows.length === 0 && <li className="empty">Nothing here.</li>}
+      </ul>
       {rows.length > 12 && (
         <button className="link more" onClick={() => setAll(!all)}>
           {all ? "Show top 12" : `Show all ${rows.length}`}
@@ -657,6 +602,8 @@ function TransactionsPanel({
 }) {
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "date", desc: true });
   const [limit, setLimit] = useState(100);
+  // The entry being refiled: only it shows the category and type pickers.
+  const [active, setActive] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
@@ -890,7 +837,7 @@ function TransactionsPanel({
         </thead>
         <tbody>
           {sorted.slice(0, limit).map((t, i) => (
-            <tr key={t.id} className={selected.has(t.id) ? "picked" : ""}>
+            <tr key={t.id} className={`${selected.has(t.id) ? "picked" : ""}${active === t.id ? " active" : ""}`}>
               <td className="check">
                 <input
                   type="checkbox"
@@ -907,24 +854,35 @@ function TransactionsPanel({
                 </button>
               </td>
               <td className="nowrap">
-                <select
-                  className="cell-select"
-                  aria-label={`Category for ${t.merchant}`}
-                  value={t.category}
-                  disabled={busy}
-                  onChange={(e) =>
-                    void refile([t], { category: e.target.value }, `Filed as ${categoryLabel(e.target.value)}`)
-                  }
-                >
-                  {categories.map((c) => (
-                    <option key={c} value={c}>
-                      {categoryLabel(c)}
-                    </option>
-                  ))}
-                  {(t.kind === "personal" || t.category === income) && (
-                    <option value={income}>{categoryLabel(income)}</option>
-                  )}
-                </select>
+                {active !== t.id ? (
+                  <button
+                    className="row-button muted"
+                    aria-label={`${categoryLabel(t.category)}: change how ${t.merchant} on ${dayLabel(t.date)} is filed`}
+                    onClick={() => setActive(t.id)}
+                  >
+                    {categoryLabel(t.category)}
+                  </button>
+                ) : (
+                  <select
+                    className="cell-select"
+                    autoFocus
+                    aria-label={`Category for ${t.merchant}`}
+                    value={t.category}
+                    disabled={busy}
+                    onChange={(e) =>
+                      void refile([t], { category: e.target.value }, `Filed as ${categoryLabel(e.target.value)}`)
+                    }
+                  >
+                    {categories.map((c) => (
+                      <option key={c} value={c}>
+                        {categoryLabel(c)}
+                      </option>
+                    ))}
+                    {(t.kind === "personal" || t.category === income) && (
+                      <option value={income}>{categoryLabel(income)}</option>
+                    )}
+                  </select>
+                )}
                 {t.original && (
                   <button
                     className="edited"
@@ -938,24 +896,30 @@ function TransactionsPanel({
               </td>
               <td className="nowrap">
                 <span className={`swatch ${t.kind}`} />
-                <select
-                  className="cell-select"
-                  aria-label={`Shared or personal for ${t.merchant}`}
-                  value={t.kind}
-                  disabled={busy}
-                  onChange={(e) =>
-                    void refile(
-                      [t],
-                      { kind: e.target.value as Kind },
-                      e.target.value === "shared" ? "Made shared" : "Made personal",
-                    )
-                  }
-                >
-                  <option value="shared" disabled={t.category === income}>
-                    Shared
-                  </option>
-                  <option value="personal">Personal</option>
-                </select>
+                {active !== t.id ? (
+                  <button className="row-button muted" onClick={() => setActive(t.id)}>
+                    {t.kind === "shared" ? "Shared" : "Personal"}
+                  </button>
+                ) : (
+                  <select
+                    className="cell-select"
+                    aria-label={`Shared or personal for ${t.merchant}`}
+                    value={t.kind}
+                    disabled={busy}
+                    onChange={(e) =>
+                      void refile(
+                        [t],
+                        { kind: e.target.value as Kind },
+                        e.target.value === "shared" ? "Made shared" : "Made personal",
+                      )
+                    }
+                  >
+                    <option value="shared" disabled={t.category === income}>
+                      Shared
+                    </option>
+                    <option value="personal">Personal</option>
+                  </select>
+                )}
                 {t.person !== me && <span className="muted"> · {personLabel(t.person, me)}</span>}
               </td>
               <td className={`num${t.cents < 0 || t.category === income ? " credit" : ""}`}>

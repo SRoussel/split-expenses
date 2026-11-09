@@ -1,86 +1,100 @@
-/* Split Insights: the desktop page. A dense analyst's workspace, not the receipt:
-   panels on a dark (or light) plane, small type, tabular numbers, and color kept
-   for the data. Shared is blue and personal is orange everywhere on the page. */
+/* Split Insights: the desktop page, in Split's own look. The phone app is a till receipt;
+   this is the same paper grown into an accountant's ledger: a sheet on the grey roll, ink
+   figures in mono on ruled lines, one green stamp for what you act on, and a sentence at
+   the top of each screen instead of rows of tiles. Year in review prints like an old
+   green-bar computer report. Colour is kept for data. */
 
 :root {
-  --plane: #f3f3f1;
-  --panel: #ffffff;
-  --panel-2: #f2f2ef; /* hover, selected rows */
-  --line: #e4e4df; /* hairlines and gridlines */
-  --axis: #c3c2b7;
-  --text: #121314;
-  --text-2: #52545a;
-  --muted: #7d8087;
-  --shared: #2a78d6;
-  --personal: #eb6834;
-  --bar: #c4c6cb; /* neutral bars in tables */
-  --bar-on: #2a78d6;
-  --credit: #0f7a3f;
-  --more: #e34948; /* spent more than usual (diverging: red) */
-  /* Net worth groups (a validated categorical set, apart from shared/personal) */
+  --plane: #e2e6e3; /* the roll the paper comes off */
+  --panel: #fcfdfc; /* paper */
+  --panel-2: #eef1ef; /* pressed rows, the selected line */
+  --line: #d3dad6; /* ruled lines */
+  --axis: #9aa39e;
+  --ink: #1b221e;
+  --text: #1b221e;
+  --text-2: #3d4742;
+  --muted: #5f6964; /* 5:1 on paper */
+  --stamp: #1f7a5a; /* Split's green: actions and the selected thing */
+  --stamp-ink: #fcfdfc;
+  --shared: #1f7a5a;
+  --personal: #8fbfa9; /* lighter than shared, so the two differ in lightness too */
+  --bar: #c5cdc8;
+  --bar-on: #1f7a5a;
+  --credit: #1b7149;
+  --more: #b3402f; /* spent more than usual (diverging: red) */
+  --less: #2a6fc4; /* spent less (diverging: blue) */
   --g-cash: #1baf7a;
   --g-invested: #6250d6;
   --g-retirement: #eda100;
   --g-property: #e87ba4;
   --g-debt: #9a9ea6;
-  --less: #2a78d6; /* spent less (diverging: blue) */
-  --focus: #2a78d6;
-  --side: #ebebe7;
-  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --focus: #1f7a5a;
+  --side: #e2e6e3;
+  --greenbar: #dcefdc; /* the stripes on Year in review's printout */
+  --sans: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --serif: "IBM Plex Serif", Georgia, serif;
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --plane: #0e0f11;
-    --panel: #17181b;
-    --panel-2: #202227;
-    --line: #2a2c31;
-    --axis: #3a3c42;
-    --text: #ecedef;
-    --text-2: #b4b7be;
-    --muted: #8a8e96;
-    --shared: #3987e5;
-    --personal: #d95926;
-    --bar: #464950;
-    --bar-on: #3987e5;
-    --credit: #4cc38a;
-    --more: #e66767;
+    --plane: #0c0f0e;
+    --panel: #191d1b;
+    --panel-2: #232926;
+    --line: #333b37;
+    --axis: #4a534f;
+    --ink: #e5eae7;
+    --text: #e5eae7;
+    --text-2: #c2cac6;
+    --muted: #9ba6a1;
+    --stamp: #4fc295;
+    --stamp-ink: #08130e;
+    --shared: #4fc295;
+    --personal: #2e7258;
+    --bar: #3a433f;
+    --bar-on: #4fc295;
+    --credit: #5fcb97;
+    --more: #f28b7c;
+    --less: #6aa8f0;
     --g-cash: #199e70;
     --g-invested: #9085e9;
     --g-retirement: #c98500;
     --g-property: #d55181;
     --g-debt: #6b7079;
-    --g-cash: #199e70;
-    --g-invested: #9085e9;
-    --g-retirement: #c98500;
-    --g-property: #d55181;
-    --g-debt: #6b7079;
-    --less: #3987e5;
-    --focus: #5598e7;
-    --side: #121316;
+    --focus: #4fc295;
+    --side: #0c0f0e;
+    --greenbar: #1f2b23;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --plane: #0e0f11;
-  --panel: #17181b;
-  --panel-2: #202227;
-  --line: #2a2c31;
-  --axis: #3a3c42;
-  --text: #ecedef;
-  --text-2: #b4b7be;
-  --muted: #8a8e96;
-  --shared: #3987e5;
-  --personal: #d95926;
-  --bar: #464950;
-  --bar-on: #3987e5;
-  --credit: #4cc38a;
-  --more: #e66767;
-  --less: #3987e5;
-  --focus: #5598e7;
-  --side: #121316;
+  --plane: #0c0f0e;
+  --panel: #191d1b;
+  --panel-2: #232926;
+  --line: #333b37;
+  --axis: #4a534f;
+  --ink: #e5eae7;
+  --text: #e5eae7;
+  --text-2: #c2cac6;
+  --muted: #9ba6a1;
+  --stamp: #4fc295;
+  --stamp-ink: #08130e;
+  --shared: #4fc295;
+  --personal: #2e7258;
+  --bar: #3a433f;
+  --bar-on: #4fc295;
+  --credit: #5fcb97;
+  --more: #f28b7c;
+  --less: #6aa8f0;
+  --g-cash: #199e70;
+  --g-invested: #9085e9;
+  --g-retirement: #c98500;
+  --g-property: #d55181;
+  --g-debt: #6b7079;
+  --focus: #4fc295;
+  --side: #0c0f0e;
+  --greenbar: #1f2b23;
   color-scheme: dark;
 }
 
@@ -1179,7 +1193,7 @@ ul.found li > span {
   flex-direction: column;
 }
 ul.found .cell-sub,
-.grid-table td > .cell-sub {
+.grid-table td strong + .cell-sub {
   margin-left: 0;
 }
 .grid-table td strong + .cell-sub {
@@ -1241,5 +1255,471 @@ tr.closed td {
   }
   .spark-col {
     display: none;
+  }
+}
+
+/* =====================================================================
+   The ledger look. These rules come last on purpose: they turn the
+   workspace's boxes and tiles into paper, ruled lines and sentences.
+   ===================================================================== */
+
+body {
+  font-size: 14px;
+}
+
+/* --- Frame: the roll, a narrow nav, and a sheet of paper --- */
+
+.side {
+  background: var(--plane);
+  border-right: 0;
+  padding: 28px 18px;
+  gap: 28px;
+}
+.brand {
+  font: 600 15px var(--mono);
+  letter-spacing: 0.18em;
+  gap: 10px;
+  padding: 0 8px;
+}
+.logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: none;
+  border: 2px solid var(--stamp);
+  color: var(--stamp);
+  display: grid;
+  place-items: center;
+  font: 600 12px var(--mono);
+  letter-spacing: 0;
+  transform: rotate(-8deg);
+}
+.nav-item {
+  border-radius: 0;
+  border-left: 2px solid transparent;
+  padding: 7px 10px;
+  font-size: 14px;
+}
+.nav-item:hover {
+  background: transparent;
+  color: var(--text);
+}
+.nav-item.on {
+  background: var(--panel);
+  box-shadow: none;
+  border-left-color: var(--stamp);
+}
+.side-foot {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.theme {
+  border-radius: 0;
+}
+
+.main {
+  padding: 20px 28px 48px 8px;
+  gap: 0;
+}
+.sheet {
+  background: var(--panel);
+  box-shadow:
+    0 1px 0 var(--line),
+    0 12px 32px rgb(27 34 30 / 0.07);
+  padding: 26px 40px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  min-width: 0;
+}
+.torn {
+  height: 12px;
+  background:
+    linear-gradient(-45deg, transparent 8px, var(--panel) 0) 0 0 / 16px 12px repeat-x,
+    linear-gradient(45deg, transparent 8px, var(--panel) 0) 0 0 / 16px 12px repeat-x;
+}
+
+/* --- One filter bar, the same on every screen --- */
+
+.filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  padding-bottom: 18px;
+  border-bottom: 1px dashed var(--line);
+}
+.filterbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font: 500 11px var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.filterbar select,
+.filterbar input {
+  font: 14px var(--sans);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 6px 8px;
+  min-height: 36px;
+  box-sizing: border-box;
+}
+.filterbar .grow {
+  flex: 1 1 220px;
+}
+.filterbar .search {
+  position: relative;
+  display: block;
+  width: auto;
+}
+.filterbar .search input {
+  width: 100%;
+  padding-right: 30px;
+}
+.btn {
+  border-radius: 0;
+  min-height: 36px;
+  padding: 0 14px;
+}
+.btn.primary {
+  background: var(--stamp);
+  border-color: var(--stamp);
+  color: var(--stamp-ink);
+}
+.chips .chip {
+  border-radius: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* --- The sentence at the top of each screen --- */
+
+.lede {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px 32px;
+}
+.lede-text {
+  flex: 1 1 520px;
+  min-width: 0;
+  max-width: 920px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.eyebrow {
+  margin: 0;
+  font: 500 12px var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.lede h1 {
+  margin: 0;
+  font: 500 32px/1.25 var(--serif);
+  text-wrap: balance;
+}
+.lede .fig {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 0.92em;
+}
+.lede em {
+  font-style: italic;
+}
+.stats {
+  margin: 0;
+  font: 13px/1.7 var(--mono);
+  color: var(--muted);
+}
+
+/* --- Sections are ruled, not boxed --- */
+
+.panel {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+.panel-head {
+  margin-bottom: 10px;
+}
+.panel-head h2,
+.panel h2 {
+  font: 600 12px var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.split {
+  gap: 40px;
+}
+.legend {
+  font-family: var(--mono);
+}
+.swatch {
+  border-radius: 0;
+}
+.month-chart .baseline {
+  stroke: var(--ink);
+}
+.tooltip {
+  border-radius: 0;
+  font-family: var(--mono);
+}
+
+/* --- Ledger lines with dotted leaders --- */
+
+ul.ledger {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ledger-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 5px 0;
+  cursor: pointer;
+  text-align: left;
+  font: 14px var(--sans);
+  color: var(--text);
+}
+.ledger-row:hover .ledger-name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ledger li.on .ledger-row {
+  font-weight: 600;
+}
+.ledger li.on .ledger-name::before {
+  content: "› ";
+  color: var(--stamp);
+}
+.ledger li.dim {
+  opacity: 0.5;
+}
+.ledger-sub {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.leader {
+  flex: 1;
+  min-width: 16px;
+  border-bottom: 1px dotted var(--axis);
+  transform: translateY(-4px);
+}
+.ledger-meta {
+  font: 12px var(--mono);
+  color: var(--muted);
+}
+.ledger-amount {
+  min-width: 88px;
+  text-align: right;
+  font: 14px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.ledger-total {
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid var(--ink);
+  margin-top: 4px;
+  padding-top: 8px;
+  font: 600 14px var(--mono);
+  text-transform: uppercase;
+}
+
+/* --- Tables as ruled ledger pages --- */
+
+.grid-table th {
+  font: 500 11px var(--mono);
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid var(--ink);
+}
+.grid-table th.num {
+  font: 500 11px var(--mono);
+}
+.grid-table td {
+  border-bottom: 1px dashed var(--line);
+}
+.grid-table tbody tr:hover td {
+  background: transparent;
+}
+.grid-table tr.active td {
+  background: var(--panel-2);
+}
+.grid-table tr.active td:first-child {
+  box-shadow: inset 2px 0 0 var(--stamp);
+}
+.grid-table tr.picked td {
+  background: color-mix(in srgb, var(--stamp) 8%, var(--panel));
+}
+.txns .row-button.muted {
+  color: var(--muted);
+}
+.txns .row-button.muted:hover {
+  color: var(--text);
+}
+.cell-select {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 0;
+}
+.bulk,
+.notice,
+.merchant-edit,
+.warn {
+  border-radius: 0;
+}
+.pill,
+.edited {
+  border-radius: 0;
+}
+
+/* --- Dialogs are paper too --- */
+
+dialog.export {
+  border-radius: 0;
+}
+.export-head h2 {
+  font: 600 13px var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.seg,
+.field input,
+.field select,
+.dates input {
+  border-radius: 0;
+}
+
+/* --- Year in review: a green-bar printout --- */
+
+.printout {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  margin: -26px -40px -40px;
+  padding: 26px 40px 40px;
+  font-family: var(--mono);
+  background: repeating-linear-gradient(var(--panel) 0 72px, var(--greenbar) 72px 144px);
+}
+.printout .lede h1 {
+  font: 600 22px/1.5 var(--mono);
+  text-transform: uppercase;
+}
+.printout .lede .fig {
+  font-size: 1em;
+  font-weight: 600;
+}
+.printout .facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 48px;
+}
+.printout .fact {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  background: none;
+  border: 0;
+  border-bottom: 1px dashed var(--axis);
+  border-radius: 0;
+  padding: 6px 0;
+  font-family: var(--mono);
+}
+.printout .fact-label {
+  text-transform: uppercase;
+  font-size: 12px;
+}
+.printout .fact-value {
+  font-size: 15px;
+  margin-left: auto;
+}
+.printout .fact-sub {
+  flex-basis: 100%;
+  font-size: 12px;
+}
+.printout .grid-table,
+.printout .grid-table td,
+.printout .ledger-row {
+  font-family: var(--mono);
+  background: transparent;
+}
+.printout .grid-table td {
+  border-bottom: 0;
+}
+ul.bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.bar-row {
+  display: flex;
+  gap: 16px;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: 14px/24px var(--mono);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+.bar-row:hover .bar-label {
+  text-decoration: underline;
+}
+.bar-label {
+  flex: 0 0 150px;
+  text-transform: uppercase;
+}
+.bar-ink {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  letter-spacing: -1px;
+  color: var(--shared);
+}
+.bar-personal {
+  color: var(--personal);
+}
+.bar-total {
+  flex: 0 0 96px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 760px) {
+  .sheet {
+    padding: 20px 18px 28px;
+  }
+  .printout {
+    margin: -20px -18px -28px;
+    padding: 20px 18px 28px;
+  }
+  .printout .facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .lede h1 {
+    font-size: 24px;
+  }
+  .bar-label {
+    flex-basis: 90px;
   }
 }

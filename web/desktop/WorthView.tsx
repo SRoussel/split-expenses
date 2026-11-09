@@ -19,6 +19,7 @@ import {
   type Txn,
   type Worth,
 } from "./analytics";
+import Lede, { Fig } from "./Lede";
 import { dayLabel, money, moneyRound, monthName, percent, personLabel } from "./format";
 import { Sparkline } from "./MonthChart";
 import WorthChart, { GROUP_LABEL } from "./WorthChart";
@@ -101,39 +102,42 @@ export default function WorthView({ txns, income }: { txns: Txn[]; income: strin
   const assets = latest ? ASSET_GROUPS.reduce((n, g) => n + latest.groups[g], 0) : 0;
   const lastDate = [...worth.found.map((f) => f.date), ...worth.balances.map((b) => b.date)].sort().at(-1) ?? "";
   const accounts = worth.accounts.filter((a) => !owner || a.owner === owner);
+  const subject = !owner
+    ? "Together you're worth"
+    : owner === "joint"
+      ? "Your joint accounts come to"
+      : owner === me
+        ? "Your own accounts come to"
+        : `${who(owner)}'s accounts come to`;
   const owners = [...worth.people.sort((a, b) => (a === me ? -1 : b === me ? 1 : a.localeCompare(b))), "joint"];
 
   return (
     <>
-      <header className="top">
-        <div>
-          <h1>Net worth</h1>
-          <p className="sub">
-            {owner ? `${who(owner)}${owner === "joint" ? " accounts" : ""}` : "Both of you"}
-            {latest && worth.accounts.length ? ` · end of ${monthName(latest.month)}` : ""}
-          </p>
-        </div>
-        <div className="top-actions">
-          <div className="seg" role="group" aria-label="Whose">
-            {[null, ...owners].map((o) => (
-              <button
-                key={o ?? "all"}
-                className={owner === o ? "on" : ""}
-                aria-pressed={owner === o}
-                onClick={() => setOwner(o)}
-              >
-                {o ? who(o) : "Everyone"}
-              </button>
+      <form className="filterbar" aria-label="Filters" onSubmit={(e) => e.preventDefault()}>
+        <label>
+          Whose
+          <select value={owner ?? ""} onChange={(e) => setOwner(e.target.value || null)}>
+            <option value="">Everyone</option>
+            {owners.map((o) => (
+              <option key={o} value={o}>
+                {who(o)}
+              </option>
             ))}
-          </div>
-          <button className="btn" onClick={() => setEditing({})}>
-            Add account
-          </button>
-          <button className="btn primary" disabled={!worth.accounts.length} onClick={() => setUpdating(true)}>
-            Update balances
-          </button>
-        </div>
-      </header>
+          </select>
+        </label>
+        <span className="grow" />
+        <button type="button" className="btn" onClick={() => setEditing({})}>
+          Add account
+        </button>
+        <button
+          type="button"
+          className="btn primary"
+          disabled={!worth.accounts.length}
+          onClick={() => setUpdating(true)}
+        >
+          Update balances
+        </button>
+      </form>
 
       {!worth.accounts.length ? (
         <section className="panel worth-start">
@@ -146,35 +150,30 @@ export default function WorthView({ txns, income }: { txns: Txn[]; income: strin
         </section>
       ) : (
         <>
-          <section className="kpis">
-            <div className="kpi">
-              <div className="kpi-label">Net worth</div>
-              <div className="kpi-value">{latest ? moneyRound(latest.net) : "–"}</div>
-              {before && latest && (
-                <div className="kpi-delta">
-                  {latest.net >= before.net ? "▲" : "▼"} {moneyRound(Math.abs(latest.net - before.net))} in {span} month
-                  {span === 1 ? "" : "s"}
-                </div>
-              )}
-            </div>
-            <div className="kpi">
-              <div className="kpi-label">Assets</div>
-              <div className="kpi-value">{moneyRound(assets)}</div>
-            </div>
-            <div className="kpi">
-              <div className="kpi-label">Debts</div>
-              <div className="kpi-value">{latest ? moneyRound(latest.groups.debt) : "–"}</div>
-            </div>
-            <div className="kpi">
-              <div className="kpi-label">Savings rate, last 12 months</div>
-              <div className="kpi-value">{saving.rate === null ? "–" : percent(saving.rate)}</div>
-              {saving.rate !== null && (
-                <div className="kpi-delta">
-                  kept {moneyRound(saving.kept)} of {moneyRound(saving.earned)} earned
-                </div>
-              )}
-            </div>
-          </section>
+          <Lede
+            eyebrow={`Net worth · ${owner ? who(owner) : "both of you"}${latest ? ` · end of ${monthName(latest.month)}` : ""}`}
+            stats={[
+              `assets ${moneyRound(assets)}`,
+              latest && `debts ${moneyRound(latest.groups.debt)}`,
+              saving.rate !== null &&
+                `kept ${percent(saving.rate)} of income over the last 12 months (${moneyRound(saving.kept)} of ${moneyRound(saving.earned)})`,
+            ]}
+          >
+            {latest ? (
+              <>
+                {subject} <Fig>{moneyRound(latest.net)}</Fig>
+                {before && (
+                  <>
+                    , {latest.net >= before.net ? "up" : "down"}{" "}
+                    <Fig>{moneyRound(Math.abs(latest.net - before.net))}</Fig> in {span} month{span === 1 ? "" : "s"}
+                  </>
+                )}
+                .
+              </>
+            ) : (
+              "No balances yet."
+            )}
+          </Lede>
 
           {rows.length > 0 && (
             <section className="panel">

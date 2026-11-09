@@ -3,7 +3,8 @@
 
 import { useMemo, useState } from "react";
 import { monthOf, shiftMonth, whatChanged, type Filters, type Mover, type Txn } from "./analytics";
-import { categoryLabel, dayLabel, monthName, moneyRound, percent, rangeLabel } from "./format";
+import Lede, { Fig } from "./Lede";
+import { categoryLabel, dayLabel, monthName, moneyRound, rangeLabel } from "./format";
 
 export default function ChangesView({
   txns,
@@ -29,54 +30,44 @@ export default function ChangesView({
     ? `against the average of ${rangeLabel(c.compared[0], c.compared[c.compared.length - 1])}`
     : "with nothing earlier to compare against";
 
+  // The category that moved most in the same direction as the total.
+  const top = c.categories.find((x) => (diff >= 0 ? x.diff > 0 : x.diff < 0)) ?? null;
+
   return (
     <>
-      <header className="top">
-        <div>
-          <h1>What changed</h1>
-          <p className="sub">
-            {monthName(month)} {compared}
-          </p>
-        </div>
-        <div className="stepper" role="group" aria-label="Month">
-          <button className="btn" disabled={month <= first} onClick={() => setMonth(shiftMonth(month, -1))}>
-            ‹ <span className="sr-only">Previous month</span>
-          </button>
-          <span className="stepper-label">{monthName(month)}</span>
-          <button className="btn" disabled={month >= last} onClick={() => setMonth(shiftMonth(month, 1))}>
-            › <span className="sr-only">Next month</span>
-          </button>
-        </div>
-      </header>
-      {partial && (
-        <p className="note">
-          Your files run to {dayLabel(lastDay)}, so {monthName(month)} may not be complete yet.
-        </p>
-      )}
-
-      <section className="kpis">
-        <div className="kpi">
-          <div className="kpi-label">Spent in {monthName(month)}</div>
-          <div className="kpi-value">{moneyRound(c.now)}</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">A usual month</div>
-          <div className="kpi-value">{c.compared.length ? moneyRound(c.usual) : "–"}</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">Difference</div>
-          <div className="kpi-value">{c.compared.length ? <Signed cents={diff} /> : "–"}</div>
-          {c.compared.length > 0 && c.usual > 0 && (
-            <div className="kpi-delta">
-              {diff >= 0 ? "▲" : "▼"} {percent(Math.abs(diff) / c.usual)} {diff >= 0 ? "more" : "less"} than usual
-            </div>
-          )}
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">New places</div>
-          <div className="kpi-value">{c.fresh.length}</div>
-        </div>
-      </section>
+      <Lede
+        eyebrow={`What changed · ${monthName(month)} ${compared}`}
+        stats={[
+          c.compared.length > 0 && `a usual month ${moneyRound(c.usual)}`,
+          `${c.fresh.length} new place${c.fresh.length === 1 ? "" : "s"}`,
+          c.missing.length > 0 && `${c.missing.length} regular${c.missing.length === 1 ? "" : "s"} skipped`,
+          partial && `your files run to ${dayLabel(lastDay)}, so this month may not be complete`,
+        ]}
+        actions={
+          <div className="stepper" role="group" aria-label="Month">
+            <button className="btn" disabled={month <= first} onClick={() => setMonth(shiftMonth(month, -1))}>
+              ‹ <span className="sr-only">Previous month</span>
+            </button>
+            <span className="stepper-label">{monthName(month)}</span>
+            <button className="btn" disabled={month >= last} onClick={() => setMonth(shiftMonth(month, 1))}>
+              › <span className="sr-only">Next month</span>
+            </button>
+          </div>
+        }
+      >
+        {monthName(month).split(" ")[0]}: <Fig>{moneyRound(c.now)}</Fig> spent
+        {c.compared.length > 0 && c.usual > 0 ? (
+          <>
+            , <Fig>{moneyRound(Math.abs(diff))}</Fig> {diff >= 0 ? "more" : "less"} than a usual month
+            {top && (
+              <>
+                , mostly <em>{categoryLabel(top.key).toLowerCase()}</em>
+              </>
+            )}
+          </>
+        ) : null}
+        .
+      </Lede>
 
       <section className="panel">
         <div className="panel-head">

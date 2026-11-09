@@ -3,8 +3,8 @@
 
 import { useMemo, useState } from "react";
 import { change, yearInReview, type Filters, type Txn } from "./analytics";
+import Lede, { Fig } from "./Lede";
 import { categoryLabel, dayLabel, monthName, moneyRound, percent, rangeLabel } from "./format";
-import MonthChart from "./MonthChart";
 
 export default function YearView({
   txns,
@@ -30,47 +30,40 @@ export default function YearView({
   const inYear = { from: `${year}-01`, to: r.months[r.months.length - 1] ?? `${year}-12` };
   const top = Math.max(1, ...r.categories.map((c) => c.total));
   const startsHere = !txns.some((t) => t.date < `${year}-01-01`);
+  // Each block in the month bars: a round amount, so the longest bar is about 40 blocks.
+  const biggestMonth = Math.max(1, ...r.byMonth.map((m) => m.shared + m.personal));
+  const unit = Math.max(1, Math.ceil(biggestMonth / 40 / 5000)) * 5000;
 
   return (
-    <>
-      <header className="top">
-        <div>
-          <h1>{year} in review</h1>
-          <p className="sub">{whole ? "The whole year" : `Your files cover ${span}`}</p>
-        </div>
-        {years.length > 1 && (
-          <div className="stepper" role="group" aria-label="Year">
-            {years.map((y) => (
-              <button
-                key={y}
-                className={`btn${y === year ? " on" : ""}`}
-                aria-pressed={y === year}
-                onClick={() => setYear(y)}
-              >
-                {y}
-              </button>
-            ))}
-          </div>
-        )}
-      </header>
-
-      <section className="kpis">
-        <Stat label="Spent" value={moneyRound(r.totals.spent)} sub={vs(r.totals.spent, r.previous?.spent)} />
-        <Stat
-          label="Shared"
-          swatch="shared"
-          value={moneyRound(r.totals.shared)}
-          sub={vs(r.totals.shared, r.previous?.shared)}
-        />
-        <Stat
-          label="Personal"
-          swatch="personal"
-          value={moneyRound(r.totals.personal)}
-          sub={vs(r.totals.personal, r.previous?.personal)}
-        />
-        <Stat label="Money in" value={moneyRound(r.totals.income)} sub={vs(r.totals.income, r.previous?.income)} />
-        <Stat label="A month, on average" value={moneyRound(r.totals.spent / Math.max(1, r.months.length))} />
-      </section>
+    <div className="printout">
+      <Lede
+        eyebrow={`Year in review · ${whole ? "the whole year" : `your files cover ${span}`}`}
+        stats={[
+          `shared ${moneyRound(r.totals.shared)}`,
+          `personal ${moneyRound(r.totals.personal)}`,
+          vs(r.totals.spent, r.previous?.spent),
+        ]}
+        actions={
+          years.length > 1 && (
+            <div className="stepper" role="group" aria-label="Year">
+              {years.map((y) => (
+                <button
+                  key={y}
+                  className={`btn${y === year ? " on" : ""}`}
+                  aria-pressed={y === year}
+                  onClick={() => setYear(y)}
+                >
+                  {y}
+                </button>
+              ))}
+            </div>
+          )
+        }
+      >
+        {year}: <Fig>{moneyRound(r.totals.spent)}</Fig> spent,{" "}
+        <Fig>{moneyRound(r.totals.spent / Math.max(1, r.months.length))}</Fig> a month, and{" "}
+        <Fig>{moneyRound(r.totals.income)}</Fig> came in.
+      </Lede>
 
       <section className="facts">
         {r.busiest && (
@@ -130,19 +123,24 @@ export default function YearView({
 
       <section className="panel">
         <div className="panel-head">
-          <h2>Month by month</h2>
-          <div className="legend">
-            <span>
-              <span className="swatch shared" />
-              Shared
-            </span>
-            <span>
-              <span className="swatch personal" />
-              Personal
-            </span>
-          </div>
+          <h2>
+            Month by month <span className="muted">(█ shared ░ personal, each = {moneyRound(unit)})</span>
+          </h2>
         </div>
-        <MonthChart rows={r.byMonth} selected={null} onSelect={(month) => month && onOpen({ ...inYear, month })} />
+        <ul className="bars">
+          {r.byMonth.map((m) => (
+            <li key={m.month}>
+              <button className="bar-row" onClick={() => onOpen({ ...inYear, month: m.month })}>
+                <span className="bar-label">{monthName(m.month)}</span>
+                <span className="bar-ink" aria-hidden="true">
+                  {"█".repeat(Math.round(Math.max(0, m.shared) / unit))}
+                  <span className="bar-personal">{"░".repeat(Math.round(Math.max(0, m.personal) / unit))}</span>
+                </span>
+                <span className="bar-total">{moneyRound(m.shared + m.personal)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
       </section>
 
       <div className="split">
@@ -218,19 +216,6 @@ export default function YearView({
           </table>
         </section>
       </div>
-    </>
-  );
-}
-
-function Stat({ label, value, sub, swatch }: { label: string; value: string; sub?: string | null; swatch?: string }) {
-  return (
-    <div className="kpi">
-      <div className="kpi-label">
-        {swatch && <span className={`swatch ${swatch}`} />}
-        {label}
-      </div>
-      <div className="kpi-value">{value}</div>
-      {sub && <div className="kpi-delta">{sub}</div>}
     </div>
   );
 }
