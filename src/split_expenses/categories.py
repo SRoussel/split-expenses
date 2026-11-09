@@ -10,13 +10,21 @@ SPENDING = [
     "utilities",
     "transport",
     "health",
-    "subscriptions",
+    "hobbies",
     "entertainment",
     "travel",
     "gift",
-    "fees",
+    "housing",
     "other",
 ]
 
 # Money in: paychecks, interest earned. Returns reduce their own category instead.
 INCOME = "income"
+
+# Categories that were retired, and where their old rows go when a file still has them.
+RETIRED = {"subscriptions": "other", "fees": "other"}
+
+
+def current(category):
+    """The category to use for one read from a file, which may be from before a rename."""
+    return RETIRED.get(category, category)

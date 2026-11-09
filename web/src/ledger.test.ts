@@ -123,8 +123,9 @@ test("parseSummary reads what `split-ledger summarize` writes (v2)", () => {
   assert.deepEqual(totalsByCategory(s.personal!.months), {
     dining: 1840,
     entertainment: 4499,
-    fees: 3500,
     income: 650042,
+    other: 3500, // filed as "fees", a retired category, in the sample CSV
+
     transport: 5230,
   });
 });

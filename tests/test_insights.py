@@ -109,6 +109,34 @@ class LoadTest(unittest.TestCase):
         )
         self.assertEqual(data["sources"][0]["skipped"], 2)  # the zero line is left out, not counted as bad
 
+    def test_retired_categories_read_as_their_replacement(self):
+        from split_expenses.split_statements import load_state
+
+        write(
+            self.root,
+            "personal_transactions.csv",
+            [["2026-01-05", "15.00", "NEWS", "subscriptions"], ["2026-01-06", "2.00", "BANK", "fees"]],
+            100,
+        )
+        self.assertEqual({t["category"] for t in load(self.root)["transactions"]}, {"other"})
+        state = self.root / ".split_state.json"
+        state.write_text(
+            json.dumps(
+                {
+                    "done": [],
+                    "vendor_rules": {
+                        "news": {"self": "subscriptions"},
+                        "x": "exclude",
+                        "in:y": {"return": "fees", "shared": True},
+                    },
+                }
+            )
+        )
+        self.assertEqual(
+            load_state(state)["vendor_rules"],
+            {"news": {"self": "other"}, "x": "exclude", "in:y": {"return": "other", "shared": True}},
+        )
+
     def test_nothing_there(self):
         self.assertEqual(load(self.root)["transactions"], [])
 

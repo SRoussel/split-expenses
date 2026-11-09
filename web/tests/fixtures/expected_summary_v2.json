@@ -24,8 +24,8 @@
       "2026-01": {
         "dining": 1840,
         "entertainment": 4499,
-        "fees": 3500,
-        "income": 325042
+        "income": 325042,
+        "other": 3500
       },
       "2026-02": {
         "income": 325000,

@@ -34,10 +34,10 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 
 try:
-    from .categories import INCOME, SPENDING
+    from .categories import INCOME, SPENDING, current
     from .people import person_dir
 except ImportError:  # run as a plain script
-    from categories import INCOME, SPENDING
+    from categories import INCOME, SPENDING, current
     from people import person_dir
 
 FIELDS = ["date", "type", "payer", "amount", "my_share", "name"]
@@ -324,7 +324,7 @@ def read_txn_csv(src, allowed):
             except (ValueError, AttributeError):
                 skipped += 1
                 continue
-            cat = (r.get("category") or "").strip().lower()
+            cat = current((r.get("category") or "").strip().lower())
             if cat in ("", "uncategorized"):
                 cat = "other"
             if cat not in allowed:

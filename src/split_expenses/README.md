@@ -28,7 +28,7 @@ It groups what's left to review **by merchant**, so "STARBUCKS ×12 · $54.20" i
 
 - **Money out:** `s` self (your own spending), `p` split (shared with your partner), `x` exclude.
 - **Money in:** `i` income (paychecks, interest earned), `r` return (asks the category of the original purchase and whether it was shared; a return *reduces* that category), `x` exclude.
-- **Categories** are one key each: `1`–`9`, then `a` gift, `b` fees, `c` other (the menu shows them). `Esc` goes back.
+- **Categories** are one key each: `1`–`9`, then `a` gift, `b` housing, `c` other (the menu shows them). `Esc` goes back.
 - **Enter** accepts the suggestion, when there is one. Suggestions come from your own answers for similar merchant names first, then a built-in keyword list (Safeway → groceries, Uber → transport, payroll → income, Zelle → exclude…). They're worked out on your computer and never applied without a keypress.
 - **Answers are remembered** for that merchant (separately for money out and in), so next time it's applied without asking. Hold **Shift** (`S`, `P`, `X`…) for "this time only".
 - **A merchant with several transactions is listed, numbered**, even when its answer is remembered: Enter accepts the remembered answer for all of them. `c` changes some lines first (type `2`, `2,5` or `3-6`, then the answer), for a one-off like a TV at Costco. Those lines are answered this time only; the merchant keeps its usual answer. Amounts much bigger than the merchant's usual are marked.
@@ -38,7 +38,7 @@ It groups what's left to review **by merchant**, so "STARBUCKS ×12 · $54.20" i
 - **Exclude** is for money that's neither spending nor income: credit-card payments, transfers between your own accounts, and money between the two of you (paying each other back is already tracked by the ledger). Counting these would double-count.
 - **`?` (unclear)** lines weren't under a heading saying whether they're money out or in, and had no minus sign. It asks: `o` out, `n` in or `x` exclude. Nothing is guessed or dropped.
 
-The categories are groceries, dining, household, utilities, transport, health, subscriptions, entertainment, travel, gift, fees and other. (The list is shared with the web app, in `web/shared/categories.json`.)
+The categories are groceries, dining, household, utilities, transport, health, hobbies, entertainment, travel, gift, housing and other. (The list is shared with the web app, in `web/shared/categories.json`.) Subscriptions and fees used to be categories; files that still have them count those rows as other.
 
 Shared transactions are saved to `split_transactions.csv` and your own (including income, and returns as negative amounts) to `personal_transactions.csv`. Both have the columns `date`, `amount`, `vendor`, `category` and `id` (which transaction it was), and neither ever leaves your computer.
 

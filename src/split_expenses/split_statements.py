@@ -39,10 +39,10 @@ except ImportError:
     sys.exit("Missing pdfplumber. Run this script with:  uv run split-statements ...")
 
 try:
-    from .categories import INCOME, SPENDING
+    from .categories import INCOME, SPENDING, current
     from .people import person_dir
 except ImportError:  # run as a plain script
-    from categories import INCOME, SPENDING
+    from categories import INCOME, SPENDING, current
     from people import person_dir
 
 CATEGORIES = SPENDING
@@ -307,6 +307,10 @@ def load_state(path):
         state = json.loads(path.read_text())
         if not isinstance(state.get("done"), list) or not isinstance(state.get("vendor_rules"), dict):
             raise ValueError("missing 'done' or 'vendor_rules'")
+        # Rules saved before a category was retired use its replacement.
+        for key, rule in state["vendor_rules"].items():
+            if isinstance(rule, dict):
+                state["vendor_rules"][key] = {k: current(v) if isinstance(v, str) else v for k, v in rule.items()}
         return state
     except (json.JSONDecodeError, ValueError) as e:
         # Never quietly start over: that would review everything again and duplicate rows.
@@ -420,9 +424,19 @@ KEYWORDS = [
     ),
     (
         "out",
-        r"netflix|spotify|hulu|disney|youtube|prime video|icloud|apple\.com/bill|patreon|nytimes|"
-        r"subscription|membership",
-        "subscriptions",
+        r"\brent\b|landlord|property management|apartments|mortgage|\bhoa\b|renters insurance",
+        "housing",
+    ),
+    (
+        "out",
+        r"netflix|spotify|hulu|disney|youtube|prime video|patreon|nytimes",
+        "entertainment",
+    ),
+    (
+        "out",
+        r"climbing|bouldering|\bgym\b|fitness|yoga|strava|\brei\b|bike|bicycle|cycl|\bski\b|golf|"
+        r"guitar|music store|craft|hobby|michaels|joann",
+        "hobbies",
     ),
     (
         "out",
@@ -455,7 +469,7 @@ KEYWORDS = [
         "entertainment",
     ),
     ("out", r"home depot|lowe'?s|ikea|hardware|wayfair|bed bath", "household"),
-    ("out", r"\bfee\b|late fee|overdraft|interest charge|finance charge|annual fee|interest", "fees"),
+    ("out", r"\bfee\b|late fee|overdraft|interest charge|finance charge|annual fee|interest", "other"),
     ("in", r"payroll|direct dep|salary|paycheck|interest", "income"),
     ("in", r"autopay|payment|transfer|zelle|venmo|cash app", "exclude"),
 ]

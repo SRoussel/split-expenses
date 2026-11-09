@@ -29,9 +29,9 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 try:
-    from .categories import INCOME, SPENDING
+    from .categories import INCOME, SPENDING, current
 except ImportError:  # run as a plain script
-    from categories import INCOME, SPENDING
+    from categories import INCOME, SPENDING, current
 
 FILES = {"split_transactions.csv": "shared", "personal_transactions.csv": "personal"}
 KINDS = ("shared", "personal")
@@ -108,7 +108,7 @@ def read_batch(batch):
                 if cents is None:
                     skipped += 1
                     continue
-                cat = (r.get("category") or "").strip().lower()
+                cat = current((r.get("category") or "").strip().lower())
                 if cat in ("", "uncategorized") or cat not in allowed:
                     cat = "other"
                 rows.append(
@@ -255,6 +255,7 @@ def read_edits(root):
     out = {}
     for k, v in read_json(desktop_file(root, "edits.json")).items():
         if isinstance(v, dict):
+            v = {**v, "category": current(v.get("category"))}
             try:
                 valid_filing(v.get("category"), v.get("kind"))
             except ValueError:
