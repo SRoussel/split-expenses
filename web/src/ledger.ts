@@ -82,13 +82,28 @@ export interface EntryFilter {
   /** YYYY-MM-DD, inclusive; "" for open-ended. */
   from: string;
   to: string;
+  /**
+   * Exactly these entries, when you tap through from a category on Spending. A category filter
+   * can't do this: an imported card statement is one entry split across many categories.
+   */
+  only: { label: string; ids: string[]; note: string | null } | null;
 }
 
-export const NO_FILTER: EntryFilter = { text: "", kind: "all", payer: "all", category: "", from: "", to: "" };
+export const NO_FILTER: EntryFilter = {
+  text: "",
+  kind: "all",
+  payer: "all",
+  category: "",
+  from: "",
+  to: "",
+  only: null,
+};
 
 /** How many filters are set, not counting the search text. */
 export function activeFilterCount(f: EntryFilter): number {
-  return [f.kind !== "all", f.payer !== "all", f.category !== "", f.from !== "" || f.to !== ""].filter(Boolean).length;
+  return [f.kind !== "all", f.payer !== "all", f.category !== "", f.from !== "" || f.to !== "", f.only !== null].filter(
+    Boolean,
+  ).length;
 }
 
 export function isFiltering(f: EntryFilter): boolean {
@@ -96,6 +111,7 @@ export function isFiltering(f: EntryFilter): boolean {
 }
 
 export function matchesFilter(e: Entry, f: EntryFilter, userId: string): boolean {
+  if (f.only && !f.only.ids.includes(e.id)) return false;
   if (f.kind !== "all" && e.kind !== f.kind) return false;
   if (f.payer !== "all" && (e.payer_id === userId) !== (f.payer === "me")) return false;
   if (f.category === "none" ? !(e.kind === "expense" && !e.category) : f.category && e.category !== f.category)

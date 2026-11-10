@@ -684,7 +684,8 @@ button.filters-btn[aria-expanded="true"] {
   white-space: nowrap;
 }
 
-.filter-result {
+.filter-result,
+.filter-only {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -696,8 +697,18 @@ button.filters-btn[aria-expanded="true"] {
   font-variant-numeric: tabular-nums;
 }
 
-.filter-result strong {
+.filter-result strong,
+.filter-only strong {
   color: var(--ink);
+}
+
+/* "From Spending: Dining in October 2026", after tapping through from a category. */
+.filter-only .hint {
+  display: block;
+  margin-top: 2px;
+}
+.filter-only .link {
+  white-space: nowrap;
 }
 
 /* "or with your password" between the passkey button and the password form. */
