@@ -273,6 +273,11 @@ export default function LedgerScreen({
           members={members}
           entries={entries}
           mode={tab === "trends" ? "trends" : "month"}
+          onShowEntries={(only) => {
+            setFilter({ ...NO_FILTER, only });
+            setTab("ledger");
+            window.scrollTo(0, 0);
+          }}
         />
       ) : (
         <>

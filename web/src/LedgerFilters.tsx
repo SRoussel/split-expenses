@@ -41,6 +41,23 @@ export default function LedgerFilters({
         </button>
       </div>
 
+      {filter.only && (
+        <p className="filter-only">
+          <span>
+            From Spending: <strong>{filter.only.label}</strong>
+            {filter.only.note && <span className="hint">{filter.only.note}</span>}
+          </span>
+          <button
+            type="button"
+            className="link"
+            aria-label={`Stop showing only ${filter.only.label}`}
+            onClick={() => set("only", null)}
+          >
+            Show all
+          </button>
+        </p>
+      )}
+
       {open && (
         <div className="filters stack">
           <div>

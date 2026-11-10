@@ -364,3 +364,15 @@ test("name suggestions and remembered categories", () => {
   assert.equal(categoryForName(all, "Gone"), null, "voided entries don't count");
   assert.equal(categoryForName(all, "new thing"), null);
 });
+
+test("a tap-through from Spending shows exactly its entries and counts as one filter", () => {
+  const only = { label: "Dining in October 2026", ids: ["a", "c"], note: null };
+  const f = { ...NO_FILTER, only };
+  const entry = (id: string) => ({ id, kind: "expense", entry_date: "2026-10-01", name: "x", category: null }) as Entry;
+  assert.deepEqual(
+    ["a", "b", "c"].filter((id) => matchesFilter(entry(id), f, ME)),
+    ["a", "c"],
+  );
+  assert.equal(activeFilterCount(f), 1);
+  assert.equal(isFiltering(f), true);
+});

@@ -3,7 +3,7 @@ import { categoryLabel, SPENDING_CATEGORIES } from "../shared/categories";
 import { deleteUpload, getSpending, moveSpending } from "./api";
 import { ChartTable, ColumnChart, signed } from "./charts";
 import Trends from "./Trends";
-import { fmt, parseDollars, todayLocal } from "./ledger";
+import { fmt, parseDollars, todayLocal, type EntryFilter } from "./ledger";
 import {
   buildIndex,
   compare,
@@ -48,11 +48,14 @@ export default function SpendingScreen({
   members,
   entries,
   mode,
+  onShowEntries,
 }: {
   userId: string;
   members: Member[];
   entries: Entry[];
   mode: "month" | "trends";
+  /** Open the Ledger showing just these entries. */
+  onShowEntries: (only: NonNullable<EntryFilter["only"]>) => void;
 }) {
   const partner = members.find((m) => m.user_id !== userId);
   const partnerId = partner?.user_id ?? null;
@@ -325,6 +328,8 @@ export default function SpendingScreen({
           onMoved={load}
           onClose={() => setDetail(null)}
           onMonth={setMonth}
+          entries={entries}
+          onShowEntries={onShowEntries}
         />
       )}
 
@@ -460,6 +465,8 @@ function CategoryDetail({
   onMoved,
   onClose,
   onMonth,
+  entries,
+  onShowEntries,
 }: {
   category: string;
   month: string;
@@ -473,6 +480,8 @@ function CategoryDetail({
   onMoved: () => Promise<void>;
   onClose: () => void;
   onMonth: (m: string) => void;
+  entries: Entry[];
+  onShowEntries: (only: NonNullable<EntryFilter["only"]>) => void;
 }) {
   const [moving, setMoving] = useState(false);
   const [moved, setMoved] = useState<{ source: MoveSource; to: string; cents: number } | null>(null);
@@ -503,6 +512,9 @@ function CategoryDetail({
   const items = sharedItemsFor(index, view, month, category, me, partner);
   const fromStatements = people.reduce((n, p) => n + (index.personal.get(p)?.get(month)?.[category] ?? 0), 0);
   const value = year[year.length - 1].v;
+  const ids = [...new Set(items.map((i) => i.entryId))];
+  // An imported statement is one entry spread over many categories; the Ledger shows it whole.
+  const partial = items.some((i) => entries.find((e) => e.id === i.entryId)?.amount_cents !== i.cents);
 
   return (
     <Modal title={catName(category)} onClose={onClose}>
@@ -570,6 +582,22 @@ function CategoryDetail({
               Move money to another category
             </button>
           )
+        )}
+
+        {ids.length > 0 && (
+          <button
+            onClick={() =>
+              onShowEntries({
+                label: `${catName(category)} in ${monthLong(month)}`,
+                ids,
+                note: partial
+                  ? `Card statements show in full here; Spending counts only their ${catName(category)} part.`
+                  : null,
+              })
+            }
+          >
+            See {ids.length === 1 ? "this entry" : `these ${ids.length} entries`} in the Ledger
+          </button>
         )}
 
         {(items.length > 0 || fromStatements !== 0) && (
