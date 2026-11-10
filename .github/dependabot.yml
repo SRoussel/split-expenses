@@ -1,7 +1,8 @@
 # Dependabot opens PRs to keep dependencies up to date, and CI runs on each one.
 # Small updates (minor and patch) come grouped into one PR per ecosystem each month.
 # Major versions get their own PR, since those are the ones that break things.
-# New releases wait a week before a PR is opened, so a bad release has time to get pulled.
+# New releases wait two weeks before a PR is opened, so a bad release has time to get pulled.
+# @types/node stays on the Node version CI and I run (22); it moves when Node does.
 # Security fixes are separate: turn on "Dependabot security updates" in the repo settings.
 version: 2
 updates:
@@ -10,7 +11,10 @@ updates:
     schedule:
       interval: monthly
     cooldown:
-      default-days: 7
+      default-days: 14
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       web-minor-and-patch:
         update-types: [minor, patch]
@@ -20,7 +24,7 @@ updates:
     schedule:
       interval: monthly
     cooldown:
-      default-days: 7
+      default-days: 14
     groups:
       python-minor-and-patch:
         update-types: [minor, patch]
@@ -30,7 +34,7 @@ updates:
     schedule:
       interval: monthly
     cooldown:
-      default-days: 7
+      default-days: 14
     groups:
       app-minor-and-patch:
         update-types: [minor, patch]
@@ -39,6 +43,8 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 14
     groups:
       actions:
         update-types: [minor, patch]
