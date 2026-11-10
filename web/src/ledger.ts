@@ -2,6 +2,7 @@
 // No browser or server code in here so it can be tested with plain Node.
 
 import { INCOME_CATEGORY, isPersonalCategory, isSpendingCategory } from "../shared/categories";
+import { DOTS, isRedacted } from "./redact";
 import type { Entry } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -10,8 +11,12 @@ import type { Entry } from "./types";
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
-/** Format cents as dollars. Always positive; callers decide on the sign. */
+/**
+ * Format cents as dollars for the screen. Always positive; callers decide on the sign.
+ * While amounts are redacted (More menu) it's dots instead, so never use it for exports.
+ */
 export function fmt(cents: number): string {
+  if (isRedacted()) return `$${DOTS}`;
   return usd.format(Math.abs(cents) / 100);
 }
 

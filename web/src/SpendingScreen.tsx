@@ -4,6 +4,7 @@ import { deleteUpload, getSpending, moveSpending } from "./api";
 import { ChartTable, ColumnChart, signed } from "./charts";
 import Trends from "./Trends";
 import { fmt, parseDollars, todayLocal, type EntryFilter } from "./ledger";
+import { moneyPercent } from "./redact";
 import {
   buildIndex,
   compare,
@@ -38,7 +39,7 @@ function Change({ value, average }: { value: number; average: number | null }) {
   if (Math.abs(pct) < 5) return <span className="change">≈ avg</span>;
   return (
     <span className="change" title={`Average of earlier months: ${fmt(average)}`}>
-      {pct > 0 ? "▲" : "▼"} {Math.abs(pct)}% vs avg
+      {pct > 0 ? "▲" : "▼"} {moneyPercent(Math.abs(pct))} vs avg
     </span>
   );
 }
@@ -222,7 +223,7 @@ export default function SpendingScreen({
                   <p className="tally-note">
                     {summary.income! > 0 &&
                       (summary.net! >= 0
-                        ? `Kept ${Math.round((summary.net! / summary.income!) * 100)}% of what came in`
+                        ? `Kept ${moneyPercent(Math.round((summary.net! / summary.income!) * 100))} of what came in`
                         : `Spent ${fmt(-summary.net!)} more than came in`)}
                     {summary.income! > 0 && partial && ", so far. "}
                     {partial && "Partial month, so no comparisons yet."}

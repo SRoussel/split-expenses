@@ -4,10 +4,12 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fmt } from "./ledger";
+import { DOTS, isRedacted } from "./redact";
 
 /** $1.2K, $12K, $1.5M (axis labels only; everything else uses full amounts). */
 export function compactMoney(cents: number): string {
   const sign = cents < 0 ? "−" : "";
+  if (isRedacted()) return `${sign}$${DOTS}`;
   const d = Math.abs(cents) / 100;
   if (d >= 1_000_000) return `${sign}$${(d / 1_000_000).toFixed(d >= 10_000_000 ? 0 : 1)}M`;
   if (d >= 10_000) return `${sign}$${Math.round(d / 1000)}K`;

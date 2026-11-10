@@ -40,6 +40,7 @@ import {
   NO_FILTER,
 } from "./ledger";
 import LedgerFilters from "./LedgerFilters";
+import { isRedacted, setRedacted } from "./redact";
 import type { Entry, Member, NewEntry, Recurring } from "./types";
 import { ConfirmDialog, ErrorText, Modal, Toast, type ToastState } from "./ui";
 
@@ -92,6 +93,11 @@ export default function LedgerScreen({
   const [editing, setEditing] = useState<Entry | null>(null);
   const [voiding, setVoiding] = useState<Entry | null>(null);
   const [showVoided, setShowVoided] = useState(false);
+  const [redacted, setRedactedState] = useState(isRedacted);
+  function redact(value: boolean) {
+    setRedacted(value); // amounts read this while rendering, so it's set before the re-render
+    setRedactedState(value);
+  }
   const [filter, setFilter] = useState(NO_FILTER);
 
   // Right after a password sign-in, offer once to add a passkey (if there isn't one yet).
@@ -668,6 +674,13 @@ export default function LedgerScreen({
             <label className="check">
               <input type="checkbox" checked={showVoided} onChange={(e) => setShowVoided(e.target.checked)} />
               Show voided and edited entries
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={redacted} onChange={(e) => redact(e.target.checked)} />
+              <span>
+                Redact amounts
+                <span className="hint">Every amount shows as dots, for showing the app to someone.</span>
+              </span>
             </label>
 
             <h2 className="section-label">Reset</h2>

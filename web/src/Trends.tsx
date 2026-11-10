@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { ChartTable, ColumnChart, signed, Sparkline } from "./charts";
 import { saveTextFile } from "./files";
 import { fmt } from "./ledger";
+import { moneyPercent } from "./redact";
 import { rangeMonths, rangeReport, reportCsv, type Range, type SpendingIndex, type View } from "./spending";
 import type { SpendingBatch } from "./types";
 import { TallyLine } from "./ui";
@@ -12,7 +13,7 @@ const monthShort = (m: string) =>
   new Date(`${m}-01T00:00:00Z`).toLocaleDateString(undefined, { month: "short", timeZone: "UTC" });
 const monthYear = (m: string) =>
   new Date(`${m}-01T00:00:00Z`).toLocaleDateString(undefined, { month: "short", year: "numeric", timeZone: "UTC" });
-const pct = (share: number) => `${Math.round(share * 100)}%`;
+const pct = (share: number) => moneyPercent(Math.round(share * 100));
 const amount = (cents: number) => (cents < 0 ? `−${fmt(cents)}` : fmt(cents));
 
 /** Spending and cash flow over 6 months, 12 months or the year so far: totals only. */
@@ -68,7 +69,7 @@ export default function Trends({
             {report.income! > 0 && (
               <p className="tally-note">
                 {report.net! >= 0
-                  ? `Kept ${Math.round((report.net! / report.income!) * 100)}% of what came in`
+                  ? `Kept ${moneyPercent(Math.round((report.net! / report.income!) * 100))} of what came in`
                   : `Spent ${fmt(-report.net!)} more than came in`}
               </p>
             )}

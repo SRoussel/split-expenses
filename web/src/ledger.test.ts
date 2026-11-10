@@ -21,6 +21,7 @@ import {
   summaryToImport,
   totalsByCategory,
 } from "./ledger.ts";
+import { setRedacted } from "./redact.ts";
 import type { Entry } from "./types.ts";
 
 const ME = "me-id";
@@ -375,4 +376,18 @@ test("a tap-through from Spending shows exactly its entries and counts as one fi
   );
   assert.equal(activeFilterCount(f), 1);
   assert.equal(isFiltering(f), true);
+});
+
+test("redacted amounts are dots on screen, but exports keep the real numbers", () => {
+  const e = entry({ kind: "expense", payer_id: ME, amount_cents: 8420, owed_cents: 4210 });
+  setRedacted(true);
+  try {
+    assert.equal(fmt(8420), "$•••••");
+    assert.equal(fmt(123_456_789), "$•••••");
+    assert.match(describeBalance(4210, "Sam"), /^Sam owes you \$•••••$/);
+    assert.match(exportLedgerCsv([e], ME), /84\.20/);
+  } finally {
+    setRedacted(false);
+  }
+  assert.equal(fmt(8420), "$84.20");
 });

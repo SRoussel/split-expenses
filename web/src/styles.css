@@ -242,6 +242,16 @@ label.check input {
   accent-color: var(--ink);
 }
 
+label.check .hint {
+  display: block;
+  color: var(--faded);
+}
+
+/* Redact amounts (More menu): what's typed in amount fields shows as dots too. */
+.redacted input[inputmode="decimal"] {
+  -webkit-text-security: disc;
+}
+
 input:not([type="checkbox"]):not([type="file"]),
 select {
   font: inherit;
