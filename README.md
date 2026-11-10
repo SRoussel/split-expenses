@@ -83,7 +83,7 @@ It opens at http://127.0.0.1:8765. To run it as an app in its own window instead
 
 ## Privacy
 
-The repo is private, but everything personal is git-ignored anyway, in case that ever changes: statements and PDFs, `balances/`, transaction CSVs, the ledger, summaries, `data/`, `archive/` and `desktop-data/`. Still, check `git status` before you commit.
+This repo is public, so everything personal is git-ignored: statements and PDFs, `balances/`, transaction CSVs, the ledger, summaries, `data/`, `archive/` and `desktop-data/`. Still, check `git status` before you commit.
 
 CI only runs the checks below and compiles the desktop app. It never deploys and doesn't use any secrets; deploying is a manual step from my computer.
 

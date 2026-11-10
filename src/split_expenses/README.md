@@ -8,7 +8,7 @@ These run on your computer and never send anything anywhere. There are three:
 
 Run them from the repo root, not from this folder. For how they fit with the web app, see the [main README](../../README.md).
 
-The scripts keep your data in plain files (`ledger.csv`, `split_transactions.csv`, `personal_transactions.csv`, `split_summary.json`, `.split_state.json`, `data/` for `--person`, and your PDFs in `statements/`). The `.gitignore` leaves those out of the repo on purpose, along with `archive/`, `balances/` and `desktop-data/`. Check `git status` before every commit anyway.
+The scripts keep your data in plain files (`ledger.csv`, `split_transactions.csv`, `personal_transactions.csv`, `split_summary.json`, `.split_state.json`, `data/` for `--person`, and your PDFs in `statements/`). The `.gitignore` leaves those out of the repo on purpose, along with `archive/`, `balances/` and `desktop-data/`. This repo is public, so check `git status` before every commit.
 
 ## Setup
 

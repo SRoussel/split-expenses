@@ -96,7 +96,7 @@ The `backups/` folder is git-ignored. The file contains your full ledger and the
 ### Things to avoid
 
 - **Don't connect the GitHub repo to Cloudflare's dashboard builds.** By default they also build every other branch you push and serve it at a public preview URL that uses the *real* database. Deploying from your computer avoids that, and `preview_urls` is turned off in `wrangler.jsonc`.
-- **Don't commit your data.** The repo on GitHub is private, but treat it as if it weren't. `ledger.csv`, `split_transactions.csv`, `split_summary.json`, `.split_state.json`, `statements/`, PDFs and `backups/` are git-ignored; keep it that way, and check `git status` before committing.
+- **Don't commit your data.** The repo on GitHub is public. `ledger.csv`, `split_transactions.csv`, `split_summary.json`, `.split_state.json`, `statements/`, PDFs and `backups/` are git-ignored; keep it that way, and check `git status` before committing.
 - **Never put a Cloudflare API token** or anything secret in `wrangler.jsonc`, `.env` files that aren't ignored, or the code. The app doesn't need any.
 
 ### How sign-in is protected
