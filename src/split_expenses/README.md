@@ -2,17 +2,17 @@
 
 These run on your computer and never send anything anywhere. There are three:
 
-- `split-statements` reads bank statement PDFs and goes through every transaction once: money out is yours, shared or excluded; money in is income, a return or excluded. Each gets a category.
+- `split-statements` reads bank statements (PDFs, or CSV and OFX downloads) and goes through every transaction once: money out is yours, shared or excluded; money in is income, a return or excluded. Each gets a category.
 - `split-ledger` keeps a running balance of who owes who, and writes the totals-only summary that the web app imports.
-- `split-insights` opens a page in your browser with every transaction you've gone through, for digging into where the money goes.
+- `split-insights` opens a page in your browser with every transaction you've gone through, for digging into where the money goes, and your net worth.
 
-Run both from the repo root, not from this folder. For how they fit with the web app, see the [main README](../../README.md).
+Run them from the repo root, not from this folder. For how they fit with the web app, see the [main README](../../README.md).
 
-The scripts keep your data in plain files (`ledger.csv`, `split_transactions.csv`, `personal_transactions.csv`, `split_summary.json`, `.split_state.json`, `data/` for `--person`, and your PDFs in `statements/`). The `.gitignore` leaves those out of the repo on purpose. This repo is public, so check `git status` before every commit.
+The scripts keep your data in plain files (`ledger.csv`, `split_transactions.csv`, `personal_transactions.csv`, `split_summary.json`, `.split_state.json`, `data/` for `--person`, and your PDFs in `statements/`). The `.gitignore` leaves those out of the repo on purpose, along with `archive/`, `balances/` and `desktop-data/`. This repo is public, so check `git status` before every commit.
 
 ## Setup
 
-Run both from the repo root with `uv run split-statements` and `uv run split-ledger`. There's nothing to install by hand: the first time, uv sets up the project and its one dependency, `pdfplumber`. Your files are read and written in the folder you run the commands from.
+Run them from the repo root with `uv run split-statements`, `uv run split-ledger` and `uv run split-insights`. There's nothing to install by hand: the first time, uv sets up the project and its one dependency, `pdfplumber`. Your files are read and written in the folder you run the commands from.
 
 **Both of you on one computer:** add `--person sam` (any short name) to `split-statements` and `split-ledger summarize` / `finish`. That person's review progress, remembered vendors, transaction files and summary then live in `data/sam/`, so the two of you never mix. Without `--person`, the files are in the repo root as before.
 
@@ -55,6 +55,7 @@ It keeps track of what you've already gone through in `.split_state.json`, so yo
 Options:
 
 - `--person NAME` keep this person's files in `data/NAME/`
+- `--csv-sign negative-out` or `positive-out` say which sign is money out in CSV downloads with one amount column
 - `-o FILE` save splits somewhere other than `split_transactions.csv`
 - `--personal-output FILE` save your own transactions somewhere other than `personal_transactions.csv`
 - `--dump` just print what it parsed, no questions
@@ -97,7 +98,7 @@ Or do both steps at once, summarize and then archive:
 
     uv run split-ledger finish --person sam
 
-It writes the summary, moves the batch into `archive/<date>/` (see "A typical month" in the [main README](../../README.md#a-typical-month)) and prints the path of the summary to import, like `archive/sam/2026-11-08/split_summary.json`. If there's nothing to summarize, nothing is moved. It takes `--no-personal` and `--name` like `summarize`; the personal transactions are archived either way. It stops if a `split_summary.json` from an earlier `summarize` is still there, since that one may already be imported.
+`uv run split-ledger archive` does just the second step. `finish` writes the summary, moves the batch into `archive/<date>/` (see "A typical month" in the [main README](../../README.md#a-typical-month)) and prints the path of the summary to import, like `archive/sam/2026-11-08/split_summary.json`. If there's nothing to summarize, nothing is moved. It takes `--no-personal` and `--name` like `summarize`; the personal transactions are archived either way. It stops if a `split_summary.json` from an earlier `summarize` is still there, since that one may already be imported.
 
 One thing to watch: importing doesn't clear `split_transactions.csv`. If you review more statements and import again, the old transactions get counted again. Either delete the CSV after you import it, or use `-o` to start a new file next time.
 
@@ -122,11 +123,13 @@ The phone app only ever sees monthly totals. This is the other side: every trans
     cd web && npm install && npm run build:desktop && cd ..
     uv run split-insights
 
+It opens http://127.0.0.1:8765 in your browser. `--port` picks another port, `--no-open` doesn't open the browser, and `--dir` reads the files from another folder. Ctrl+C stops it.
+
 It reads every `split_transactions.csv` and `personal_transactions.csv` it can find: the current batch, `data/<person>/`, and everything in `archive/`. When the same statement shows up in more than one batch (an archived copy and a second pass, say), the newest file wins, so nothing is counted twice. The terminal prints what came from where.
 
 The page runs on `127.0.0.1` and only answers to that address, so other machines and other websites can't read it. Reload it after going through new statements. Merchant names are cleaned up from what the bank sends (`TST* CAFE BLUEBELL 207-555-0100 ME 6462 1111` becomes Cafe Bluebell); hover a name in the transactions list to see the original.
 
-Click a month, a category or a merchant to filter everything else by it. `/` jumps to search, and Esc clears.
+Each view starts with a sentence that sums it up, like "You spent $64,245 in the last 12 months, $5,354 a month", with the other figures in a line under it. The bar at the top picks the period, whose spending (yours, the other person's or both), shared or personal, and searches. Click a month, a category or a merchant to filter everything else by it. `/` jumps to search, and Esc clears.
 
 Besides that overview there are four more views in the sidebar. **What changed** compares a month with the six before it: which categories and merchants went up or down, places you went for the first time, and regulars you skipped. **Recurring charges** finds subscriptions, memberships and bills from merchants that charge on a steady schedule, with what each costs a year, when the next one is due, and any price change. Bills that vary (electricity) count when they're filed as utilities or housing. **Year in review** sums up a calendar year: totals against the same months the year before (when your files have them), month by month, categories, top merchants, and a few highlights like the biggest purchase (rent and bills aside), the place you went most, and new places. Click anything in these views to see those transactions in the overview.
 
@@ -134,9 +137,9 @@ Besides that overview there are four more views in the sidebar. **What changed**
 
 When the same place shows up under different names, pick one in Merchants and rename it. Typing another merchant's name merges the two, and it suggests names that look alike.
 
-You can also refile transactions there: change the category or shared/personal right in the list, or tick several (shift-click for a range) and change them together. Each change can be undone, and "edited" on a row shows what the statement had and puts it back. When everything you changed is one merchant, it offers to file that merchant the same way in future statements, which saves the same rule `split-statements` would.
+You can also refile transactions there: click a transaction and change its category or shared/personal right in the list, or tick several (shift-click for a range) and change them together. Each change can be undone, and "edited" on a row shows what the statement had and puts it back. When everything you changed is one merchant, it offers to file that merchant the same way in future statements, which saves the same rule `split-statements` would.
 
-**Sending it to the phone app.** "Export for phone app" makes the same `split_summary.json` that `split-ledger finish` does, for one person and the dates you pick, with your refilings and renames applied. Import it on the phone under More > Import statement summary. It starts from the day after the last summary it knows about (the ones `finish` archived, and earlier exports), and warns when the dates overlap one, since importing the same days twice counts them twice. To fix something already in the app, delete that upload there and import the new file.
+**Sending it to the phone app.** "Export for the phone" makes the same `split_summary.json` that `split-ledger finish` does, for one person and the dates you pick, with your refilings and renames applied. Import it on the phone under More > Import statement summary. It starts from the day after the last summary it knows about (the ones `finish` archived, and earlier exports), and warns when the dates overlap one, since importing the same days twice counts them twice. To fix something already in the app, delete that upload there and import the new file.
 
 With a desktop key (`npm run desktop-key`, see [web/README.md](../../web/README.md#desktop-keys)) there's also **Send to the app**, which skips the file: it sends the same summary straight to the app. It then knows exactly what's already there, starts after it, and when the dates overlap an upload, offers to take that one out first (its spending totals go, and its shared expense is voided, so the ledger still shows it crossed out).
 
@@ -151,6 +154,8 @@ Then, from `web/`:
 
     npm run app:build      # takes a few minutes the first time
     npm run app:install    # adds it to the app menu; under WSL, the Windows Start menu
+
+Under WSL, it only appears in the Start menu after WSL restarts: run `wsl --shutdown` from PowerShell, then open Ubuntu again.
 
 `npm run app` runs it without installing. It reads the files in this repo folder; set `SPLIT_DIR` to use another one.
 

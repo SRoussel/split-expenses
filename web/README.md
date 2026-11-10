@@ -8,7 +8,7 @@ The screen refreshes every 15 seconds while it's open, and whenever you switch b
 
 ## 1. Run it locally
 
-You need **Node 20 or newer** (Node 22 is best; Wrangler refuses to run on 18).
+You need **Node 22 or newer**, the same as CI.
 
     cd web
     npm install
@@ -29,16 +29,17 @@ To test the whole backend (sign-up and sign-in, the security guards, throttling,
 
     npm run test:api
 
-It builds the app, starts the Worker against a brand-new throwaway database, runs about 15 checks over HTTP, then deletes everything. Your local and deployed data aren't touched. Run it after any change to `worker/`, `shared/` or `migrations/`, before you deploy.
+It builds the app, starts the Worker against a brand-new throwaway database, runs about 60 checks over HTTP, then deletes everything. Your local and deployed data aren't touched. Run it after any change to `worker/`, `shared/` or `migrations/`, before you deploy.
 
-To check for common mistakes (unused code, misused React hooks and so on):
+To check for common mistakes (unused code, misused React hooks and so on), and the formatting:
 
     npm run lint
+    npm run format:check      # npm run format fixes it
 
 
 ## 2. Deploy to Cloudflare
 
-You need a free Cloudflare account and Node 20 or newer. Run everything from the `web/` folder. Deploy from your computer with the commands below; don't connect the git repo in the Cloudflare dashboard (see "Things to avoid").
+You need a free Cloudflare account and Node 22 or newer. Run everything from the `web/` folder. Deploy from your computer with the commands below; don't connect the git repo in the Cloudflare dashboard (see "Things to avoid").
 
 **Step 1: log in to Cloudflare.**
 
@@ -156,19 +157,19 @@ Sign in with email and password the first time, then add a passkey when the app 
 
 - **Add expense**: amount, name, who paid, and your share. Under the name you get names you've used before; tap one and it also fills in the category you gave it last time (until you pick a category yourself). Your share is a row of quick picks starting at your default split (see below): "Split evenly", "All theirs", "All mine", or "Custom…" for any percentage.
 - **Reading the list**: each row says who paid and who owes whom, like "You paid $184.32 · Sam owes you", and the amount on the right is what that entry adds to the balance (green: owed to you, red: you owe). Payments between you are greyed out with a PAID stamp, and each month ends with a subtotal: how much that month moved the balance.
-- **Search and filters**, under the balance: type part of a name, a category or an exact amount (`84.20`). **Filters** narrows by type (expenses or payments), who paid, category and a date range. The line under them counts what matches, with what was spent and your share of it (expenses only, not voided ones), and **Clear** resets everything. Imported statements are split across categories, so the category filter doesn't find them; the Spending tab does.
+- **Search and filters**, under the balance: type part of a name, a category or an exact amount (`84.20`). **Filters** narrows by type (expenses or payments), who paid, category and a date range. The line under them counts what matches, with what was spent and your share of it (expenses only, not voided ones), and **Clear** resets everything. Imported statements are split across categories, so the category filter doesn't find them; the Spending tab does, and its category sheet can open the Ledger with exactly the entries it counts (see below).
 - **Tap any entry** to see the details: who paid, the split, who added it and when. Entries your partner added say "added by …" in the list.
 - **Edit**: from an entry's details. The original isn't overwritten. It's kept in the history, marked "edited", and the corrected copy takes its place. The type (expense, payment, starting balance) can't change in an edit.
 - **Settle up**: records a payment between you. It defaults to the full balance, paid by whoever owes. It only updates the ledger and doesn't move any money.
 - **More > Recurring expenses**: rent, subscriptions and other bills with a fixed amount. Set the amount, who pays, the split, how often (weekly, monthly or yearly) and the first date (today or later). Each one is added to the ledger by itself, marked ↻, the first time either of you opens the app on or after its date. If nobody opens the app for a while, the missed ones are all added next time. A rule on the 29th–31st uses the last day of shorter months. Edit a rule to change the amount, payer or split (from the next one on), or to pause it. Resuming doesn't fill in the paused months. Stopping a rule keeps the entries it already added, and a voided or edited one never comes back. Bills paid by card also show up on your statements, so mark those vendors as "self" in `split-statements` to avoid counting them twice.
 - **More > Default split**: the share each of you normally pays, like 60/40. It's one setting for both of you and can be set once you've both joined.
-- **More > Import statement summary**: adds a statement to the app as totals only. On your computer, run `uv run split-ledger finish` (add `--person sam` for Sam's files). It writes `split_summary.json` with totals per month and category: the shared transactions, plus that person's own spending and income. Open it to see exactly what the app will get. It then archives the batch and prints where the file is. Get that small file to your phone (AirDrop, iCloud Drive), choose it in the app, and say **whose statement it is** (it also sets who paid the shared part). You can leave either part out. The shared part becomes one ledger entry, like `Expenses 01/15/26-02/03/26`, with its category breakdown. The personal part is saved as that person's monthly spending and income by category, visible to both of you. Everything is saved together or not at all, and the same statement can't be uploaded twice for the same person. The detailed transaction files never leave your computer: the app refuses them if you pick one by mistake. Older summary files (shared total only) still work.
+- **More > Import statement summary**: adds a statement to the app as totals only. On your computer, run `uv run split-ledger finish` (add `--person sam` for Sam's files). It writes `split_summary.json` with totals per month and category: the shared transactions, plus that person's own spending and income. Open it to see exactly what the app will get. It then archives the batch and prints where the file is. Get that small file to your phone (AirDrop, iCloud Drive), choose it in the app, and say **whose statement it is** (it also sets who paid the shared part). You can leave either part out. The shared part becomes one ledger entry, like `Expenses 01/15/26-02/03/26`, with its category breakdown. The personal part is saved as that person's monthly spending and income by category, visible to both of you. Everything is saved together or not at all, and the same statement can't be uploaded twice for the same person. One upload can cover up to 24 months. The detailed transaction files never leave your computer: the app refuses them if you pick one by mistake. Older summary files (shared total only) still work.
 - **Categories**: expenses you add by hand and recurring expenses can have an optional category, for the spending reports.
 - **Spending tab** (Ledger · Spending · Trends at the top): spending and cash flow by month, built only from totals.
   - Switch between **You**, **Sam**, **Shared** and **Both**. "You" is your own uploaded spending plus *your share* of shared expenses (so a $100 shared grocery run at 50/50 counts as $50). "Shared" is shared expenses at their full amount. "Both" is everything, and always equals You + Sam.
   - **Net cash flow** is money in (income from your uploads) minus spending, with how much of your income you kept.
   - A **coverage strip** shows which days of the month your uploads cover. A month that's only partly uploaded says so and hides comparisons, and a month with nothing uploaded for someone is marked incomplete rather than shown as overspending.
-  - **By category** lists the month's categories, with the change against the average of earlier months that have data. Tap one for its 12-month trend and what's in it: shared expenses by name, statement uploads as a monthly total only. **Move money to another category** fixes a month after the fact, e.g. $700 of a Costco run from groceries to household. It changes one upload or one imported shared statement, so totals and the balance stay the same; for a shared one the amount is the full shared amount and it changes for both of you. Undo right after, or move it back later. (Hand-added expenses: edit their category instead.)
+  - **By category** lists the month's categories, with the change against the average of earlier months that have data. Tap one for its 12-month trend and what's in it: shared expenses by name, statement uploads as a monthly total only. **See these entries in the Ledger** opens the Ledger showing just those shared expenses, with a "From Spending" line and **Show all** to go back. An imported statement shows there in full, though Spending only counts its part in that category. **Move money to another category** fixes a month after the fact, e.g. $700 of a Costco run from groceries to household. It changes one upload or one imported shared statement, so totals and the balance stay the same; for a shared one the amount is the full shared amount and it changes for both of you. Undo right after, or move it back later. (Hand-added expenses: edit their category instead.)
   - **Last 6 months** charts net cash flow (or shared spending); tap a month to jump to it. "Show numbers" under each chart has the same numbers as a table.
   - **Statement uploads** lists every upload, and you can delete a wrong one. A shared entry added by the same import stays in the ledger; void it there.
   - Payments between you, starting balances and voided entries never count as spending. Shared expenses added without a category show as "No category".
@@ -207,8 +208,11 @@ Also bump the `?v=` numbers on the other icon links, deploy, and remove and re-a
 
     migrations/           D1 (SQLite) tables, applied in order
     shared/owed.ts        the splitting rule, used by both the app and the Worker
+    shared/categories.*   the category list (the Python scripts keep a copy; a test checks they match)
+    shared/recurring.ts   recurring-expense dates, shared by the app and the Worker
+    shared/limits.ts      limits the app and the desktop page share, like 24 months per upload
     public/_headers       security headers for the pages
-    scripts/              reset-password helper
+    scripts/              reset-password, desktop-key, and install-app (adds the desktop app to the menu)
     tests/api.test.mjs    end-to-end backend tests (npm run test:api)
     tests/fake-passkey.mjs  a software passkey for those tests
     worker/index.ts       the backend's front door: routes each /api/* request
@@ -219,6 +223,7 @@ Also bump the `?v=` numbers on the other icon links, deploy, and remove and re-a
     worker/entries.ts     add, edit, void and restore entries
     worker/recurring.ts   recurring expenses
     worker/spending.ts    statement imports and spending totals
+    worker/desktop.ts     desktop keys, and the uploads they're allowed to list, add and replace
     eslint.config.js      lint rules (npm run lint)
     src/ledger.ts         money parsing, balance math, CSV import and export
     src/ledger.test.ts    tests for the above
@@ -237,6 +242,8 @@ Also bump the `?v=` numbers on the other icon links, deploy, and remove and re-a
     src/SpendingScreen.tsx the Spending tab
     src/files.ts          saving files (CSV exports) to the device
     src/ui.tsx            shared UI pieces
+    desktop/              the desktop page that split-insights serves (npm run build:desktop)
+    src-tauri/            the desktop app around that page (npm run app)
     wrangler.jsonc        Cloudflare config
 
 ## Not done yet
