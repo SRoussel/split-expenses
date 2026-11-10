@@ -16,16 +16,16 @@ My partner and I share a lot of expenses, and I wanted an easy way to keep track
 
 It has three parts:
 
-- **Python scripts** that run on my computer. One reads bank statement PDFs and walks me through every transaction so I can mark it as mine, shared, or neither, with a category. The other keeps a running ledger and makes a small summary file for the app. See [src/split_expenses/README.md](src/split_expenses/README.md).
+- **Python scripts** that run on my computer. One reads bank statements (PDFs, or the CSV and OFX files banks let you download) and walks me through every transaction so I can mark it as mine, shared, or neither, with a category. The other keeps a running ledger and makes a small summary file for the app. See [src/split_expenses/README.md](src/split_expenses/README.md).
 - **A web app** we both use from our phones. It shows the balance, lets either of us add an expense or settle up, and has spending and cash flow reports by month and category. It runs on Cloudflare (a Worker plus a D1 database). See [web/README.md](web/README.md).
-- **A desktop page** for digging into every transaction, both of ours, on my computer. `uv run split-insights` serves it locally, so the details never leave the machine.
+- **A desktop page** for digging into every transaction, both of ours, on my computer: where the money goes, what changed this month, recurring charges, a year in review, and our net worth. `uv run split-insights` serves it locally, so the details never leave the machine. It also comes as a desktop app with its own window. See the split-insights section of [src/split_expenses/README.md](src/split_expenses/README.md#split-insights).
 
 It's built for exactly two people. The app won't let a third person join.
 
 ## How the pieces fit
 
 ```
-bank statement PDFs
+bank statements (PDF, CSV, OFX)
         │
         ▼
 uv run split-statements      go through each transaction: mine, shared or skip
@@ -44,6 +44,8 @@ the web app                  import it from my phone
 ```
 
 The scripts and the app never talk to each other directly. The summary file is just totals per month and category: no merchant names, no individual purchases. Open it before you import it if you want to see exactly what goes up.
+
+The desktop page can make the same summary file, with any merchants I've renamed or transactions I've refiled there. With a desktop key it can also send it to the app directly instead of as a file; a key can only add and replace statement uploads.
 
 Going the other way, the app can export the ledger as a CSV in the format `split-ledger` reads.
 
@@ -69,6 +71,8 @@ For the desktop page, build it once and start it from the repo root:
     cd web && npm run build:desktop && cd ..
     uv run split-insights
 
+It opens at http://127.0.0.1:8765. To run it as an app in its own window instead, see the split-insights section of [src/split_expenses/README.md](src/split_expenses/README.md#split-insights) (it needs Rust once).
+
 ## A typical month
 
 1. Download the month's statements into `statements/`: PDFs, or the bank's CSV or OFX download.
@@ -79,20 +83,20 @@ For the desktop page, build it once and start it from the repo root:
 
 ## Privacy
 
-This repo is public, so everything personal is git-ignored: the PDFs, transaction CSVs, the ledger, summaries, `data/` and `archive/`. Still, check `git status` before you commit.
+The repo is private, but everything personal is git-ignored anyway, in case that ever changes: statements and PDFs, `balances/`, transaction CSVs, the ledger, summaries, `data/`, `archive/` and `desktop-data/`. Still, check `git status` before you commit.
 
-CI only runs the tests. It never deploys and doesn't use any secrets; deploying is a manual step from my computer.
+CI only runs the checks below and compiles the desktop app. It never deploys and doesn't use any secrets; deploying is a manual step from my computer.
 
 ## Tests
 
     uv run python -m unittest discover -s tests -v    # the scripts
-    cd web && npm test                                 # the app's ledger and spending math
+    cd web && npm test                                 # the app's ledger and spending math, and the desktop page's analytics
     cd web && npm run test:api                         # the backend, against a throwaway database
 
-And the linters, which CI also runs:
+And the linters and formatting checks, which CI also runs:
 
-    uv run ruff check
-    cd web && npm run lint
+    uv run ruff check && uv run ruff format --check
+    cd web && npm run lint && npm run format:check
 
 ## Layout
 
@@ -100,5 +104,10 @@ And the linters, which CI also runs:
     tests/                tests for the scripts
     web/                  the web app (and its README)
     web/desktop/          the desktop page that split-insights serves
+    web/src-tauri/        the desktop app: a window around that page
     web/shared/           code the app and the Worker share, and the category list (the scripts keep a copy; a test checks they match)
-    statements/           your PDFs (git-ignored)
+    screenshots/          the pictures in this README (made with made-up data)
+    statements/           your statements: PDFs and downloads (git-ignored)
+    balances/             brokerage and retirement downloads for Net worth (git-ignored)
+    archive/, data/       finished batches, and per-person files from --person (git-ignored)
+    desktop-data/         the desktop page's own files: renames, refilings, accounts (git-ignored)
