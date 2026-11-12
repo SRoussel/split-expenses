@@ -686,6 +686,16 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(rules, {"freshway": {"split": "household"}})
         self.assertEqual(self.post_to("/api/nope", {})[0], 404)
 
+    def test_budgets_are_kept_and_checked(self):
+        status, body = self.post_to("/api/budgets", {"budgets": {"groceries": 80000, "dining": 25000}})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["budgets"], {"dining": 25000, "groceries": 80000})
+        for bad in ({"nope": 100}, {"income": 100}, {"dining": 0}, {"dining": 12.5}, {"dining": "100"}, []):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.post_to("/api/budgets", {"budgets": bad})[0], 400)
+        self.assertEqual(self.post_to("/api/budgets", {"budgets": {}})[0], 200)
+        self.assertEqual(json.loads(self.request("GET", "/api/data")[1])["budgets"], {})
+
     def test_projection_numbers_are_kept(self):
         status, body = self.post_to("/api/projection", {"age": "38", "tax": "12"})
         self.assertEqual((status, json.loads(body)), (200, {"age": "38", "tax": "12"}))

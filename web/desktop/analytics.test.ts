@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   applyFilters,
+  budgetRows,
+  suggestBudget,
   byCategory,
   byMerchant,
   byMonth,
@@ -404,4 +406,41 @@ test("net worth without the home leaves out the house and its mortgage together,
     mortgage: 0,
     net: 10_000 - 20_000,
   });
+});
+
+test("budgets: this month against the budget, the year's average, and months over", () => {
+  const t = (date: string, cents: number, category: string, kind: "shared" | "personal" = "shared", person = "me") =>
+    ({
+      id: date + cents + category,
+      date,
+      cents,
+      vendor: "x",
+      auto: "x",
+      merchant: "x",
+      category,
+      kind,
+      person,
+      source: "",
+    }) as Txn;
+  const txns = [
+    t("2026-10-03", 30000, "groceries"),
+    t("2026-10-09", 25000, "groceries", "personal", "jordan"), // both of you count
+    t("2026-10-10", -5000, "groceries"), // a return lowers it
+    t("2026-10-12", 9000, "dining"),
+    t("2026-10-15", 500000, "income", "personal"), // never a budget
+    t("2026-09-05", 70000, "groceries"),
+    t("2026-08-05", 40000, "groceries"),
+    t("2025-09-05", 99999, "groceries"), // more than a year back: not counted
+  ];
+  const rows = budgetRows(txns, "2026-10", "income", { groceries: 60000, travel: 20000 });
+  assert.deepEqual(
+    rows.map((r) => [r.category, r.budget, r.spent, r.average, r.overMonths, r.monthsCounted]),
+    [
+      ["groceries", 60000, 50000, Math.round(160000 / 3), 1, 3],
+      ["travel", 20000, 0, 0, 0, 3],
+      ["dining", null, 9000, 3000, 0, 3],
+    ],
+  );
+  assert.equal(suggestBudget(53334), 54000);
+  assert.equal(suggestBudget(0), 0);
 });

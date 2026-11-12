@@ -184,6 +184,7 @@ def load(root, edited=True):
         "categories": SPENDING,
         "income": INCOME,
         "me": ME,
+        "budgets": read_budgets(root),
     }
 
 
@@ -195,6 +196,7 @@ def load(root, edited=True):
 #     Giving two merchants the same name merges them.
 # edits.json           {"<transaction id>": {"category": "groceries", "kind": "shared"}, ...}
 #     Your changes to how a transaction is filed. Only differences are kept.
+# budgets.json         {"groceries": 80000, ...}: a monthly budget per category, in cents, for the household
 # projection.json      the numbers typed into "Where this is heading" on Net worth
 # added.json           {"<id>": {"date": ..., "cents": ..., "vendor": ..., "category": ..., "kind": ..., "person": ...}}
 #     Transactions you typed in yourself: cash, or anything no statement will show.
@@ -294,6 +296,31 @@ def classify(root, changes):
             edits[c["id"]] = {"category": c["category"], "kind": c["kind"]}
     write_json(desktop_file(root, "edits.json"), edits)
     return edits
+
+
+MAX_BUDGET = 10**10  # cents
+
+
+def read_budgets(root):
+    out = {}
+    for k, v in read_json(desktop_file(root, "budgets.json")).items():
+        k = current(k)
+        if k in SPENDING and isinstance(v, int) and not isinstance(v, bool) and 0 < v <= MAX_BUDGET:
+            out[k] = v
+    return out
+
+
+def save_budgets(root, budgets):
+    """Replace the monthly budgets: {category: cents}. A category left out has no budget."""
+    if not isinstance(budgets, dict):
+        raise ValueError("expected budgets by category")
+    for k, v in budgets.items():
+        if k not in SPENDING:
+            raise ValueError(f"unknown category: {k!r}")
+        if not isinstance(v, int) or isinstance(v, bool) or not 0 < v <= MAX_BUDGET:
+            raise ValueError("a budget is a whole number of cents above zero")
+    write_json(desktop_file(root, "budgets.json"), budgets)
+    return budgets
 
 
 def read_added(root):
@@ -940,6 +967,7 @@ class Handler(SimpleHTTPRequestHandler):
             "/api/worth": lambda b: change_worth(self.root, b),
             "/api/added": lambda b: change_added(self.root, b),
             "/api/projection": lambda b: save_projection(self.root, b),
+            "/api/budgets": lambda b: save_budgets(self.root, b.get("budgets")),
         }
         if self.path not in routes:
             self.send_error(404)

@@ -27,6 +27,8 @@ export interface Data {
   categories: string[];
   income: string;
   me: string;
+  /** Monthly budgets for the household, in cents, by category. */
+  budgets?: Record<string, number>;
 }
 
 export interface Filters {
@@ -685,3 +687,61 @@ export function savingsRate(txns: Txn[], months: string[], income: string) {
   }
   return { earned, spent, kept: earned - spent, rate: earned > 0 ? (earned - spent) / earned : null };
 }
+
+export interface BudgetRow {
+  category: string;
+  /** The monthly budget in cents, or null when there isn't one. */
+  budget: number | null;
+  /** Spent in the month, in cents; returns lower it. */
+  spent: number;
+  /** A month on average over the year up to and including this month, counting only months with transactions. */
+  average: number;
+  /** Of those months, how many went over the budget. */
+  overMonths: number;
+  monthsCounted: number;
+}
+
+/**
+ * Each category's spending in `month` against its budget, for the household: shared and
+ * personal, both of you. Budgeted categories come first, biggest budget first.
+ */
+export function budgetRows(txns: Txn[], month: string, income: string, budgets: Record<string, number>): BudgetRow[] {
+  const year = new Set(monthRange(shiftMonth(month, -11), month));
+  const byMonth = new Map<string, Map<string, number>>(); // category -> month -> cents
+  const withData = new Set<string>();
+  for (const t of txns) {
+    const m = monthOf(t.date);
+    if (!year.has(m)) continue;
+    withData.add(m);
+    if (t.category === income) continue;
+    const row = byMonth.get(t.category) ?? new Map<string, number>();
+    row.set(m, (row.get(m) ?? 0) + t.cents);
+    byMonth.set(t.category, row);
+  }
+  const counted = [...withData];
+  const cats = new Set([...Object.keys(budgets), ...byMonth.keys()]);
+  const rows = [...cats].map((category) => {
+    const months = byMonth.get(category) ?? new Map<string, number>();
+    const budget = budgets[category] ?? null;
+    const total = counted.reduce((n, m) => n + (months.get(m) ?? 0), 0);
+    return {
+      category,
+      budget,
+      spent: months.get(month) ?? 0,
+      average: counted.length ? Math.round(total / counted.length) : 0,
+      overMonths: budget === null ? 0 : counted.filter((m) => (months.get(m) ?? 0) > budget).length,
+      monthsCounted: counted.length,
+    };
+  });
+  return rows
+    .filter((r) => r.budget !== null || r.spent !== 0 || r.average > 0)
+    .sort(
+      (a, b) =>
+        (a.budget === null ? 1 : 0) - (b.budget === null ? 1 : 0) ||
+        (b.budget ?? b.spent) - (a.budget ?? a.spent) ||
+        a.category.localeCompare(b.category),
+    );
+}
+
+/** A starting budget from an average: rounded up to the next $10. */
+export const suggestBudget = (average: number) => Math.ceil(Math.max(0, average) / 1000) * 1000;

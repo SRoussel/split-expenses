@@ -19,6 +19,7 @@ import {
 } from "./analytics";
 import { categoryLabel, dayLabel, money, moneyRound, monthName, percent, personLabel, rangeLabel } from "./format";
 import AddDialog from "./AddDialog";
+import BudgetsView from "./BudgetsView";
 import ChangesView from "./ChangesView";
 import ExportDialog from "./ExportDialog";
 import Lede, { Fig } from "./Lede";
@@ -36,11 +37,12 @@ const PRESETS: { id: Preset; label: string }[] = [
 ];
 
 type Theme = "system" | "light" | "dark";
-type Screen = "overview" | "changes" | "recurring" | "year" | "worth";
+type Screen = "overview" | "changes" | "budgets" | "recurring" | "year" | "worth";
 
 const SCREENS: { id: Screen; label: string }[] = [
   { id: "overview", label: "Where the money goes" },
   { id: "changes", label: "What changed" },
+  { id: "budgets", label: "Budgets" },
   { id: "recurring", label: "Recurring charges" },
   { id: "year", label: "Year in review" },
   { id: "worth", label: "Net worth" },
@@ -117,6 +119,7 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
   const [preset, setPreset] = useState<Preset | null>("12m");
   const [screen, setScreen] = useState<Screen>("overview");
   const [changesMonth, setChangesMonth] = useState<string | null>(null);
+  const [budgetsMonth, setBudgetsMonth] = useState<string | null>(null);
   const [f, setF] = useState<Filters>(() => ({
     ...presetRange("12m", first, last),
     person: null,
@@ -316,7 +319,7 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
 
       <main className="main">
         <div className="sheet">
-          {screen !== "worth" && (
+          {screen !== "worth" && screen !== "budgets" && (
             <form className="filterbar" aria-label="Filters" onSubmit={(e) => e.preventDefault()}>
               {screen === "overview" && (
                 <label>
@@ -381,6 +384,16 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
               income={income}
               month={changesMonth}
               onMonth={setChangesMonth}
+              onOpen={openInOverview}
+            />
+          ) : screen === "budgets" ? (
+            <BudgetsView
+              txns={txns}
+              income={income}
+              budgets={data.budgets ?? {}}
+              month={budgetsMonth}
+              onMonth={setBudgetsMonth}
+              onSave={(budgets) => post("/api/budgets", { budgets })}
               onOpen={openInOverview}
             />
           ) : screen === "worth" ? (

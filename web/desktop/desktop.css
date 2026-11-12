@@ -781,6 +781,56 @@ kbd {
   background: var(--text-2);
 }
 
+/* --- Budgets --- */
+
+.budgets .budget-input {
+  display: inline-block;
+  width: 7.5em;
+}
+.budget-bar-col {
+  width: 30%;
+  min-width: 120px;
+}
+.budget-track {
+  position: relative;
+  display: block;
+  height: 10px;
+  background: var(--panel-2);
+}
+.budget-fill,
+.budget-over {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+}
+.budget-fill {
+  background: var(--bar-on);
+}
+.budget-over {
+  background: var(--more);
+  border-left: 2px solid var(--panel);
+}
+.budget-limit {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ink);
+}
+.over-by {
+  color: var(--more);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.budgets td {
+  vertical-align: middle;
+}
+.budgets .cell-sub {
+  display: block;
+}
+
 /* --- Tables --- */
 
 .grid-table {
