@@ -231,6 +231,18 @@ export default function ImportSummary({
             </div>
           )}
 
+          {summary.netWorth && (
+            <p className="muted small">
+              Also brings your net worth at the end of{" "}
+              {new Date(`${summary.netWorth.month}-01T00:00:00Z`).toLocaleDateString(undefined, {
+                month: "long",
+                year: "numeric",
+                timeZone: "UTC",
+              })}
+              , {summary.netWorth.cents < 0 ? "−" : ""}
+              {fmt(summary.netWorth.cents)}, for Home: just the total, not your accounts.
+            </p>
+          )}
           {summary.budgets && (
             <p className="muted small">
               {Object.keys(summary.budgets).length

@@ -86,4 +86,6 @@ export interface SpendingData {
   breakdown: { entry_id: string; month: string; category: string; cents: number }[];
   /** The household's monthly budgets, by spending category. */
   budgets?: { category: string; cents: number }[];
+  /** Net worth at a month's end (and the month before), sent from the desktop page. */
+  net_worth?: { month: string; cents: number; previous_month: string | null; previous_cents: number | null } | null;
 }

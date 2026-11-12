@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { categoryLabel } from "../shared/categories";
 import { getSpending } from "./api";
-import { budgetLines, lastSettled } from "./home";
+import { budgetLines, lastSettled, netWorthLine } from "./home";
 import { fmt, todayLocal } from "./ledger";
 import { buildIndex, coverage, summarize, UNCATEGORIZED } from "./spending";
 import type { Entry, Member, SpendingData } from "./types";
@@ -102,6 +102,7 @@ export default function HomeScreen({
             : `Last settled ${settled.daysAgo === 1 ? "yesterday" : `${settled.daysAgo} days ago`}, on ${dayShort(settled.date)}.`
           : "You haven't settled up in the app yet."}
       </p>
+      {data?.net_worth && <p className="home-settled muted small">{netWorthLine(data.net_worth)}</p>}
 
       <ErrorText message={error} />
 

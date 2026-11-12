@@ -20,6 +20,7 @@ import {
   savingsRate,
   unlinked,
   worthByMonth,
+  latestNetWorth,
   worthMonths,
   withoutHome,
   type Worth,
@@ -365,6 +366,15 @@ test("net worth: statements fill in an account's history, typed balances win, de
   assert.equal(rows[1].groups.debt, 50_000, "a joint card matches statements from either of you");
   assert.equal(rows[1].net, 999 + 5_000_000 - 50_000);
   assert.equal(worthByMonth(worth, ["2026-02"], "jordan")[0].net, 5_000_000, "just Jordan's");
+
+  // For the phone's Home: the latest month and the one before, everyone's accounts.
+  assert.deepEqual(latestNetWorth(worth), {
+    month: "2026-03",
+    cents: 999 + 5_000_000 - 50_000,
+    previous_month: "2026-02",
+    previous_cents: 999 + 5_000_000 - 50_000,
+  });
+  assert.equal(latestNetWorth({ ...worth, accounts: [] }), null, "no accounts, nothing to send");
 
   assert.deepEqual(
     unlinked(worth).map((u) => [u.ref, u.person, u.count, u.latest.cents]),

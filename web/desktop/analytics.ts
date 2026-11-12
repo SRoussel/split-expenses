@@ -745,3 +745,31 @@ export function budgetRows(txns: Txn[], month: string, income: string, budgets: 
 
 /** A starting budget from an average: rounded up to the next $10. */
 export const suggestBudget = (average: number) => Math.ceil(Math.max(0, average) / 1000) * 1000;
+
+/** Net worth at the end of the latest month, and the month before, for the phone app's Home. */
+export interface NetWorthNote {
+  month: string;
+  cents: number;
+  previous_month: string | null;
+  previous_cents: number | null;
+}
+
+/**
+ * The household's net worth (everyone's accounts, the home included, as Net worth's
+ * headline shows it) at the end of the latest month with balances, and the month before.
+ * Null without any accounts or balances.
+ */
+export function latestNetWorth(worth: Worth): NetWorthNote | null {
+  if (!worth.accounts.length) return null;
+  const months = worthMonths(worth);
+  if (!months.length) return null;
+  const rows = worthByMonth(worth, months);
+  const last = rows[rows.length - 1];
+  const before = rows.length > 1 ? rows[rows.length - 2] : null;
+  return {
+    month: last.month,
+    cents: last.net,
+    previous_month: before?.month ?? null,
+    previous_cents: before?.net ?? null,
+  };
+}

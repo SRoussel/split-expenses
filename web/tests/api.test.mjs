@@ -936,6 +936,35 @@ describe("Split API", () => {
       assert.deepEqual(await budgets(), []);
     });
 
+    test("net worth comes with an upload; only a later month replaces it", async () => {
+      const nw = async () => (await bob.get("/api/spending")).data.net_worth;
+      const note = (month, cents, previous_month = null, previous_cents = null) => ({
+        month,
+        cents,
+        previous_month,
+        previous_cents,
+      });
+      const send = (name, n) => desk("POST", "/api/desktop/import", { ...upload(name), net_worth: n });
+      assert.equal(await nw(), null);
+      assert.equal((await send("NW October", note("2026-10", 25240000, "2026-09", 24830000))).status, 201);
+      assert.deepEqual(await nw(), note("2026-10", 25240000, "2026-09", 24830000));
+      assert.equal((await send("NW August", note("2026-08", 1))).status, 201, "an older summary still imports");
+      assert.equal((await nw()).month, "2026-10", "but doesn't take the net worth back");
+      assert.equal((await send("NW November", note("2026-11", -5000))).status, 201);
+      assert.deepEqual(await nw(), note("2026-11", -5000));
+      for (const bad of [
+        { ...note("2026-12", 1), accounts: [] },
+        note("2026-13", 1),
+        note("2026-12", 1.5),
+        note("2026-12", 1, "2026-12", 1),
+        note("2026-12", 1, "2026-11", null),
+        "252400",
+      ]) {
+        assert.equal((await send("NW bad", bad)).status, 400, JSON.stringify(bad));
+      }
+      assert.deepEqual(await nw(), note("2026-11", -5000));
+    });
+
     test("bad budgets are refused, and a bad one stops the whole upload", async () => {
       await desk("POST", "/api/desktop/budgets", { budgets: { groceries: 80000 } });
       for (const bad of [

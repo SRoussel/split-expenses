@@ -166,6 +166,21 @@ test("parseSummary refuses the detailed CSVs and anything unexpected", () => {
     ["zero budget", (d) => (d.budgets = { dining: 0 }), /budget for dining isn't valid/],
     ["budgets as a list", (d) => (d.budgets = [1]), /budgets aren't valid/],
     [
+      "accounts in the net worth",
+      (d) => (d.net_worth = { month: "2026-01", cents: 1, previous_month: null, previous_cents: null, accounts: [] }),
+      /unexpected fields in its net worth/,
+    ],
+    [
+      "net worth in dollars",
+      (d) => (d.net_worth = { month: "2026-01", cents: 1.5, previous_month: null, previous_cents: null }),
+      /net worth isn't valid/,
+    ],
+    [
+      "net worth's month before is after",
+      (d) => (d.net_worth = { month: "2026-01", cents: 1, previous_month: "2026-02", previous_cents: 1 }),
+      /net worth isn't valid/,
+    ],
+    [
       "empty",
       (d) => {
         delete d.shared;
@@ -214,6 +229,10 @@ test("budgets from the desktop page come along with an import, and only when the
     {},
     "none on the desktop: clears them",
   );
+  const nw = { month: "2026-01", cents: -5000, previous_month: null, previous_cents: null };
+  assert.equal(summaryToImport(parseSummary(JSON.stringify(d)), choices).net_worth, undefined);
+  d.net_worth = nw;
+  assert.deepEqual(summaryToImport(parseSummary(JSON.stringify(d)), choices).net_worth, nw);
 });
 
 test("export uses the CLI ledger.csv format", () => {

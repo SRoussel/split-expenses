@@ -571,7 +571,40 @@ def summary_for(root, body):
     budgets = budgets_to_send(root)
     if budgets is not None:
         summary["budgets"] = budgets
+    net_worth = clean_net_worth(body.get("net_worth"))
+    if net_worth is not None:
+        summary["net_worth"] = net_worth
     return person, summary
+
+
+def clean_net_worth(note):
+    """The page's net worth for the phone's Home: one total at a month's end, and the month before.
+
+    {"month": "2026-10", "cents": ..., "previous_month": "2026-09" or None, "previous_cents": ... or None}.
+    The page works it out from the accounts (Net worth's headline); only these numbers leave.
+    """
+    if note is None:
+        return None
+    if not isinstance(note, dict) or set(note) != {"month", "cents", "previous_month", "previous_cents"}:
+        raise ValueError("bad net worth")
+
+    def ok_month(m):
+        return isinstance(m, str) and re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", m)
+
+    def ok_cents(c):
+        return isinstance(c, int) and not isinstance(c, bool) and abs(c) <= 10**13
+
+    if not ok_month(note["month"]) or not ok_cents(note["cents"]):
+        raise ValueError("bad net worth")
+    if (note["previous_month"] is None) != (note["previous_cents"] is None):
+        raise ValueError("bad net worth")
+    if note["previous_month"] is not None and (
+        not ok_month(note["previous_month"])
+        or note["previous_month"] >= note["month"]
+        or not ok_cents(note["previous_cents"])
+    ):
+        raise ValueError("bad net worth")
+    return dict(note)
 
 
 def note_sent(root, person, summary, how):
@@ -735,6 +768,8 @@ def send_to_app(root, body):
         payload["personal"] = {"person_id": person_id, "months": summary["personal"]["months"]}
     if "budgets" in summary:
         payload["budgets"] = summary["budgets"]
+    if "net_worth" in summary:
+        payload["net_worth"] = summary["net_worth"]
 
     for upload_id in replace:
         app_call(cfg, "POST", f"/api/desktop/uploads/{upload_id}/remove", {})

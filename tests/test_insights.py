@@ -539,6 +539,26 @@ class SendToAppTest(unittest.TestCase):
             FakeApp.calls[-1][1:3], ("/api/desktop/budgets", {"budgets": {}}), "cleared here, cleared there"
         )
 
+    def test_net_worth_goes_along_when_the_page_sends_it(self):
+        note = {"month": "2026-10", "cents": 25240000, "previous_month": "2026-09", "previous_cents": 24830000}
+        body = {"person": "me", "start": "2000-01-01", "end": "2100-01-01", "net_worth": note}
+        out = send_to_app(self.root, body)
+        payload = [c for c in FakeApp.calls if c[1] == "/api/desktop/import"][-1][2]
+        self.assertEqual(payload["net_worth"], note)
+        self.assertEqual(out["summary"]["net_worth"], note, "the file carries it too")
+        first = {"month": "2026-10", "cents": -500, "previous_month": None, "previous_cents": None}
+        self.assertEqual(insights.clean_net_worth(first), first, "a first month, and it can be negative")
+        for bad in (
+            {**note, "accounts": []},  # nothing but the totals
+            {**note, "month": "2026-13"},
+            {**note, "cents": 1.5},
+            {**note, "previous_cents": None},
+            {**note, "previous_month": "2026-10"},
+            "252400",
+        ):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                insights.clean_net_worth(bad)
+
     def test_the_partners_statement_goes_to_the_partner(self):
         send_to_app(self.root, {"person": "jordan", "start": "2026-01-01", "end": "2026-01-31", "personal": False})
         payload = [c for c in FakeApp.calls if c[1] == "/api/desktop/import"][0][2]

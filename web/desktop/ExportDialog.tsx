@@ -5,8 +5,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MAX_UPLOAD_MONTHS as MAX_MONTHS } from "../shared/limits";
-import { monthOf, monthRange, shiftMonth, type Data, type Txn } from "./analytics";
-import { dayLabel, money, personLabel } from "./format";
+import {
+  latestNetWorth,
+  monthOf,
+  monthRange,
+  shiftMonth,
+  type Data,
+  type NetWorthNote,
+  type Txn,
+  type Worth,
+} from "./analytics";
+import { dayLabel, money, monthName, moneyRound, personLabel } from "./format";
 
 // The desktop app opens the page with ?app; there the server saves the file, since the
 // app's window doesn't do browser downloads.
@@ -81,6 +90,15 @@ export default function ExportDialog({
     return () => d?.close();
   }, []);
 
+  // Net worth goes along too, as one number for the phone's Home (not the accounts).
+  const [netWorth, setNetWorth] = useState<NetWorthNote | null>(null);
+  useEffect(() => {
+    fetch("/api/worth")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((w: Worth | null) => setNetWorth(w ? latestNetWorth(w) : null))
+      .catch(() => setNetWorth(null));
+  }, []);
+
   // Ask split-insights whether a desktop key is set up, and what the app already has.
   useEffect(() => {
     fetch("/api/app")
@@ -148,6 +166,7 @@ export default function ExportDialog({
           end: range.to,
           personal,
           name: name.trim() || null,
+          net_worth: netWorth,
           save: IN_APP,
         }),
       });
@@ -186,6 +205,7 @@ export default function ExportDialog({
           end: range.to,
           personal,
           name: name.trim() || null,
+          net_worth: netWorth,
           replace: ids,
         }),
       });
@@ -404,6 +424,12 @@ export default function ExportDialog({
             </tbody>
           </table>
           {refiled > 0 && <p className="hint">Includes {refiled} you refiled here, the way you filed them.</p>}
+          {netWorth && (
+            <p className="hint">
+              Also takes your net worth at the end of {monthName(netWorth.month)}, {moneyRound(netWorth.cents)}, for the
+              phone&apos;s Home: just that total, not your accounts.
+            </p>
+          )}
 
           <label className="field">
             Name in the app

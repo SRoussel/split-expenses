@@ -110,6 +110,7 @@ export async function importFor(
   if (!body.shared && !body.personal) throw new HttpError(400, "Nothing to import.");
   // Summaries from the desktop page carry the household's budgets along.
   const budgets = body.budgets === undefined ? [] : budgetStatements(env, household_id, userId, body.budgets);
+  const netWorth = body.net_worth === undefined ? [] : [netWorthStatement(env, household_id, userId, body.net_worth)];
 
   const isMember = async (id: unknown) =>
     typeof id === "string" &&
@@ -171,7 +172,7 @@ export async function importFor(
     );
   }
 
-  statements.push(...budgets);
+  statements.push(...budgets, ...netWorth);
   try {
     await env.DB.batch(statements); // all or nothing
   } catch (err) {
@@ -187,7 +188,7 @@ export async function importFor(
 export async function getSpending(request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
   const { household_id } = await requireMembership(env, user.id);
-  const [batches, totals, breakdown, budgets] = await env.DB.batch([
+  const [batches, totals, breakdown, budgets, netWorth] = await env.DB.batch([
     env.DB.prepare(
       `SELECT id, person_id, name, start_date, end_date, entry_id, created_by, created_at
        FROM spending_batches WHERE household_id = ? ORDER BY start_date DESC, created_at DESC`,
@@ -201,13 +202,51 @@ export async function getSpending(request: Request, env: Env): Promise<Response>
        JOIN entries e ON e.id = d.entry_id WHERE e.household_id = ? AND e.voided_at IS NULL`,
     ).bind(household_id),
     env.DB.prepare("SELECT category, cents FROM budgets WHERE household_id = ? ORDER BY category").bind(household_id),
+    env.DB.prepare("SELECT month, cents, previous_month, previous_cents FROM net_worth WHERE household_id = ?").bind(
+      household_id,
+    ),
   ]);
   return json({
     batches: batches.results,
     totals: totals.results,
     breakdown: breakdown.results,
     budgets: budgets.results,
+    net_worth: netWorth.results[0] ?? null,
   });
+}
+
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+const isCents = (v: unknown) => Number.isInteger(v) && Math.abs(v as number) <= MAX_AMOUNT_CENTS;
+
+/**
+ * Net worth from the desktop page, for Home: { month, cents, previous_month, previous_cents }.
+ * Only the totals. Kept only if it's for the same month or later than the one already here.
+ */
+export function netWorthStatement(env: Env, household_id: string, userId: string, note: unknown) {
+  const n = note as Record<string, unknown>;
+  const ok =
+    !!n &&
+    typeof n === "object" &&
+    !Array.isArray(n) &&
+    Object.keys(n).sort().join() === "cents,month,previous_cents,previous_month" &&
+    typeof n.month === "string" &&
+    MONTH.test(n.month) &&
+    isCents(n.cents) &&
+    (n.previous_month === null
+      ? n.previous_cents === null
+      : typeof n.previous_month === "string" &&
+        MONTH.test(n.previous_month) &&
+        n.previous_month < n.month &&
+        isCents(n.previous_cents));
+  if (!ok) throw new HttpError(400, "The net worth isn't valid.");
+  return env.DB.prepare(
+    `INSERT INTO net_worth (household_id, month, cents, previous_month, previous_cents, updated_by)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (household_id) DO UPDATE SET
+       month = excluded.month, cents = excluded.cents, previous_month = excluded.previous_month,
+       previous_cents = excluded.previous_cents, updated_by = excluded.updated_by, updated_at = datetime('now')
+     WHERE excluded.month >= net_worth.month`,
+  ).bind(household_id, n.month, n.cents, n.previous_month, n.previous_cents, userId);
 }
 
 /**

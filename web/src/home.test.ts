@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { budgetLines, lastSettled } from "./home.ts";
+import { budgetLines, lastSettled, netWorthLine } from "./home.ts";
+import { setRedacted } from "./redact.ts";
 import type { Entry } from "./types.ts";
 
 const A = "alex";
@@ -55,4 +56,24 @@ test("budget lines: over budget first, then by size, the rest added up, income l
     { category: "dining", budget: 20000, spent: 9000 },
   ]);
   assert.equal(other, 0);
+});
+
+test("net worth in a sentence: the change from the month before, and negative totals keep their sign", () => {
+  const nw = { month: "2026-10", cents: 25240000, previous_month: "2026-09", previous_cents: 24830000 };
+  assert.equal(netWorthLine(nw), "Net worth $252,400.00 at the end of October, up $4,100.00 from September.");
+  assert.equal(
+    netWorthLine({ ...nw, previous_cents: 25300000 }),
+    "Net worth $252,400.00 at the end of October, down $600.00 from September.",
+  );
+  assert.equal(
+    netWorthLine({ ...nw, previous_cents: nw.cents }),
+    "Net worth $252,400.00 at the end of October, the same as September.",
+  );
+  assert.equal(
+    netWorthLine({ month: "2026-01", cents: -120050, previous_month: null, previous_cents: null }),
+    "Net worth −$1,200.50 at the end of January.",
+  );
+  setRedacted(true);
+  assert.doesNotMatch(netWorthLine(nw), /\d{2},\d{3}/, "Redact amounts hides it");
+  setRedacted(false);
 });

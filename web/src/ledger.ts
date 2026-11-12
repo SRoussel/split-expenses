@@ -227,6 +227,15 @@ export interface ImportSummary {
   personal: { count: number; months: MonthTotals } | null;
   /** The household's monthly budgets, from the desktop page; null when the file has none. */
   budgets: Record<string, number> | null;
+  /** Net worth at a month's end and the month before, from the desktop page; null when the file has none. */
+  netWorth: NetWorthNote | null;
+}
+
+export interface NetWorthNote {
+  month: string;
+  cents: number;
+  previous_month: string | null;
+  previous_cents: number | null;
 }
 
 /** Biggest summary file the app will read (they're a few KB at most). */
@@ -333,10 +342,11 @@ export function parseSummary(text: string): ImportSummary {
       shared: { count: data.count as number, totalCents: total as number, months },
       personal: null,
       budgets: null,
+      netWorth: null,
     };
   }
 
-  onlyKeys(data, ["format", "version", "name", "start", "end", "shared", "personal", "budgets"], "");
+  onlyKeys(data, ["format", "version", "name", "start", "end", "shared", "personal", "budgets", "net_worth"], "");
   let shared: ImportSummary["shared"] = null;
   let personal: ImportSummary["personal"] = null;
   if (data.shared !== undefined) {
@@ -372,7 +382,26 @@ export function parseSummary(text: string): ImportSummary {
       budgets[cat] = cents as number;
     }
   }
-  return { name, start, end, shared, personal, budgets };
+  let netWorth: ImportSummary["netWorth"] = null;
+  if (data.net_worth !== undefined) {
+    const n = data.net_worth;
+    const isMonth = (m: unknown): m is string => typeof m === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(m);
+    const isCents = (c: unknown): c is number => Number.isInteger(c) && Math.abs(c as number) <= MAX_CENTS;
+    if (!isObject(n)) throw new Error("The summary's net worth isn't valid.");
+    onlyKeys(n, ["month", "cents", "previous_month", "previous_cents"], " in its net worth");
+    const prevOk =
+      n.previous_month === null
+        ? n.previous_cents === null
+        : isMonth(n.previous_month) && isMonth(n.month) && n.previous_month < n.month && isCents(n.previous_cents);
+    if (!isMonth(n.month) || !isCents(n.cents) || !prevOk) throw new Error("The summary's net worth isn't valid.");
+    netWorth = {
+      month: n.month,
+      cents: n.cents,
+      previous_month: (n.previous_month as string | null) ?? null,
+      previous_cents: (n.previous_cents as number | null) ?? null,
+    };
+  }
+  return { name, start, end, shared, personal, budgets, netWorth };
 }
 
 /** Totals per category across all months. */
@@ -392,6 +421,8 @@ export interface StatementImport {
   personal?: { person_id: string; months: MonthTotals };
   /** Replaces the household's budgets, when the summary came with them. */
   budgets?: Record<string, number>;
+  /** Net worth for Home, when the summary came with it. */
+  net_worth?: NetWorthNote;
 }
 
 /**
@@ -416,6 +447,7 @@ export function summaryToImport(
     body.personal = { person_id: choices.personId, months: summary.personal.months };
   }
   if (summary.budgets) body.budgets = summary.budgets;
+  if (summary.netWorth) body.net_worth = summary.netWorth;
   return body;
 }
 
