@@ -781,6 +781,23 @@ kbd {
   background: var(--text-2);
 }
 
+/* --- Export: one section per person --- */
+
+.export-person {
+  border: 1px solid var(--line);
+  margin: 0;
+  padding: 8px 12px 12px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.export-person legend {
+  padding: 0 4px;
+}
+.export-person legend .check-row {
+  margin: 0;
+}
+
 /* --- Splits --- */
 
 .split-at {
