@@ -4,7 +4,7 @@
 // and desktop.ts (the desktop app, with its own kind of key).
 
 import { changePassword, login, logout, me, signup } from "./auth";
-import { desktopHousehold, desktopImport, desktopRemove, revokeDesktopKey } from "./desktop";
+import { desktopBudgets, desktopHousehold, desktopImport, desktopRemove, revokeDesktopKey } from "./desktop";
 import { addEntry, editEntry, unvoidEntry, voidEntry } from "./entries";
 import { createHousehold, getHousehold, joinHousehold, purgeVoided, resetHousehold, setSplit } from "./household";
 import {
@@ -21,7 +21,7 @@ import {
 } from "./passkeys";
 import { assertSameOrigin, type Env, HttpError, json } from "./http";
 import { createRecurring, stopRecurring, updateRecurring } from "./recurring";
-import { deleteBatch, getSpending, importStatement, moveSpending, setBudgets } from "./spending";
+import { deleteBatch, getSpending, importStatement, moveSpending } from "./spending";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -32,6 +32,7 @@ export default {
       if (pathname.startsWith("/api/desktop/")) {
         if (method === "GET" && pathname === "/api/desktop/household") return await desktopHousehold(request, env);
         if (method === "POST" && pathname === "/api/desktop/import") return await desktopImport(request, env);
+        if (method === "POST" && pathname === "/api/desktop/budgets") return await desktopBudgets(request, env);
         const u = pathname.match(/^\/api\/desktop\/uploads\/([\w-]+)\/remove$/);
         if (method === "POST" && u) return await desktopRemove(request, env, u[1]);
         throw new HttpError(404, "Not found.");
@@ -65,7 +66,6 @@ export default {
         if (pathname === "/api/household/reset") return await resetHousehold(request, env);
         if (pathname === "/api/statements/import") return await importStatement(request, env);
         if (pathname === "/api/spending/move") return await moveSpending(request, env);
-        if (pathname === "/api/budgets") return await setBudgets(request, env);
         const b = pathname.match(/^\/api\/statements\/([\w-]+)\/delete$/);
         if (b) return await deleteBatch(request, env, b[1]);
         if (pathname === "/api/recurring") return await createRecurring(request, env);

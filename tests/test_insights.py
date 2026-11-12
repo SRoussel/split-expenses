@@ -459,7 +459,7 @@ class FakeApp(BaseHTTPRequestHandler):
             if FakeApp.fail_import:
                 return self.reply(400, {"error": "Shared: the categories don't add up to the total."})
             return self.reply(201, {"ok": True})
-        if self.path.startswith("/api/desktop/uploads/"):
+        if self.path.startswith("/api/desktop/uploads/") or self.path == "/api/desktop/budgets":
             return self.reply(200, {"ok": True})
         self.reply(404, {"error": "Not found."})
 
@@ -523,6 +523,21 @@ class SendToAppTest(unittest.TestCase):
         self.assertEqual(payload["personal"], {"person_id": "u-me", "months": expected["personal"]["months"]})
         self.assertEqual(out["summary"], expected)
         self.assertIn(("me", "sent to the app"), [(e["person"], e["from"]) for e in sent(self.root)])
+
+    def test_budgets_go_along_once_set_here_and_on_their_own(self):
+        send_to_app(self.root, {"person": "me", "start": "2000-01-01", "end": "2100-01-01"})
+        payload = [c for c in FakeApp.calls if c[1] == "/api/desktop/import"][-1][2]
+        self.assertNotIn("budgets", payload, "never set here: the app's are left alone")
+        insights.save_budgets(self.root, {"groceries": 80000})
+        out = send_to_app(self.root, {"person": "me", "start": "2000-01-01", "end": "2100-01-01"})
+        payload = [c for c in FakeApp.calls if c[1] == "/api/desktop/import"][-1][2]
+        self.assertEqual(payload["budgets"], {"groceries": 80000})
+        self.assertEqual(out["summary"]["budgets"], {"groceries": 80000}, "the file carries them too")
+        insights.save_budgets(self.root, {})
+        insights.send_budgets(self.root)
+        self.assertEqual(
+            FakeApp.calls[-1][1:3], ("/api/desktop/budgets", {"budgets": {}}), "cleared here, cleared there"
+        )
 
     def test_the_partners_statement_goes_to_the_partner(self):
         send_to_app(self.root, {"person": "jordan", "start": "2026-01-01", "end": "2026-01-31", "personal": False})

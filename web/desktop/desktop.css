@@ -827,6 +827,11 @@ kbd {
 .budgets td {
   vertical-align: middle;
 }
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .budgets .cell-sub {
   display: block;
 }

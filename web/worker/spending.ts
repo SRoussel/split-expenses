@@ -108,6 +108,8 @@ export async function importFor(
   const end = str(body, "end", 10);
   if (!validDate(start) || !validDate(end) || start > end) throw new HttpError(400, "Invalid statement dates.");
   if (!body.shared && !body.personal) throw new HttpError(400, "Nothing to import.");
+  // Summaries from the desktop page carry the household's budgets along.
+  const budgets = body.budgets === undefined ? [] : budgetStatements(env, household_id, userId, body.budgets);
 
   const isMember = async (id: unknown) =>
     typeof id === "string" &&
@@ -169,6 +171,7 @@ export async function importFor(
     );
   }
 
+  statements.push(...budgets);
   try {
     await env.DB.batch(statements); // all or nothing
   } catch (err) {
@@ -208,35 +211,34 @@ export async function getSpending(request: Request, env: Env): Promise<Response>
 }
 
 /**
- * Replace the household's monthly budgets: { budgets: { groceries: 80000, ... } } in cents.
- * A category left out has no budget. Either person can change them; they're shared.
+ * The statements that replace the household's monthly budgets with `budgets`
+ * ({ groceries: 80000, ... } in cents; a category left out has no budget).
+ * Budgets come only from the desktop page, the one place they're set: with a
+ * statement upload (a summary file or a desktop key), or on their own with a
+ * desktop key (desktop.ts). So there's one writer, and nothing to race.
  */
-export async function setBudgets(request: Request, env: Env): Promise<Response> {
-  const user = await requireUser(request, env);
-  const { household_id } = await requireMembership(env, user.id);
-  const budgets = (await readBody(request)).budgets;
+export function budgetStatements(env: Env, household_id: string, userId: string, budgets: unknown) {
   if (!budgets || typeof budgets !== "object" || Array.isArray(budgets)) {
     throw new HttpError(400, "Expected budgets by category.");
   }
   const rows = Object.entries(budgets as Record<string, unknown>);
   for (const [category, cents] of rows) {
-    if (!isSpendingCategory(category)) throw new HttpError(400, `Unknown category: ${category}.`);
+    if (!isSpendingCategory(category)) throw new HttpError(400, `Unknown budget category: ${category}.`);
     if (!Number.isInteger(cents) || (cents as number) <= 0 || (cents as number) > MAX_AMOUNT_CENTS) {
       throw new HttpError(400, "A budget is a whole number of cents above zero.");
     }
   }
-  await env.DB.batch([
+  return [
     env.DB.prepare("DELETE FROM budgets WHERE household_id = ?").bind(household_id),
     ...rows.map(([category, cents]) =>
       env.DB.prepare("INSERT INTO budgets (household_id, category, cents, updated_by) VALUES (?, ?, ?, ?)").bind(
         household_id,
         category,
         cents,
-        user.id,
+        userId,
       ),
     ),
-  ]);
-  return json({ ok: true });
+  ];
 }
 
 /**

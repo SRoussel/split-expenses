@@ -161,6 +161,10 @@ test("parseSummary refuses the detailed CSVs and anything unexpected", () => {
     ["dollars, not cents", (d) => (d.personal.months["2026-01"].dining = 18.4), /isn't valid/],
     ["month outside the dates", (d) => (d.personal.months["2026-05"] = { dining: 1 }), /outside its dates/],
     ["impossible date", (d) => (d.start = "2026-02-31"), /dates aren't valid/],
+    ["budget for income", (d) => (d.budgets = { income: 100 }), /budget for an unknown category/],
+    ["budget in dollars", (d) => (d.budgets = { dining: 18.4 }), /budget for dining isn't valid/],
+    ["zero budget", (d) => (d.budgets = { dining: 0 }), /budget for dining isn't valid/],
+    ["budgets as a list", (d) => (d.budgets = [1]), /budgets aren't valid/],
     [
       "empty",
       (d) => {
@@ -193,6 +197,23 @@ test("an import sends only names, the period and month/category totals", () => {
   assert.equal(sharedOnly.personal, undefined);
   const personalOnly = summaryToImport(s, { name: "x", shared: null, personId: "a" });
   assert.equal(personalOnly.shared, undefined);
+});
+
+test("budgets from the desktop page come along with an import, and only when the file has them", () => {
+  const d = JSON.parse(fixture("expected_summary_v2.json"));
+  const choices = { name: "x", shared: null, personId: "a" };
+  const without = parseSummary(JSON.stringify(d));
+  assert.equal(without.budgets, null);
+  assert.equal(summaryToImport(without, choices).budgets, undefined, "no budgets: the app's stay as they are");
+  d.budgets = { groceries: 80000, dining: 25000 };
+  const withThem = parseSummary(JSON.stringify(d));
+  assert.deepEqual(summaryToImport(withThem, choices).budgets, { groceries: 80000, dining: 25000 });
+  d.budgets = {};
+  assert.deepEqual(
+    summaryToImport(parseSummary(JSON.stringify(d)), choices).budgets,
+    {},
+    "none on the desktop: clears them",
+  );
 });
 
 test("export uses the CLI ledger.csv format", () => {

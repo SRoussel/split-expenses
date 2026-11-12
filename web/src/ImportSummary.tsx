@@ -231,6 +231,14 @@ export default function ImportSummary({
             </div>
           )}
 
+          {summary.budgets && (
+            <p className="muted small">
+              {Object.keys(summary.budgets).length
+                ? `Also brings the ${Object.keys(summary.budgets).length} monthly budgets from the desktop page, replacing the ones here.`
+                : "Also clears the monthly budgets here: the desktop page has none."}
+            </p>
+          )}
+
           <label>
             Name
             <input value={name} maxLength={200} onChange={(e) => setName(e.target.value)} />

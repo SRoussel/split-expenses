@@ -225,6 +225,8 @@ export interface ImportSummary {
   end: string; // YYYY-MM-DD
   shared: { count: number; totalCents: number; months: MonthTotals } | null;
   personal: { count: number; months: MonthTotals } | null;
+  /** The household's monthly budgets, from the desktop page; null when the file has none. */
+  budgets: Record<string, number> | null;
 }
 
 /** Biggest summary file the app will read (they're a few KB at most). */
@@ -330,10 +332,11 @@ export function parseSummary(text: string): ImportSummary {
       end,
       shared: { count: data.count as number, totalCents: total as number, months },
       personal: null,
+      budgets: null,
     };
   }
 
-  onlyKeys(data, ["format", "version", "name", "start", "end", "shared", "personal"], "");
+  onlyKeys(data, ["format", "version", "name", "start", "end", "shared", "personal", "budgets"], "");
   let shared: ImportSummary["shared"] = null;
   let personal: ImportSummary["personal"] = null;
   if (data.shared !== undefined) {
@@ -357,7 +360,19 @@ export function parseSummary(text: string): ImportSummary {
     };
   }
   if (!shared && !personal) throw new Error("The summary is empty.");
-  return { name, start, end, shared, personal };
+  let budgets: ImportSummary["budgets"] = null;
+  if (data.budgets !== undefined) {
+    if (!isObject(data.budgets)) throw new Error("The summary's budgets aren't valid.");
+    budgets = {};
+    for (const [cat, cents] of Object.entries(data.budgets)) {
+      if (!isSpendingCategory(cat)) throw new Error(`The summary has a budget for an unknown category: "${cat}".`);
+      if (!Number.isInteger(cents) || (cents as number) < 1 || (cents as number) > MAX_CENTS) {
+        throw new Error(`The summary's budget for ${cat} isn't valid.`);
+      }
+      budgets[cat] = cents as number;
+    }
+  }
+  return { name, start, end, shared, personal, budgets };
 }
 
 /** Totals per category across all months. */
@@ -375,6 +390,8 @@ export interface StatementImport {
   end: string;
   shared?: { total_cents: number; months: MonthTotals; payer_id: string; payer_share_pct: number };
   personal?: { person_id: string; months: MonthTotals };
+  /** Replaces the household's budgets, when the summary came with them. */
+  budgets?: Record<string, number>;
 }
 
 /**
@@ -398,6 +415,7 @@ export function summaryToImport(
   if (summary.personal && choices.personId) {
     body.personal = { person_id: choices.personId, months: summary.personal.months };
   }
+  if (summary.budgets) body.budgets = summary.budgets;
   return body;
 }
 

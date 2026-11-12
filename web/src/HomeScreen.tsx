@@ -1,14 +1,14 @@
 // Home: the month so far, for both of you. The balance and when you last settled, this
 // month's spending against the household's budgets, and the latest entries.
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { categoryLabel, SPENDING_CATEGORIES } from "../shared/categories";
-import { getSpending, setBudgets } from "./api";
-import { budgetLines, lastSettled, monthlyAverages, roundBudget } from "./home";
-import { fmt, parseDollars, todayLocal } from "./ledger";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { categoryLabel } from "../shared/categories";
+import { getSpending } from "./api";
+import { budgetLines, lastSettled } from "./home";
+import { fmt, todayLocal } from "./ledger";
 import { buildIndex, coverage, summarize, UNCATEGORIZED } from "./spending";
 import type { Entry, Member, SpendingData } from "./types";
-import { ErrorText, Modal, MoneyInput } from "./ui";
+import { ErrorText } from "./ui";
 
 const dayShort = (d: string) =>
   new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
@@ -36,7 +36,6 @@ export default function HomeScreen({
   const partnerId = partner?.user_id ?? null;
   const [data, setData] = useState<SpendingData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -113,13 +112,10 @@ export default function HomeScreen({
         {!data ? (
           <p className="muted small">Loading…</p>
         ) : lines.length === 0 ? (
-          <div className="stack">
-            <p className="muted small">
-              Set a monthly budget for the categories you care about, and this shows how the month is going for both of
-              you.
-            </p>
-            <button onClick={() => setEditing(true)}>Set budgets</button>
-          </div>
+          <p className="muted small">
+            No budgets yet. Set them on the desktop page (Budgets), and they come over with your next statement upload,
+            or with Send budgets to the app. Then this shows how the month is going for both of you.
+          </p>
         ) : (
           <>
             <p className="home-total">
@@ -142,9 +138,7 @@ export default function HomeScreen({
               Expenses added here count right away. {statements} The pale tick on each bar is where you&apos;d be if you
               spent evenly through the month.
             </p>
-            <button className="link" onClick={() => setEditing(true)}>
-              Change budgets
-            </button>
+            <p className="muted small">Budgets are set on the desktop page and come over with statement uploads.</p>
           </>
         )}
       </section>
@@ -157,18 +151,6 @@ export default function HomeScreen({
             See everything in the Ledger
           </button>
         </section>
-      )}
-
-      {editing && index && (
-        <BudgetsForm
-          current={budgets}
-          averages={monthlyAverages(index, month, userId, partnerId)}
-          onClose={() => setEditing(false)}
-          onSaved={() => {
-            setEditing(false);
-            void load();
-          }}
-        />
       )}
     </>
   );
@@ -195,96 +177,5 @@ function BudgetMeter({ line: l, pace }: { line: { category: string; budget: numb
         <span className="budget-meter-pace" style={{ left: pct(l.budget * pace) }} />
       </span>
     </li>
-  );
-}
-
-function BudgetsForm({
-  current,
-  averages,
-  onClose,
-  onSaved,
-}: {
-  current: { category: string; cents: number }[];
-  averages: Record<string, number>;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [values, setValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(current.map((b) => [b.category, (b.cents / 100).toFixed(0)])),
-  );
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const bad = Object.entries(values).filter(([, v]) => v.trim() !== "" && parseDollars(v) === null);
-  const missing = SPENDING_CATEGORIES.filter((c) => !values[c]?.trim() && roundBudget(averages[c] ?? 0) > 0);
-
-  async function save(e: FormEvent) {
-    e.preventDefault();
-    if (bad.length) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const budgets: Record<string, number> = {};
-      for (const [c, v] of Object.entries(values)) {
-        const cents = parseDollars(v);
-        if (cents) budgets[c] = cents;
-      }
-      await setBudgets(budgets);
-      onSaved();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't save the budgets.");
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal title="Monthly budgets" onClose={onClose}>
-      <form className="stack" onSubmit={(e) => void save(e)}>
-        <p className="muted small">
-          For the two of you together, shared and personal. Leave a category empty to not budget it. You both see the
-          same budgets.
-        </p>
-        {missing.length > 0 && (
-          <button
-            type="button"
-            className="link"
-            onClick={() =>
-              setValues({
-                ...values,
-                ...Object.fromEntries(missing.map((c) => [c, (roundBudget(averages[c]) / 100).toFixed(0)])),
-              })
-            }
-          >
-            Fill in the empty ones from your average month
-          </button>
-        )}
-        <div className="budget-form">
-          {SPENDING_CATEGORIES.map((c) => (
-            <label key={c} className="budget-form-row">
-              <span>
-                {categoryLabel(c)}
-                {averages[c] ? <span className="muted small"> · avg {fmt(averages[c])}</span> : null}
-              </span>
-              <MoneyInput
-                aria-label={`Monthly budget for ${categoryLabel(c)}`}
-                aria-invalid={bad.some(([k]) => k === c)}
-                placeholder="none"
-                value={values[c] ?? ""}
-                onChange={(e) => setValues({ ...values, [c]: e.target.value })}
-              />
-            </label>
-          ))}
-        </div>
-        {bad.length > 0 && <p className="error">Amounts look like 450 or 450.00.</p>}
-        <ErrorText message={error} />
-        <div className="row">
-          <button type="button" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="primary" disabled={busy || bad.length > 0}>
-            Save
-          </button>
-        </div>
-      </form>
-    </Modal>
   );
 }

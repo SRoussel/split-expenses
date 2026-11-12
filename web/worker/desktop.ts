@@ -2,8 +2,9 @@
 // here instead of as a file. A key is made on the computer with `npm run desktop-key`,
 // which needs the Cloudflare login that deploys the app, so it adds no new way in.
 //
-// A key works only on the routes in this file, and only for statement uploads: list
-// them, import one, replace one. It can't add expenses, change settings or sign in.
+// A key works only on the routes in this file, and only for statement uploads and
+// budgets: list uploads, import one, replace one, and replace the household's budgets
+// (which are set on the desktop page). It can't add expenses, change other settings or sign in.
 // It travels in an Authorization header, which browsers never attach on their own, so
 // these routes don't need the cross-site checks that cookie sessions do; and cookies
 // are never accepted here. Only a hash is stored. Keys expire after a year and can be
@@ -11,7 +12,7 @@
 
 import { requireMembership, requireUser, sha256Hex } from "./auth";
 import { type Env, HttpError, json, readBody } from "./http";
-import { importFor } from "./spending";
+import { budgetStatements, importFor } from "./spending";
 
 const KEY_FORMAT = /^Bearer (split_[A-Za-z0-9_-]{43})$/;
 
@@ -66,6 +67,13 @@ export async function desktopHousehold(request: Request, env: Env): Promise<Resp
 export async function desktopImport(request: Request, env: Env): Promise<Response> {
   const { userId, household_id } = await requireKey(request, env);
   return importFor(request, env, userId, household_id, await readBody(request));
+}
+
+/** Replace the household's budgets with the desktop page's, between statement uploads. */
+export async function desktopBudgets(request: Request, env: Env): Promise<Response> {
+  const { userId, household_id } = await requireKey(request, env);
+  await env.DB.batch(budgetStatements(env, household_id, userId, (await readBody(request)).budgets));
+  return json({ ok: true });
 }
 
 /**

@@ -310,6 +310,24 @@ def read_budgets(root):
     return out
 
 
+def budgets_to_send(root):
+    """The budgets that go to the app with a summary, or None if none were ever set here.
+
+    The desktop page is the one place budgets are set; the app takes whatever comes with
+    a summary, so an empty set (every budget cleared) clears them there too.
+    """
+    return read_budgets(root) if desktop_file(root, "budgets.json").exists() else None
+
+
+def send_budgets(root):
+    """Send the budgets to the app on their own, between statement uploads."""
+    cfg = app_config(root)
+    if not cfg:
+        raise ValueError("no desktop key yet: run `npm run desktop-key` in web/ first")
+    app_call(cfg, "POST", "/api/desktop/budgets", {"budgets": read_budgets(root)})
+    return {"ok": True}
+
+
 def save_budgets(root, budgets):
     """Replace the monthly budgets: {category: cents}. A category left out has no budget."""
     if not isinstance(budgets, dict):
@@ -549,7 +567,11 @@ def summary_for(root, body):
     if not any(t["person"] == person for t in everything):
         raise ValueError("unknown person")
     txns = [t for t in everything if t["person"] == person and start <= t["date"] <= end]
-    return person, build_summary(txns, name, personal=body.get("personal", True) is not False)
+    summary = build_summary(txns, name, personal=body.get("personal", True) is not False)
+    budgets = budgets_to_send(root)
+    if budgets is not None:
+        summary["budgets"] = budgets
+    return person, summary
 
 
 def note_sent(root, person, summary, how):
@@ -711,6 +733,8 @@ def send_to_app(root, body):
         }
     if "personal" in summary:
         payload["personal"] = {"person_id": person_id, "months": summary["personal"]["months"]}
+    if "budgets" in summary:
+        payload["budgets"] = summary["budgets"]
 
     for upload_id in replace:
         app_call(cfg, "POST", f"/api/desktop/uploads/{upload_id}/remove", {})
@@ -968,6 +992,7 @@ class Handler(SimpleHTTPRequestHandler):
             "/api/added": lambda b: change_added(self.root, b),
             "/api/projection": lambda b: save_projection(self.root, b),
             "/api/budgets": lambda b: save_budgets(self.root, b.get("budgets")),
+            "/api/app/budgets": lambda _b: send_budgets(self.root),
         }
         if self.path not in routes:
             self.send_error(404)
@@ -984,7 +1009,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_json(
             200,
             result
-            if self.path in ("/api/export", "/api/app/send", "/api/worth", "/api/projection")
+            if self.path in ("/api/export", "/api/app/send", "/api/app/budgets", "/api/worth", "/api/projection")
             else load(self.root),
         )
 

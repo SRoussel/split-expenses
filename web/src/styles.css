@@ -1816,15 +1816,3 @@ details.chart-table.wide table {
   background: var(--faded);
   opacity: 0.6;
 }
-
-.budget-form {
-  display: grid;
-  gap: 8px;
-}
-
-.budget-form-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 8.5em;
-  align-items: center;
-  gap: 10px;
-}

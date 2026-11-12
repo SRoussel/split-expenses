@@ -1,11 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { budgetLines, lastSettled, monthlyAverages, roundBudget } from "./home.ts";
-import { buildIndex } from "./spending.ts";
-import type { Entry, SpendingData } from "./types.ts";
+import { budgetLines, lastSettled } from "./home.ts";
+import type { Entry } from "./types.ts";
 
 const A = "alex";
-const B = "sam";
 let n = 0;
 function entry(p: Partial<Entry>): Entry {
   n++;
@@ -57,35 +55,4 @@ test("budget lines: over budget first, then by size, the rest added up, income l
     { category: "dining", budget: 20000, spent: 9000 },
   ]);
   assert.equal(other, 0);
-});
-
-test("averages: the household's months before this one, skipping months with nothing", () => {
-  const data: SpendingData = {
-    batches: [
-      {
-        id: "b1",
-        person_id: B,
-        name: "x",
-        start_date: "2026-01-01",
-        end_date: "2026-03-31",
-        entry_id: null,
-        created_by: B,
-        created_at: "",
-      },
-    ],
-    totals: [
-      { batch_id: "b1", month: "2026-01", category: "dining", cents: 6000 },
-      { batch_id: "b1", month: "2026-03", category: "dining", cents: 2000 },
-      { batch_id: "b1", month: "2026-04", category: "dining", cents: 99999 }, // this month: not counted
-    ],
-    breakdown: [],
-  };
-  const entries = [
-    entry({ entry_date: "2026-01-05", category: "groceries", amount_cents: 30000 }),
-    entry({ entry_date: "2026-03-05", category: "groceries", amount_cents: 10000 }),
-  ];
-  const index = buildIndex(entries, data, [A, B]);
-  // January and March have data, February doesn't: averages over two months, both of you.
-  assert.deepEqual(monthlyAverages(index, "2026-04", A, B), { dining: 4000, groceries: 20000 });
-  assert.equal(roundBudget(20001), 21000);
 });

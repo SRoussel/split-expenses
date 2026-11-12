@@ -40,6 +40,28 @@ export default function BudgetsView({
   const rows = useMemo(() => budgetRows(txns, month, income, budgets), [txns, month, income, budgets]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState<string | null>(null);
+
+  /** Budgets go to the phone app with each statement upload; this sends them now. */
+  async function sendToApp() {
+    setBusy(true);
+    setError(null);
+    setSent(null);
+    try {
+      const r = await fetch("/api/app/budgets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const body = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(body?.error ?? `Couldn't send (the server said ${r.status}).`);
+      setSent("Sent. The phone app shows these budgets now.");
+    } catch (e) {
+      setError(e instanceof Error ? `Couldn't send the budgets: ${e.message}` : "Couldn't send the budgets.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function save(next: Record<string, number>) {
     setBusy(true);
@@ -116,23 +138,29 @@ export default function BudgetsView({
       <section className="panel">
         <div className="panel-head">
           <h2>By category</h2>
-          {suggestions.length > 0 && (
-            <button
-              className="btn"
-              disabled={busy}
-              title="Each category without a budget gets its monthly average over the past year, rounded up to $10"
-              onClick={() =>
-                void save({
-                  ...budgets,
-                  ...Object.fromEntries(suggestions.map((r) => [r.category, suggestBudget(r.average)])),
-                })
-              }
-            >
-              Fill in the rest from your averages
+          <div className="panel-actions">
+            {suggestions.length > 0 && (
+              <button
+                className="btn"
+                disabled={busy}
+                title="Each category without a budget gets its monthly average over the past year, rounded up to $10"
+                onClick={() =>
+                  void save({
+                    ...budgets,
+                    ...Object.fromEntries(suggestions.map((r) => [r.category, suggestBudget(r.average)])),
+                  })
+                }
+              >
+                Fill in the rest from your averages
+              </button>
+            )}
+            <button className="btn primary" disabled={busy} onClick={() => void sendToApp()}>
+              Send budgets to the app
             </button>
-          )}
+          </div>
         </div>
         {error && <p className="warn">{error}</p>}
+        {sent && <p className="note">{sent}</p>}
         <table className="grid-table budgets">
           <thead>
             <tr>
@@ -165,7 +193,9 @@ export default function BudgetsView({
         </table>
         <p className="proj-note muted">
           Everything the two of you spent, shared and personal, against one budget per category. Budgets are saved in{" "}
-          <code>desktop-data/budgets.json</code>. Clear a budget to stop tracking that category.
+          <code>desktop-data/budgets.json</code>. Clear a budget to stop tracking that category. This page is the one
+          place budgets are set: they go to the phone app with each statement you send or export, or right away with
+          Send budgets to the app (that needs a desktop key).
         </p>
       </section>
     </>

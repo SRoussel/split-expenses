@@ -823,54 +823,6 @@ describe("Split API", () => {
     });
   });
 
-  describe("budgets", () => {
-    const budgets = async (c = alice) => (await c.get("/api/spending")).data.budgets;
-
-    test("either person sets them, both see them, and setting again replaces them", async () => {
-      assert.equal((await alice.post("/api/budgets", { budgets: { groceries: 80000, dining: 30000 } })).status, 200);
-      assert.deepEqual(await budgets(bob), [
-        { category: "dining", cents: 30000 },
-        { category: "groceries", cents: 80000 },
-      ]);
-      assert.equal((await bob.post("/api/budgets", { budgets: { travel: 50000 } })).status, 200);
-      assert.deepEqual(await budgets(), [{ category: "travel", cents: 50000 }]);
-      assert.equal((await alice.post("/api/budgets", { budgets: {} })).status, 200);
-      assert.deepEqual(await budgets(), []);
-    });
-
-    test("bad budgets are refused and change nothing", async () => {
-      await alice.post("/api/budgets", { budgets: { groceries: 80000 } });
-      for (const bad of [
-        { nope: 100 },
-        { income: 100 }, // budgets are for spending
-        { groceries: 0 },
-        { groceries: -5 },
-        { groceries: 12.5 },
-        { groceries: "100" },
-        { groceries: 1e13 },
-      ]) {
-        assert.equal((await alice.post("/api/budgets", { budgets: bad })).status, 400, JSON.stringify(bad));
-      }
-      assert.equal((await alice.post("/api/budgets", { budgets: [] })).status, 400);
-      assert.equal((await alice.post("/api/budgets", {})).status, 400);
-      assert.deepEqual(await budgets(), [{ category: "groceries", cents: 80000 }]);
-    });
-
-    test("each household has its own, set only from the app", async () => {
-      assert.equal((await new Client().post("/api/budgets", { budgets: {} })).status, 401);
-      // Carol is in another household: hers are separate from Alice and Bob's.
-      assert.equal((await carol.post("/api/budgets", { budgets: { gift: 1000 } })).status, 200);
-      assert.deepEqual(await budgets(carol), [{ category: "gift", cents: 1000 }]);
-      const res = await fetch(`${BASE}/api/budgets`, {
-        method: "POST",
-        headers: { "content-type": "text/plain", cookie: alice.cookie, origin: BASE },
-        body: JSON.stringify({ budgets: {} }),
-      });
-      assert.equal(res.status, 415);
-      assert.deepEqual(await budgets(), [{ category: "groceries", cents: 80000 }]);
-    });
-  });
-
   describe("desktop keys", () => {
     const today = new Date().toISOString().slice(0, 10);
     const summary = JSON.parse(readFileSync(new URL("./fixtures/expected_summary_v2.json", import.meta.url), "utf8"));
@@ -961,6 +913,67 @@ describe("Split API", () => {
       assert.equal((await desk("POST", "/api/household/split", { myShare: 10 })).status, 401);
       assert.equal((await alice.get("/api/desktop/household")).status, 401, "a signed-in browser can't use them");
       assert.equal((await alice.post("/api/desktop/import", upload("Via cookie"))).status, 401);
+    });
+
+    test("budgets come from the desktop: on their own with a key, or along with an upload", async () => {
+      const budgets = async () => (await bob.get("/api/spending")).data.budgets;
+      const set = (b) => desk("POST", "/api/desktop/budgets", { budgets: b });
+      assert.equal((await set({ groceries: 80000, dining: 30000 })).status, 200);
+      assert.deepEqual(await budgets(), [
+        { category: "dining", cents: 30000 },
+        { category: "groceries", cents: 80000 },
+      ]);
+      // Setting them again replaces them; an upload that carries budgets does too.
+      assert.equal(
+        (await desk("POST", "/api/desktop/import", { ...upload("With budgets"), budgets: { travel: 50000 } })).status,
+        201,
+      );
+      assert.deepEqual(await budgets(), [{ category: "travel", cents: 50000 }]);
+      // An upload without them leaves them alone; an empty set clears them.
+      assert.equal((await desk("POST", "/api/desktop/import", upload("Without budgets"))).status, 201);
+      assert.deepEqual(await budgets(), [{ category: "travel", cents: 50000 }]);
+      assert.equal((await set({})).status, 200);
+      assert.deepEqual(await budgets(), []);
+    });
+
+    test("bad budgets are refused, and a bad one stops the whole upload", async () => {
+      await desk("POST", "/api/desktop/budgets", { budgets: { groceries: 80000 } });
+      for (const bad of [
+        { nope: 100 },
+        { income: 100 },
+        { groceries: 0 },
+        { groceries: 12.5 },
+        { groceries: "1" },
+        [],
+        null,
+      ]) {
+        assert.equal((await desk("POST", "/api/desktop/budgets", { budgets: bad })).status, 400, JSON.stringify(bad));
+      }
+      const uploadsBefore = (await desk("GET", "/api/desktop/household")).data.uploads.length;
+      assert.equal(
+        (await desk("POST", "/api/desktop/import", { ...upload("Bad budgets"), budgets: { nope: 1 } })).status,
+        400,
+      );
+      assert.equal(
+        (await desk("GET", "/api/desktop/household")).data.uploads.length,
+        uploadsBefore,
+        "nothing imported",
+      );
+      assert.deepEqual((await alice.get("/api/spending")).data.budgets, [{ category: "groceries", cents: 80000 }]);
+    });
+
+    test("the phone can't set budgets itself, except by importing a summary file", async () => {
+      assert.equal((await alice.post("/api/budgets", { budgets: { dining: 1 } })).status, 404);
+      assert.equal(
+        (await alice.post("/api/desktop/budgets", { budgets: { dining: 1 } })).status,
+        401,
+        "no cookies there",
+      );
+      const file = { ...upload("From a file"), budgets: { dining: 25000 } };
+      delete file.today;
+      assert.equal((await alice.post("/api/statements/import", file)).status, 201);
+      assert.deepEqual((await alice.get("/api/spending")).data.budgets, [{ category: "dining", cents: 25000 }]);
+      assert.deepEqual((await carol.get("/api/spending")).data.budgets, [], "another household's are its own");
     });
 
     test("wrong, malformed and expired keys are refused", async () => {
