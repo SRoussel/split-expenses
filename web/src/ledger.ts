@@ -225,6 +225,11 @@ export interface ImportSummary {
   end: string; // YYYY-MM-DD
   shared: { count: number; totalCents: number; months: MonthTotals } | null;
   personal: { count: number; months: MonthTotals } | null;
+  /**
+   * Shared expenses at their own split, one group per split: `sharePct` is the share of
+   * whoever's statement it is (they paid). Empty when there are none.
+   */
+  splits: { sharePct: number; count: number; totalCents: number; months: MonthTotals }[];
   /** The household's monthly budgets, from the desktop page; null when the file has none. */
   budgets: Record<string, number> | null;
   /** Net worth at a month's end and the month before, from the desktop page; null when the file has none. */
@@ -341,12 +346,17 @@ export function parseSummary(text: string): ImportSummary {
       end,
       shared: { count: data.count as number, totalCents: total as number, months },
       personal: null,
+      splits: [],
       budgets: null,
       netWorth: null,
     };
   }
 
-  onlyKeys(data, ["format", "version", "name", "start", "end", "shared", "personal", "budgets", "net_worth"], "");
+  onlyKeys(
+    data,
+    ["format", "version", "name", "start", "end", "shared", "personal", "splits", "budgets", "net_worth"],
+    "",
+  );
   let shared: ImportSummary["shared"] = null;
   let personal: ImportSummary["personal"] = null;
   if (data.shared !== undefined) {
@@ -369,7 +379,25 @@ export function parseSummary(text: string): ImportSummary {
       months: checkMonths(data.personal.months, start, end, isPersonalCategory, "personal"),
     };
   }
-  if (!shared && !personal) throw new Error("The summary is empty.");
+  const splits: ImportSummary["splits"] = [];
+  if (data.splits !== undefined) {
+    if (!Array.isArray(data.splits) || data.splits.length > 10) throw new Error("The summary's splits aren't valid.");
+    for (const g of data.splits) {
+      if (!isObject(g)) throw new Error("The summary's splits aren't valid.");
+      onlyKeys(g, ["share_pct", "count", "total_cents", "months"], " in its splits");
+      const pct = g.share_pct;
+      if (typeof pct !== "number" || pct < 1 || pct > 99 || Math.round(pct * 100) !== pct * 100) {
+        throw new Error("The summary has a split that isn't between 1% and 99%.");
+      }
+      if (!isCount(g.count)) throw new Error("The summary's transaction count isn't valid.");
+      const months = checkMonths(g.months, start, end, isSpendingCategory, "split");
+      if (!Number.isInteger(g.total_cents) || g.total_cents !== sumMonths(months) || (g.total_cents as number) < 1) {
+        throw new Error("The summary's categories don't add up to its total, so it wasn't imported.");
+      }
+      splits.push({ sharePct: pct, count: g.count as number, totalCents: g.total_cents as number, months });
+    }
+  }
+  if (!shared && !personal && !splits.length) throw new Error("The summary is empty.");
   let budgets: ImportSummary["budgets"] = null;
   if (data.budgets !== undefined) {
     if (!isObject(data.budgets)) throw new Error("The summary's budgets aren't valid.");
@@ -401,7 +429,7 @@ export function parseSummary(text: string): ImportSummary {
       previous_cents: (n.previous_cents as number | null) ?? null,
     };
   }
-  return { name, start, end, shared, personal, budgets, netWorth };
+  return { name, start, end, shared, personal, splits, budgets, netWorth };
 }
 
 /** Totals per category across all months. */
@@ -419,6 +447,8 @@ export interface StatementImport {
   end: string;
   shared?: { total_cents: number; months: MonthTotals; payer_id: string; payer_share_pct: number };
   personal?: { person_id: string; months: MonthTotals };
+  /** Shared expenses at their own split, each its own ledger entry. */
+  splits?: { payer_id: string; payer_share_pct: number; total_cents: number; months: MonthTotals }[];
   /** Replaces the household's budgets, when the summary came with them. */
   budgets?: Record<string, number>;
   /** Net worth for Home, when the summary came with it. */
@@ -432,7 +462,13 @@ export interface StatementImport {
  */
 export function summaryToImport(
   summary: ImportSummary,
-  choices: { name: string; shared: { payerId: string; payerSharePct: number } | null; personId: string | null },
+  choices: {
+    name: string;
+    shared: { payerId: string; payerSharePct: number } | null;
+    personId: string | null;
+    /** Whoever's statement it is: they paid the splits. Null leaves the splits out. */
+    splitsPayerId?: string | null;
+  },
 ): StatementImport {
   const body: StatementImport = { name: choices.name, start: summary.start, end: summary.end };
   if (summary.shared && choices.shared) {
@@ -445,6 +481,14 @@ export function summaryToImport(
   }
   if (summary.personal && choices.personId) {
     body.personal = { person_id: choices.personId, months: summary.personal.months };
+  }
+  if (summary.splits.length && choices.splitsPayerId) {
+    body.splits = summary.splits.map((g) => ({
+      payer_id: choices.splitsPayerId!,
+      payer_share_pct: g.sharePct,
+      total_cents: g.totalCents,
+      months: g.months,
+    }));
   }
   if (summary.budgets) body.budgets = summary.budgets;
   if (summary.netWorth) body.net_worth = summary.netWorth;

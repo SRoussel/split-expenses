@@ -50,6 +50,7 @@ export async function desktopHousehold(request: Request, env: Env): Promise<Resp
        FROM entries e JOIN entry_breakdown t ON t.entry_id = e.id
        WHERE e.household_id = ? AND e.voided_at IS NULL
          AND NOT EXISTS (SELECT 1 FROM spending_batches b WHERE b.entry_id = e.id)
+         AND e.upload_of IS NULL -- a split that came with another upload
        GROUP BY e.id ORDER BY start`,
     ).bind(household_id),
   ]);
@@ -86,11 +87,12 @@ export async function desktopRemove(request: Request, env: Env, id: string): Pro
     .bind(id, household_id)
     .first<{ entry_id: string | null }>();
   const entryId = batch ? batch.entry_id : id;
+  // Its shared expense, and any at their own split that came with it.
   const voidEntry = env.DB.prepare(
     `UPDATE entries SET voided_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), voided_by = ?
-     WHERE id = ? AND household_id = ? AND voided_at IS NULL
+     WHERE (id = ? OR upload_of = ?) AND household_id = ? AND voided_at IS NULL
        AND EXISTS (SELECT 1 FROM entry_breakdown WHERE entry_id = entries.id)`,
-  ).bind(userId, entryId, household_id);
+  ).bind(userId, entryId, id, household_id);
   const results = await env.DB.batch(
     batch
       ? [

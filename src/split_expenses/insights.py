@@ -173,9 +173,11 @@ def load(root, edited=True):
         t["auto"] = names[t["vendor"]]  # the cleaned-up name, before your renames
         t["merchant"] = renamed.get(t["auto"], t["auto"])
         e = edits.get(t["id"])
-        if e and (e["category"], e["kind"]) != (t["category"], t["kind"]):
+        if e and (e["category"], e["kind"], e.get("share")) != (t["category"], t["kind"], None):
             t["original"] = {"category": t["category"], "kind": t["kind"]}
             t["category"], t["kind"] = e["category"], e["kind"]
+            if e.get("share") is not None:
+                t["share"] = e["share"]  # this one's own split: the payer's share, in percent
     out.sort(key=lambda t: (t["date"], t["id"]), reverse=True)
     return {
         "transactions": out,
@@ -254,13 +256,27 @@ def rename(root, names, to):
     return renames
 
 
-def valid_filing(category, kind):
+def valid_filing(category, kind, share=None):
+    """Checks a filing. `share` is a shared transaction's own split: the payer's share in
+    percent (1 to 99, up to two decimals), or None for your usual split."""
     if kind not in KINDS:
         raise ValueError("kind must be shared or personal")
     if category not in SPENDING and category != INCOME:
         raise ValueError(f"unknown category: {category!r}")
     if category == INCOME and kind == "shared":
         raise ValueError("income can't be shared")
+    if share is not None:
+        if kind != "shared":
+            raise ValueError("only shared transactions have a split")
+        if isinstance(share, bool) or not isinstance(share, (int, float)) or not 1 <= share <= 99:
+            raise ValueError("a split is a share from 1% to 99%")
+        if round(share * 100) != share * 100:
+            raise ValueError("a split has at most two decimals")
+
+
+def clean_share(share):
+    """5.0 -> 5, so the same split always reads and groups the same."""
+    return None if share is None else (int(share) if float(share).is_integer() else round(float(share), 2))
 
 
 def read_edits(root):
@@ -269,18 +285,20 @@ def read_edits(root):
         if isinstance(v, dict):
             v = {**v, "category": current(v.get("category"))}
             try:
-                valid_filing(v.get("category"), v.get("kind"))
+                valid_filing(v.get("category"), v.get("kind"), v.get("share"))
             except ValueError:
                 continue
             out[k] = {"category": v["category"], "kind": v["kind"]}
+            if v.get("share") is not None:
+                out[k]["share"] = clean_share(v["share"])
     return out
 
 
 def classify(root, changes):
-    """File transactions differently: [{"id": ..., "category": ..., "kind": ...}, ...].
+    """File transactions differently: [{"id": ..., "category": ..., "kind": ..., "share": ...}, ...].
 
     Each change says how the transaction should end up; setting it back to what the
-    CSV says removes the edit.
+    CSV says removes the edit. `share` is optional: a shared transaction's own split.
     """
     if not isinstance(changes, list) or not changes or len(changes) > MAX_CHANGES:
         raise ValueError("changes must be a non-empty list")
@@ -289,11 +307,14 @@ def classify(root, changes):
     for c in changes:
         if not isinstance(c, dict) or c.get("id") not in originals:
             raise ValueError("unknown transaction")
-        valid_filing(c.get("category"), c.get("kind"))
-        if (c["category"], c["kind"]) == originals[c["id"]]:
+        share = c.get("share")
+        valid_filing(c.get("category"), c.get("kind"), share)
+        if (c["category"], c["kind"]) == originals[c["id"]] and share is None:
             edits.pop(c["id"], None)
         else:
             edits[c["id"]] = {"category": c["category"], "kind": c["kind"]}
+            if share is not None:
+                edits[c["id"]]["share"] = clean_share(share)
     write_json(desktop_file(root, "edits.json"), edits)
     return edits
 
@@ -520,18 +541,29 @@ def build_summary(txns, name=None, personal=True):
             cats[t["category"]] = cats.get(t["category"], 0) + t["cents"]
         return {m: dict(sorted(c.items())) for m, c in sorted(by.items())}
 
-    shared = [t for t in txns if t["kind"] == "shared"]
+    # Shared at your usual split goes in "shared"; shared at its own split, in one group per split.
+    shared = [t for t in txns if t["kind"] == "shared" and t.get("share") is None]
     mine = [t for t in txns if t["kind"] == "personal"] if personal else []
     if shared and sum(t["cents"] for t in shared) <= 0:
         shared = []  # returns only: nothing for the ledger
-    if not shared and not mine:
+    groups = {}
+    for t in txns:
+        if t["kind"] == "shared" and t.get("share") is not None:
+            groups.setdefault(t["share"], []).append(t)
+    splits = [
+        {"share_pct": pct, "count": len(rows), "total_cents": sum(t["cents"] for t in rows), "months": months(rows)}
+        for pct, rows in sorted(groups.items())
+        if sum(t["cents"] for t in rows) > 0
+    ]
+    in_splits = [t for pct, rows in groups.items() for t in rows if any(s["share_pct"] == pct for s in splits)]
+    if not shared and not mine and not splits:
         raise ValueError("there's nothing to export in those dates")
     mine_months = months(mine)
     for m, cats in mine_months.items():
         if cats.get(INCOME, 0) < 0:
             raise ValueError(f"income in {m} adds up to less than zero; check how it's filed")
 
-    dates = sorted(t["date"] for t in shared + mine)
+    dates = sorted(t["date"] for t in shared + mine + in_splits)
     start, end = dates[0], dates[-1]
     if not name:
         fmt = lambda d: datetime.strptime(d, "%Y-%m-%d").strftime("%m/%d/%y")  # noqa: E731
@@ -545,6 +577,8 @@ def build_summary(txns, name=None, personal=True):
         }
     if mine:
         summary["personal"] = {"count": len(mine), "months": mine_months}
+    if splits:
+        summary["splits"] = splits  # share_pct: the share of whoever's statement it is (they paid)
     return summary
 
 
@@ -766,6 +800,16 @@ def send_to_app(root, body):
         }
     if "personal" in summary:
         payload["personal"] = {"person_id": person_id, "months": summary["personal"]["months"]}
+    if "splits" in summary:
+        payload["splits"] = [
+            {
+                "payer_id": person_id,
+                "payer_share_pct": g["share_pct"],
+                "total_cents": g["total_cents"],
+                "months": g["months"],
+            }
+            for g in summary["splits"]
+        ]
     if "budgets" in summary:
         payload["budgets"] = summary["budgets"]
     if "net_worth" in summary:

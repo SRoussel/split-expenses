@@ -559,6 +559,16 @@ class SendToAppTest(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 insights.clean_net_worth(bad)
 
+    def test_splits_go_to_the_app_paid_by_whoever_the_statement_is_for(self):
+        t = next(t for t in load(self.root)["transactions"] if t["person"] == "me" and t["kind"] == "shared")
+        classify(self.root, [{"id": t["id"], "category": t["category"], "kind": "shared", "share": 70}])
+        send_to_app(self.root, {"person": "me", "start": "2000-01-01", "end": "2100-01-01"})
+        payload = [c for c in FakeApp.calls if c[1] == "/api/desktop/import"][-1][2]
+        self.assertEqual(len(payload["splits"]), 1)
+        g = payload["splits"][0]
+        self.assertEqual((g["payer_id"], g["payer_share_pct"], g["total_cents"]), ("u-me", 70, t["cents"]))
+        self.assertEqual(payload["shared"]["total_cents"] + g["total_cents"], 134955, "nothing lost or counted twice")
+
     def test_the_partners_statement_goes_to_the_partner(self):
         send_to_app(self.root, {"person": "jordan", "start": "2026-01-01", "end": "2026-01-31", "personal": False})
         payload = [c for c in FakeApp.calls if c[1] == "/api/desktop/import"][0][2]
@@ -738,6 +748,81 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.post_to("/api/projection", {"evil": "1"})[0], 400)
         self.assertEqual(self.post_to("/api/projection", {"age": 38})[0], 400)
         self.assertEqual(self.post_to("/api/projection", {"age": "x" * 21})[0], 400)
+
+
+class SplitTest(unittest.TestCase):
+    """A shared transaction can have its own split, instead of your usual one."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        write(
+            self.root,
+            "split_transactions.csv",
+            [
+                ["2026-03-01", "100.00", "GROCER", "groceries"],
+                ["2026-03-02", "60.00", "CAFE", "dining"],
+                ["2026-03-03", "40.00", "HARDWARE", "household"],
+                ["2026-04-01", "20.00", "CAFE", "dining"],
+            ],
+            300,
+        )
+        self.ids = {t["vendor"] + t["date"]: t["id"] for t in load(self.root)["transactions"]}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def split(self, key, share, category="dining", kind="shared"):
+        classify(self.root, [{"id": self.ids[key], "category": category, "kind": kind, "share": share}])
+
+    def test_a_split_is_saved_shown_and_put_back(self):
+        self.split("CAFE2026-03-02", 70.0)
+        t = next(t for t in load(self.root)["transactions"] if t["id"] == self.ids["CAFE2026-03-02"])
+        self.assertEqual((t["share"], t["original"]), (70, {"category": "dining", "kind": "shared"}))
+        self.split("CAFE2026-03-02", None)  # back to the usual split: no edit left
+        t = next(t for t in load(self.root)["transactions"] if t["id"] == self.ids["CAFE2026-03-02"])
+        self.assertNotIn("share", t)
+        self.assertNotIn("original", t)
+
+    def test_bad_splits_are_refused(self):
+        for share, kind in (
+            (0, "shared"),
+            (100, "shared"),
+            (33.333, "shared"),
+            ("70", "shared"),
+            (True, "shared"),
+            (50, "personal"),
+        ):
+            with self.subTest(share=share, kind=kind), self.assertRaises(ValueError):
+                self.split("CAFE2026-03-02", share, kind=kind)
+
+    def test_summary_groups_each_split_and_leaves_the_rest_shared(self):
+        self.split("CAFE2026-03-02", 70)
+        self.split("CAFE2026-04-01", 70.0)
+        self.split("HARDWARE2026-03-03", 33.5, category="household")
+        s = insights.build_summary(load(self.root)["transactions"])
+        self.assertEqual(s["shared"], {"count": 1, "total_cents": 10000, "months": {"2026-03": {"groceries": 10000}}})
+        self.assertEqual(
+            s["splits"],
+            [
+                {"share_pct": 33.5, "count": 1, "total_cents": 4000, "months": {"2026-03": {"household": 4000}}},
+                {
+                    "share_pct": 70,
+                    "count": 2,
+                    "total_cents": 8000,
+                    "months": {"2026-03": {"dining": 6000}, "2026-04": {"dining": 2000}},
+                },
+            ],
+        )
+        self.assertEqual((s["start"], s["end"]), ("2026-03-01", "2026-04-01"))
+
+    def test_only_splits_still_make_a_summary(self):
+        for key in self.ids:
+            t = next(t for t in load(self.root)["transactions"] if t["id"] == self.ids[key])
+            self.split(key, 60, category=t["category"])
+        s = insights.build_summary(load(self.root)["transactions"])
+        self.assertNotIn("shared", s)
+        self.assertEqual([g["share_pct"] for g in s["splits"]], [60])
 
 
 class AddedTest(unittest.TestCase):

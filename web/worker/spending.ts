@@ -17,6 +17,7 @@ import {
 } from "./http";
 
 const MAX_CATEGORIES_PER_MONTH = 13;
+const MAX_SPLITS = 10; // shared expenses at their own split, per upload
 const ROWS_PER_INSERT = 20; // 4 values per row; D1 allows about 100 values per statement
 
 interface TotalRow {
@@ -107,7 +108,9 @@ export async function importFor(
   const start = str(body, "start", 10);
   const end = str(body, "end", 10);
   if (!validDate(start) || !validDate(end) || start > end) throw new HttpError(400, "Invalid statement dates.");
-  if (!body.shared && !body.personal) throw new HttpError(400, "Nothing to import.");
+  if (!body.shared && !body.personal && !(Array.isArray(body.splits) && body.splits.length)) {
+    throw new HttpError(400, "Nothing to import.");
+  }
   // Summaries from the desktop page carry the household's budgets along.
   const budgets = body.budgets === undefined ? [] : budgetStatements(env, household_id, userId, body.budgets);
   const netWorth = body.net_worth === undefined ? [] : [netWorthStatement(env, household_id, userId, body.net_worth)];
@@ -121,12 +124,18 @@ export async function importFor(
     );
 
   const statements: D1PreparedStatement[] = [];
+  const splits = body.splits === undefined ? [] : body.splits;
+  if (!Array.isArray(splits) || splits.length > MAX_SPLITS) throw new HttpError(400, "Invalid splits.");
   const entryId = body.shared ? crypto.randomUUID() : null;
   const batchId = body.personal ? crypto.randomUUID() : null;
+  const splitIds = splits.map(() => crypto.randomUUID());
+  // Expenses at their own split belong to this upload, so taking it out takes them too.
+  const uploadOf = batchId ?? entryId ?? splitIds[0] ?? null;
 
-  if (body.shared) {
-    const shared = body.shared as Record<string, unknown>;
-    const rows = validateMonths(shared.months, start, end, isSpendingCategory, "Shared");
+  /** One shared expense in the ledger, with its month/category breakdown. */
+  async function sharedEntry(part: unknown, id: string, entryName: string, label: string, link: string | null) {
+    const shared = (part ?? {}) as Record<string, unknown>;
+    const rows = validateMonths(shared.months, start, end, isSpendingCategory, label);
     const total = rows.reduce((sum, r) => sum + r.cents, 0);
     if (
       !Number.isInteger(shared.total_cents) ||
@@ -134,7 +143,7 @@ export async function importFor(
       total <= 0 ||
       total > MAX_AMOUNT_CENTS
     ) {
-      throw new HttpError(400, "Shared: the categories don't add up to the total.");
+      throw new HttpError(400, `${label}: the categories don't add up to the total.`);
     }
     const bp = typeof shared.payer_share_pct === "number" ? pctToBasisPoints(shared.payer_share_pct) : null;
     if (bp === null) throw new HttpError(400, "Invalid share.");
@@ -142,21 +151,33 @@ export async function importFor(
     statements.push(
       env.DB.prepare(
         `INSERT INTO entries
-           (id, household_id, kind, entry_date, name, amount_cents, payer_id, payer_share_pct, owed_cents, created_by)
-         VALUES (?, ?, 'expense', ?, ?, ?, ?, ?, ?, ?)`,
+           (id, household_id, kind, entry_date, name, amount_cents, payer_id, payer_share_pct, owed_cents, created_by,
+            upload_of)
+         VALUES (?, ?, 'expense', ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
-        entryId,
+        id,
         household_id,
         todayFor(request, body),
-        name,
+        entryName,
         total,
         shared.payer_id,
         bp / 100,
         owedCents("expense", total, bp / 100),
         user.id,
+        link,
       ),
-      ...insertTotals(env, "entry_breakdown", "entry_id", entryId!, rows),
+      ...insertTotals(env, "entry_breakdown", "entry_id", id, rows),
     );
+    return bp / 100;
+  }
+
+  if (body.shared) await sharedEntry(body.shared, entryId!, name, "Shared", null);
+  for (const [i, part] of splits.entries()) {
+    const pct = (part as Record<string, unknown> | null)?.payer_share_pct;
+    const label = `Split ${i + 1}`;
+    const shown =
+      typeof pct === "number" ? `${Math.round(pct * 100) / 100}/${Math.round((100 - pct) * 100) / 100}` : "";
+    await sharedEntry(part, splitIds[i], `${name} · ${shown} split`, label, splitIds[i] === uploadOf ? null : uploadOf);
   }
 
   if (body.personal) {
@@ -181,7 +202,7 @@ export async function importFor(
     }
     throw err;
   }
-  return json({ ok: true, entryId, batchId }, 201);
+  return json({ ok: true, entryId, batchId, splitIds }, 201);
 }
 
 /** Everything the spending and cash-flow views need: totals only. */

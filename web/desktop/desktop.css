@@ -781,6 +781,28 @@ kbd {
   background: var(--text-2);
 }
 
+/* --- Splits --- */
+
+.split-at {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.split-at input {
+  width: 4.5em;
+  font: 13px var(--sans);
+  text-align: right;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 3px 6px;
+}
+.split-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* --- Budgets --- */
 
 .budgets .budget-input {

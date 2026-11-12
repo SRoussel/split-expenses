@@ -641,11 +641,18 @@ function MerchantsPanel({
 }
 
 type SortKey = "date" | "merchant" | "amount";
-type Change = { id: string; category: string; kind: Kind };
+type Change = { id: string; category: string; kind: Kind; share: number | null };
 type Rule = { vendor: string; person: string; category: string; kind: Kind };
 type Notice = { text: string; undo?: Change[]; offer?: { text: string; rules: Rule[] } };
 
 const kindLabel = (k: Kind) => (k === "shared" ? "shared" : "personal");
+/** "70/30": a split as the share of whoever paid, then the other person's. */
+const splitText = (share: number) => `${share}/${Math.round((100 - share) * 100) / 100}`;
+/** A typed split: 1 to 99 percent, at most two decimals; null otherwise. */
+function parseShare(text: string): number | null {
+  const n = Number(text.replace(/[%\s]/g, ""));
+  return text.trim() && Number.isFinite(n) && n >= 1 && n <= 99 && Math.round(n * 100) === n * 100 ? n : null;
+}
 
 function TransactionsPanel({
   txns,
@@ -710,17 +717,20 @@ function TransactionsPanel({
   }
 
   /** Refile transactions; then offer to undo, and to teach split-statements if it was one merchant. */
-  type Patch = { category?: string; kind?: Kind };
+  type Patch = { category?: string; kind?: Kind; share?: number | null };
   async function refile(targets: Txn[], patch: Patch | ((t: Txn) => Patch), label: string) {
     const changes: Change[] = [];
     const before: Change[] = [];
     for (const t of targets) {
       const p = typeof patch === "function" ? patch(t) : patch;
-      const next = { id: t.id, category: p.category ?? t.category, kind: p.kind ?? t.kind };
+      const kind = p.kind ?? t.kind;
+      // Only shared ones have a split; otherwise a change keeps the one it had.
+      const share = kind === "personal" ? null : p.share !== undefined ? p.share : (t.share ?? null);
+      const next = { id: t.id, category: p.category ?? t.category, kind, share };
       if (next.category === income && next.kind === "shared") continue; // income is never shared
-      if (next.category === t.category && next.kind === t.kind) continue;
+      if (next.category === t.category && next.kind === t.kind && next.share === (t.share ?? null)) continue;
       changes.push(next);
-      before.push({ id: t.id, category: t.category, kind: t.kind });
+      before.push({ id: t.id, category: t.category, kind: t.kind, share: t.share ?? null });
     }
     if (!changes.length) {
       setNotice({ text: "Nothing to change." });
@@ -744,7 +754,9 @@ function TransactionsPanel({
     const merchants = new Set(targets.map((t) => t.merchant));
     const filings = new Set(changes.map((c) => `${c.category}|${c.kind}`));
     if (merchants.size !== 1 || filings.size !== 1) return undefined;
-    const { category, kind } = changes[0];
+    const { category, kind, share } = changes[0];
+    // A rule files future statements shared or personal; it can't hold a split of its own.
+    if (share !== null || changes.some((c) => c.share !== null)) return undefined;
     if (category === income || targets.some((t) => t.cents < 0)) return undefined;
     const merchant = [...merchants][0];
     // Every spelling of the merchant, for whoever's transactions you changed.
@@ -788,7 +800,7 @@ function TransactionsPanel({
   const putBack = (targets: Txn[]) =>
     refile(
       targets.filter((t) => t.original),
-      (t) => t.original ?? {},
+      (t) => ({ ...(t.original ?? {}), share: null }),
       "Put back",
     );
 
@@ -851,6 +863,27 @@ function TransactionsPanel({
             <span className="swatch personal" />
             Personal
           </button>
+          <form
+            className="split-at"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const input = e.currentTarget.elements.namedItem("split") as HTMLInputElement;
+              const share = parseShare(input.value);
+              if (share === null) return setError("A split is the payer's share, from 1 to 99 (like 70).");
+              void refile(picked, { kind: "shared", share }, `Split ${splitText(share)}`);
+            }}
+          >
+            <input
+              name="split"
+              inputMode="decimal"
+              placeholder="70"
+              aria-label="Split: the share of whoever paid, in percent"
+              title="The share of whoever paid (whoever's statement it is), in percent"
+            />
+            <button className="btn" disabled={busy}>
+              Split at %
+            </button>
+          </form>
           {picked.some((t) => t.original) && (
             <button className="link" disabled={busy} onClick={() => void putBack(picked)}>
               Put back as the statement had it
@@ -902,7 +935,7 @@ function TransactionsPanel({
             {header("date", "Date")}
             {header("merchant", "Merchant")}
             <th>Category</th>
-            <th>Type</th>
+            <th>Split</th>
             {header("amount", "Amount", "num")}
           </tr>
         </thead>
@@ -978,27 +1011,17 @@ function TransactionsPanel({
                 <span className={`swatch ${t.kind}`} />
                 {active !== t.id ? (
                   <button className="row-button muted" onClick={() => setActive(t.id)}>
-                    {t.kind === "shared" ? "Shared" : "Personal"}
+                    {t.kind === "personal" ? "Personal" : t.share != null ? `Shared ${splitText(t.share)}` : "Shared"}
                   </button>
                 ) : (
-                  <select
-                    className="cell-select"
-                    aria-label={`Shared or personal for ${t.merchant}`}
-                    value={t.kind}
-                    disabled={busy}
-                    onChange={(e) =>
-                      void refile(
-                        [t],
-                        { kind: e.target.value as Kind },
-                        e.target.value === "shared" ? "Made shared" : "Made personal",
-                      )
-                    }
-                  >
-                    <option value="shared" disabled={t.category === income}>
-                      Shared
-                    </option>
-                    <option value="personal">Personal</option>
-                  </select>
+                  <SplitPicker
+                    txn={t}
+                    payer={personLabel(t.person, me)}
+                    busy={busy}
+                    income={income}
+                    onPick={(patch, label) => void refile([t], patch, label)}
+                    onBad={() => setError("A split is the payer's share, from 1 to 99 (like 70).")}
+                  />
                 )}
                 {t.person !== me && <span className="muted"> · {personLabel(t.person, me)}</span>}
               </td>
@@ -1022,6 +1045,78 @@ function TransactionsPanel({
         </button>
       )}
     </section>
+  );
+}
+
+/** Personal, shared at your usual split, or shared at its own: the share of whoever paid. */
+function SplitPicker({
+  txn: t,
+  payer,
+  busy,
+  income,
+  onPick,
+  onBad,
+}: {
+  txn: Txn;
+  payer: string;
+  busy: boolean;
+  income: string;
+  onPick: (patch: { kind: Kind; share: number | null }, label: string) => void;
+  onBad: () => void;
+}) {
+  const current = t.kind === "personal" ? "personal" : t.share != null ? "custom" : "shared";
+  const [choice, setChoice] = useState(current);
+  const [draft, setDraft] = useState(String(t.share ?? 50));
+  const set = () => {
+    const share = parseShare(draft);
+    if (share === null) return onBad();
+    onPick({ kind: "shared", share }, `Split ${splitText(share)}`);
+  };
+  return (
+    <span className="split-picker">
+      <select
+        className="cell-select"
+        autoFocus
+        aria-label={`Split for ${t.merchant}`}
+        value={choice}
+        disabled={busy}
+        onChange={(e) => {
+          const v = e.target.value;
+          setChoice(v);
+          if (v === "personal") onPick({ kind: "personal", share: null }, "Made personal");
+          if (v === "shared") onPick({ kind: "shared", share: null }, "Made shared");
+        }}
+      >
+        <option value="shared" disabled={t.category === income}>
+          Shared, usual split
+        </option>
+        <option value="custom" disabled={t.category === income}>
+          Shared at…
+        </option>
+        <option value="personal">Personal</option>
+      </select>
+      {choice === "custom" && (
+        <form
+          className="split-at"
+          onSubmit={(e) => {
+            e.preventDefault();
+            set();
+          }}
+        >
+          <input
+            inputMode="decimal"
+            value={draft}
+            aria-label={`${payer === "You" ? "Your" : `${payer}'s`} share, in percent`}
+            title={`${payer === "You" ? "Your" : `${payer}'s`} share: they paid`}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          <span className="muted">% {payer === "You" ? "yours" : payer}</span>
+          <button className="btn" disabled={busy}>
+            Set
+          </button>
+        </form>
+      )}
+    </span>
   );
 }
 

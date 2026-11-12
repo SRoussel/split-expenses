@@ -898,6 +898,89 @@ describe("Split API", () => {
       assert.equal((await desk("POST", "/api/desktop/import", upload("From the desktop"))).status, 201);
     });
 
+    test("splits: each becomes its own shared expense, and taking the upload out takes them all", async () => {
+      const split = (pct, cents) => ({
+        payer_id: aliceId,
+        payer_share_pct: pct,
+        total_cents: cents,
+        months: { [summary.start.slice(0, 7)]: { dining: cents } },
+      });
+      const res = await desk("POST", "/api/desktop/import", {
+        ...upload("With splits"),
+        splits: [split(70, 10000), split(33.5, 4000)],
+      });
+      assert.equal(res.status, 201);
+      const { batchId, entryId, splitIds } = res.data;
+      const entries = (await alice.get("/api/household")).data.entries;
+      const made = splitIds.map((id) => entries.find((e) => e.id === id));
+      assert.deepEqual(
+        made.map((e) => [e.name, e.amount_cents, e.payer_id, e.payer_share_pct, e.owed_cents]),
+        [
+          ["With splits · 70/30 split", 10000, aliceId, 70, 3000],
+          ["With splits · 33.5/66.5 split", 4000, aliceId, 33.5, 2660],
+        ],
+      );
+      // Still one upload as far as the desktop is concerned.
+      const uploads = (await desk("GET", "/api/desktop/household")).data.uploads;
+      assert.equal(uploads.filter((u) => u.name.startsWith("With splits")).length, 1);
+      // Taking it out voids the shared expense and both splits.
+      assert.equal((await desk("POST", `/api/desktop/uploads/${batchId}/remove`)).status, 200);
+      const after = (await alice.get("/api/household")).data.entries;
+      for (const id of [entryId, ...splitIds]) assert.ok(after.find((e) => e.id === id).voided_at, id);
+    });
+
+    test("an upload of only splits works, lists once, and comes out whole", async () => {
+      const only = {
+        name: "Only splits",
+        start: summary.start,
+        end: summary.end,
+        today,
+        splits: [60, 80].map((pct) => ({
+          payer_id: bobId,
+          payer_share_pct: pct,
+          total_cents: 5000,
+          months: { [summary.start.slice(0, 7)]: { groceries: 5000 } },
+        })),
+      };
+      const res = await desk("POST", "/api/desktop/import", only);
+      assert.equal(res.status, 201);
+      const listed = (await desk("GET", "/api/desktop/household")).data.uploads.filter((u) =>
+        u.name.startsWith("Only splits"),
+      );
+      assert.equal(listed.length, 1);
+      assert.equal((await desk("POST", `/api/desktop/uploads/${listed[0].id}/remove`)).status, 200);
+      const after = (await alice.get("/api/household")).data.entries;
+      for (const id of res.data.splitIds) assert.ok(after.find((e) => e.id === id).voided_at);
+    });
+
+    test("bad splits stop the whole upload", async () => {
+      const before = (await alice.get("/api/household")).data.entries.length;
+      const good = {
+        payer_id: aliceId,
+        payer_share_pct: 70,
+        total_cents: 100,
+        months: { [summary.start.slice(0, 7)]: { dining: 100 } },
+      };
+      for (const bad of [
+        { ...good, total_cents: 99 }, // doesn't add up
+        { ...good, payer_share_pct: "70" },
+        { ...good, payer_id: carolId }, // not in this household
+        { ...good, months: { [summary.start.slice(0, 7)]: { income: 100 } } },
+      ]) {
+        assert.equal(
+          (await desk("POST", "/api/desktop/import", { ...upload("Bad split"), splits: [bad] })).status,
+          400,
+          JSON.stringify(bad),
+        );
+      }
+      assert.equal(
+        (await desk("POST", "/api/desktop/import", { ...upload("Too many"), splits: Array(11).fill(good) })).status,
+        400,
+      );
+      assert.equal((await desk("POST", "/api/desktop/import", { ...upload("Not a list"), splits: good })).status, 400);
+      assert.equal((await alice.get("/api/household")).data.entries.length, before, "nothing added");
+    });
+
     test("removing can't touch ordinary expenses", async () => {
       assert.equal((await alice.post("/api/entries", expense(aliceId, { name: "Not an import" }))).status, 201);
       const plain = (await alice.get("/api/household")).data.entries.find((e) => e.name === "Not an import");

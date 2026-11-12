@@ -166,6 +166,24 @@ test("parseSummary refuses the detailed CSVs and anything unexpected", () => {
     ["zero budget", (d) => (d.budgets = { dining: 0 }), /budget for dining isn't valid/],
     ["budgets as a list", (d) => (d.budgets = [1]), /budgets aren't valid/],
     [
+      "split at 100%",
+      (d) => (d.splits = [{ share_pct: 100, count: 1, total_cents: 1, months: { "2026-01": { dining: 1 } } }]),
+      /between 1% and 99%/,
+    ],
+    [
+      "split that doesn't add up",
+      (d) => (d.splits = [{ share_pct: 70, count: 1, total_cents: 2, months: { "2026-01": { dining: 1 } } }]),
+      /don't add up/,
+    ],
+    [
+      "merchants in a split",
+      (d) =>
+        (d.splits = [
+          { share_pct: 70, count: 1, total_cents: 1, months: { "2026-01": { dining: 1 } }, vendors: ["X"] },
+        ]),
+      /unexpected fields in its splits/,
+    ],
+    [
       "accounts in the net worth",
       (d) => (d.net_worth = { month: "2026-01", cents: 1, previous_month: null, previous_cents: null, accounts: [] }),
       /unexpected fields in its net worth/,
@@ -233,6 +251,19 @@ test("budgets from the desktop page come along with an import, and only when the
   assert.equal(summaryToImport(parseSummary(JSON.stringify(d)), choices).net_worth, undefined);
   d.net_worth = nw;
   assert.deepEqual(summaryToImport(parseSummary(JSON.stringify(d)), choices).net_worth, nw);
+});
+
+test("splits go to the app paid by whoever's statement it is, and only when chosen", () => {
+  const d = JSON.parse(fixture("expected_summary_v2.json"));
+  d.splits = [{ share_pct: 70, count: 2, total_cents: 8000, months: { "2026-01": { dining: 8000 } } }];
+  const s = parseSummary(JSON.stringify(d));
+  assert.deepEqual(s.splits, [{ sharePct: 70, count: 2, totalCents: 8000, months: { "2026-01": { dining: 8000 } } }]);
+  const base = { name: "x", shared: null, personId: null };
+  assert.deepEqual(summaryToImport(s, { ...base, splitsPayerId: "sam-id" }).splits, [
+    { payer_id: "sam-id", payer_share_pct: 70, total_cents: 8000, months: { "2026-01": { dining: 8000 } } },
+  ]);
+  assert.equal(summaryToImport(s, { ...base, splitsPayerId: null }).splits, undefined);
+  assert.deepEqual(parseSummary(fixture("expected_summary_v2.json")).splits, [], "older files have none");
 });
 
 test("export uses the CLI ledger.csv format", () => {

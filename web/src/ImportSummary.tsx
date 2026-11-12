@@ -63,6 +63,7 @@ export default function ImportSummary({
   const [myShare, setMyShare] = useState(pctText(me.share_pct));
   const [includeShared, setIncludeShared] = useState(true);
   const [includePersonal, setIncludePersonal] = useState(true);
+  const [includeSplits, setIncludeSplits] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,6 +87,7 @@ export default function ImportSummary({
       setName(s.name);
       setIncludeShared(Boolean(s.shared));
       setIncludePersonal(Boolean(s.personal));
+      setIncludeSplits(s.splits.length > 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't read that file.");
     }
@@ -99,6 +101,8 @@ export default function ImportSummary({
   const payerShare = payerSharePct(myShare, payer);
   const doShared = Boolean(summary?.shared && includeShared);
   const doPersonal = Boolean(summary?.personal && includePersonal);
+  const doSplits = Boolean(summary?.splits.length && includeSplits);
+  const ownerId = owner === "me" ? me.user_id : partner.user_id;
   const duplicate = doShared && entries.some((e) => !e.voided_at && e.name === name.trim());
   const owed =
     summary?.shared && payerShare !== null ? owedCents("expense", summary.shared.totalCents, payerShare) : null;
@@ -113,7 +117,7 @@ export default function ImportSummary({
   async function save() {
     if (!summary) return;
     if (!name.trim()) return setError("Give the import a name.");
-    if (!doShared && !doPersonal) return setError("Choose at least one part to import.");
+    if (!doShared && !doPersonal && !doSplits) return setError("Choose at least one part to import.");
     if (doShared && payerShare === null) return setError(SHARE_ERROR);
     if (duplicate) return setError("There's already an entry with that name. Change the name to add it anyway.");
     setBusy(true);
@@ -127,6 +131,7 @@ export default function ImportSummary({
             ? { payerId: payer === "me" ? me.user_id : partner.user_id, payerSharePct: payerShare! }
             : null,
           personId: doPersonal ? person : null,
+          splitsPayerId: doSplits ? ownerId : null,
         }),
       );
       onSaved();
@@ -197,6 +202,36 @@ export default function ImportSummary({
                         : `You will owe ${partner.display_name} ${fmt(owed)}`}
                     </p>
                   )}
+                </>
+              )}
+            </div>
+          )}
+
+          {summary.splits.length > 0 && (
+            <div className="card stack">
+              <label className="check">
+                <input type="checkbox" checked={includeSplits} onChange={(e) => setIncludeSplits(e.target.checked)} />
+                <strong>Shared at their own split</strong>
+              </label>
+              {includeSplits && (
+                <>
+                  {summary.splits.map((g) => {
+                    const owes = owedCents("expense", g.totalCents, g.sharePct);
+                    const theirs = owner === "me" ? partner.display_name : "You";
+                    return (
+                      <div key={g.sharePct} className="stack">
+                        <span>
+                          {pctText(g.sharePct)}/{pctText(100 - g.sharePct)}: {fmt(g.totalCents)}, paid by{" "}
+                          {owner === "me" ? "you" : partner.display_name}
+                        </span>
+                        <CategoryList totals={totalsByCategory(g.months)} />
+                        <p className="preview">
+                          {theirs} will owe {owner === "me" ? "you" : partner.display_name} {fmt(owes)}
+                        </p>
+                      </div>
+                    );
+                  })}
+                  <span className="muted small">Each split is its own entry in the Ledger.</span>
                 </>
               )}
             </div>

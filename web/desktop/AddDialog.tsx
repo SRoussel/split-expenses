@@ -190,7 +190,7 @@ export default function AddDialog({
           </label>
           {people.length > 1 && (
             <label>
-              Whose
+              Who paid
               <select value={person} onChange={(e) => setPerson(e.target.value)}>
                 {people.map((p) => (
                   <option key={p} value={p}>

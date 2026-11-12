@@ -141,6 +141,7 @@ export default function ExportDialog({
   const income_ = sum(mine.filter((t) => t.category === income));
   const sharedGoes = shared.length > 0 && sharedTotal > 0;
   const refiled = [...(sharedGoes ? shared : []), ...mine].filter((t) => t.original).length;
+  const ownSplit = shared.filter((t) => t.share != null);
   const dates = [...(sharedGoes ? shared : []), ...mine].map((t) => t.date).sort();
   const defaultName = dates.length ? `Expenses ${shortDate(dates[0])}-${shortDate(dates[dates.length - 1])}` : "";
   const overlaps = data.sent.filter((e) => e.person === person && !(e.end < range.from || e.start > range.to));
@@ -424,6 +425,12 @@ export default function ExportDialog({
             </tbody>
           </table>
           {refiled > 0 && <p className="hint">Includes {refiled} you refiled here, the way you filed them.</p>}
+          {ownSplit.length > 0 && (
+            <p className="hint">
+              {ownSplit.length} shared at their own split go as their own entries in the Ledger, one per split (
+              {[...new Set(ownSplit.map((t) => `${t.share}/${Math.round((100 - t.share!) * 100) / 100}`))].join(", ")}).
+            </p>
+          )}
           {netWorth && (
             <p className="hint">
               Also takes your net worth at the end of {monthName(netWorth.month)}, {moneyRound(netWorth.cents)}, for the
