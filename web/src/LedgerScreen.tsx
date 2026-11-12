@@ -28,6 +28,7 @@ import {
 import ImportSummary from "./ImportSummary";
 import { saveTextFile } from "./files";
 import SignInSettings from "./SignInSettings";
+import HomeScreen from "./HomeScreen";
 import SpendingScreen from "./SpendingScreen";
 import {
   balanceFor,
@@ -88,7 +89,7 @@ export default function LedgerScreen({
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
-  const [tab, setTab] = useState<"ledger" | "spending" | "trends">("ledger");
+  const [tab, setTab] = useState<"home" | "ledger" | "spending" | "trends">("home");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Entry | null>(null);
   const [voiding, setVoiding] = useState<Entry | null>(null);
@@ -243,10 +244,30 @@ export default function LedgerScreen({
   }
 
   const tone = balance > 0 ? "pos" : balance < 0 ? "neg" : "even";
+  const waiting = !partner && (
+    <section className="card stack">
+      <strong>Waiting for your partner</strong>
+      <p className="muted">Have them create an account, choose "Join partner's", and enter this code:</p>
+      <div className="row">
+        <code className="code">{inviteCode}</code>
+        <button className="link" onClick={() => void copyCode()}>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </section>
+  );
+  const balanceCard = (
+    <section className={`balance ${tone}`} aria-live="polite">
+      <span className="balance-label">
+        {balance > 0 ? `${partnerName} owes you` : balance < 0 ? `You owe ${partnerName}` : "All settled up"}
+      </span>
+      <strong className="balance-amount">{fmt(balance)}</strong>
+    </section>
+  );
   const saveEdit = (entry: NewEntry) => editEntry(editing!.id, entry);
 
   return (
-    <main className={tab === "ledger" ? "with-bar" : ""}>
+    <main className={tab === "ledger" || tab === "home" ? "with-bar" : ""}>
       <header className="masthead">
         <h1>SPLIT</h1>
         <p>
@@ -257,6 +278,7 @@ export default function LedgerScreen({
       <nav className="nav" role="tablist" aria-label="Section">
         {(
           [
+            ["home", "Home"],
             ["ledger", "Ledger"],
             ["spending", "Spending"],
             ["trends", "Trends"],
@@ -273,7 +295,34 @@ export default function LedgerScreen({
 
       <ErrorText message={error} />
 
-      {tab !== "ledger" ? (
+      {tab === "home" ? (
+        <HomeScreen
+          userId={userId}
+          members={members}
+          entries={entries}
+          balance={
+            <>
+              {waiting}
+              {balanceCard}
+            </>
+          }
+          renderEntry={(e) => (
+            <EntryRow
+              key={e.id}
+              entry={e}
+              userId={userId}
+              partnerName={partnerName}
+              fresh={freshIds.has(e.id)}
+              addedBy={e.created_by !== userId ? nameOf(e.created_by) : null}
+              onOpen={() => setSelectedId(e.id)}
+            />
+          )}
+          onSeeAll={() => {
+            setTab("ledger");
+            window.scrollTo(0, 0);
+          }}
+        />
+      ) : tab !== "ledger" ? (
         <SpendingScreen
           userId={userId}
           members={members}
@@ -287,25 +336,8 @@ export default function LedgerScreen({
         />
       ) : (
         <>
-          {!partner && (
-            <section className="card stack">
-              <strong>Waiting for your partner</strong>
-              <p className="muted">Have them create an account, choose "Join partner's", and enter this code:</p>
-              <div className="row">
-                <code className="code">{inviteCode}</code>
-                <button className="link" onClick={() => void copyCode()}>
-                  {copied ? "Copied" : "Copy"}
-                </button>
-              </div>
-            </section>
-          )}
-
-          <section className={`balance ${tone}`} aria-live="polite">
-            <span className="balance-label">
-              {balance > 0 ? `${partnerName} owes you` : balance < 0 ? `You owe ${partnerName}` : "All settled up"}
-            </span>
-            <strong className="balance-amount">{fmt(balance)}</strong>
-          </section>
+          {waiting}
+          {balanceCard}
 
           {entries.length > 0 && (
             <LedgerFilters
@@ -359,18 +391,20 @@ export default function LedgerScreen({
               Split {pctText(me.share_pct)}/{pctText(partner.share_pct)}
             </span>
           )}
-
-          <div className="bar">
-            <div className="bar-inner">
-              <button disabled={!ready || balance === 0} onClick={() => setPanel("settle")}>
-                Settle up
-              </button>
-              <button className="primary" disabled={!ready} onClick={() => setPanel("add")}>
-                Add expense
-              </button>
-            </div>
-          </div>
         </>
+      )}
+
+      {(tab === "ledger" || tab === "home") && (
+        <div className="bar">
+          <div className="bar-inner">
+            <button disabled={!ready || balance === 0} onClick={() => setPanel("settle")}>
+              Settle up
+            </button>
+            <button className="primary" disabled={!ready} onClick={() => setPanel("add")}>
+              Add expense
+            </button>
+          </div>
+        </div>
       )}
 
       <Toast toast={toast} onDone={clearToast} />

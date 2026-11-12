@@ -17,7 +17,7 @@
     "app:build": "tauri build --no-bundle",
     "app:install": "node scripts/install-app.mjs",
     "start": "npm run build && mkdir -p dist && wrangler dev --port 8787",
-    "test": "node --import tsx --test src/ledger.test.ts src/spending.test.ts desktop/analytics.test.ts desktop/projection.test.ts",
+    "test": "node --import tsx --test src/ledger.test.ts src/spending.test.ts desktop/analytics.test.ts desktop/projection.test.ts src/home.test.ts",
     "test:api": "npm run build && node --test tests/api.test.mjs",
     "deploy": "npm run build && wrangler deploy",
     "reset-password": "node scripts/reset-password.mjs",

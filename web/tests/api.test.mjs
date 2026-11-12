@@ -823,6 +823,54 @@ describe("Split API", () => {
     });
   });
 
+  describe("budgets", () => {
+    const budgets = async (c = alice) => (await c.get("/api/spending")).data.budgets;
+
+    test("either person sets them, both see them, and setting again replaces them", async () => {
+      assert.equal((await alice.post("/api/budgets", { budgets: { groceries: 80000, dining: 30000 } })).status, 200);
+      assert.deepEqual(await budgets(bob), [
+        { category: "dining", cents: 30000 },
+        { category: "groceries", cents: 80000 },
+      ]);
+      assert.equal((await bob.post("/api/budgets", { budgets: { travel: 50000 } })).status, 200);
+      assert.deepEqual(await budgets(), [{ category: "travel", cents: 50000 }]);
+      assert.equal((await alice.post("/api/budgets", { budgets: {} })).status, 200);
+      assert.deepEqual(await budgets(), []);
+    });
+
+    test("bad budgets are refused and change nothing", async () => {
+      await alice.post("/api/budgets", { budgets: { groceries: 80000 } });
+      for (const bad of [
+        { nope: 100 },
+        { income: 100 }, // budgets are for spending
+        { groceries: 0 },
+        { groceries: -5 },
+        { groceries: 12.5 },
+        { groceries: "100" },
+        { groceries: 1e13 },
+      ]) {
+        assert.equal((await alice.post("/api/budgets", { budgets: bad })).status, 400, JSON.stringify(bad));
+      }
+      assert.equal((await alice.post("/api/budgets", { budgets: [] })).status, 400);
+      assert.equal((await alice.post("/api/budgets", {})).status, 400);
+      assert.deepEqual(await budgets(), [{ category: "groceries", cents: 80000 }]);
+    });
+
+    test("each household has its own, set only from the app", async () => {
+      assert.equal((await new Client().post("/api/budgets", { budgets: {} })).status, 401);
+      // Carol is in another household: hers are separate from Alice and Bob's.
+      assert.equal((await carol.post("/api/budgets", { budgets: { gift: 1000 } })).status, 200);
+      assert.deepEqual(await budgets(carol), [{ category: "gift", cents: 1000 }]);
+      const res = await fetch(`${BASE}/api/budgets`, {
+        method: "POST",
+        headers: { "content-type": "text/plain", cookie: alice.cookie, origin: BASE },
+        body: JSON.stringify({ budgets: {} }),
+      });
+      assert.equal(res.status, 415);
+      assert.deepEqual(await budgets(), [{ category: "groceries", cents: 80000 }]);
+    });
+  });
+
   describe("desktop keys", () => {
     const today = new Date().toISOString().slice(0, 10);
     const summary = JSON.parse(readFileSync(new URL("./fixtures/expected_summary_v2.json", import.meta.url), "utf8"));

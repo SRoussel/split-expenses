@@ -155,6 +155,7 @@ Sign in with email and password the first time, then add a passkey when the app 
 
 ## Using it
 
+- **Home** is the first tab: the balance, how long since you last settled up, this month against your budgets, and the latest entries. Budgets are per category for the two of you together, shared and personal, and you both see the same ones; set them with **Set budgets** (or **Change budgets**), which can fill in empty categories from your average month. Expenses added in the app count straight away; card spending counts once you upload that month's statements, and Home says how far each of your statements reach. A pale tick on each bar shows where you'd be if you spent evenly through the month.
 - **Add expense**: amount, name, who paid, and your share. Under the name you get names you've used before; tap one and it also fills in the category you gave it last time (until you pick a category yourself). Your share is a row of quick picks starting at your default split (see below): "Split evenly", "All theirs", "All mine", or "Custom…" for any percentage.
 - **Reading the list**: each row says who paid and who owes whom, like "You paid $184.32 · Sam owes you", and the amount on the right is what that entry adds to the balance (green: owed to you, red: you owe). Payments between you are greyed out with a PAID stamp, and each month ends with a subtotal: how much that month moved the balance.
 - **Search and filters**, under the balance: type part of a name, a category or an exact amount (`84.20`). **Filters** narrows by type (expenses or payments), who paid, category and a date range. The line under them counts what matches, with what was spent and your share of it (expenses only, not voided ones), and **Clear** resets everything. Imported statements are split across categories, so the category filter doesn't find them; the Spending tab does, and its category sheet can open the Ledger with exactly the entries it counts (see below).
@@ -166,7 +167,7 @@ Sign in with email and password the first time, then add a passkey when the app 
 - **More > Default split**: the share each of you normally pays, like 60/40. It's one setting for both of you and can be set once you've both joined.
 - **More > Import statement summary**: adds a statement to the app as totals only. On your computer, run `uv run split-ledger finish` (add `--person sam` for Sam's files). It writes `split_summary.json` with totals per month and category: the shared transactions, plus that person's own spending and income. Open it to see exactly what the app will get. It then archives the batch and prints where the file is. Get that small file to your phone (AirDrop, iCloud Drive), choose it in the app, and say **whose statement it is** (it also sets who paid the shared part). You can leave either part out. The shared part becomes one ledger entry, like `Expenses 01/15/26-02/03/26`, with its category breakdown. The personal part is saved as that person's monthly spending and income by category, visible to both of you. Everything is saved together or not at all, and the same statement can't be uploaded twice for the same person. One upload can cover up to 24 months. The detailed transaction files never leave your computer: the app refuses them if you pick one by mistake. Older summary files (shared total only) still work.
 - **Categories**: expenses you add by hand and recurring expenses can have an optional category, for the spending reports.
-- **Spending tab** (Ledger · Spending · Trends at the top): spending and cash flow by month, built only from totals.
+- **Spending tab** (Home · Ledger · Spending · Trends at the top): spending and cash flow by month, built only from totals.
   - Switch between **You**, **Sam**, **Shared** and **Both**. "You" is your own uploaded spending plus *your share* of shared expenses (so a $100 shared grocery run at 50/50 counts as $50). "Shared" is shared expenses at their full amount. "Both" is everything, and always equals You + Sam.
   - **Net cash flow** is money in (income from your uploads) minus spending, with how much of your income you kept.
   - A **coverage strip** shows which days of the month your uploads cover. A month that's only partly uploaded says so and hides comparisons, and a month with nothing uploaded for someone is marked incomplete rather than shown as overspending.
@@ -229,6 +230,8 @@ Also bump the `?v=` numbers on the other icon links, deploy, and remove and re-a
     src/ledger.ts         money parsing, balance math, CSV import and export
     src/ledger.test.ts    tests for the above
     src/spending.ts       spending and cash-flow math for the Spending tab (+ spending.test.ts)
+    src/home.ts           Home's numbers: last settled, budgets, averages (+ home.test.ts)
+    src/HomeScreen.tsx    the Home tab and the budgets sheet
     src/charts.tsx        the small charts (no chart library)
     src/Trends.tsx        the Trends view (reports over several months, CSV export)
     src/api.ts            all the calls to the Worker

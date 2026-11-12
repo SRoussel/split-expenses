@@ -1723,3 +1723,108 @@ details.chart-table.wide table {
 .preview .link {
   padding: 0 2px;
 }
+
+/* ------------------------------------------------------------------ home */
+
+.home-settled {
+  margin: 0 0 4px;
+}
+
+.home-total {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 10px;
+}
+
+.home-total {
+  font-size: 0.85rem;
+}
+
+.home-total strong {
+  font-size: 1.1rem;
+}
+
+.budget-lines {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 10px;
+  display: grid;
+  gap: 12px;
+}
+
+.budget-line-text {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.95rem;
+  margin-bottom: 4px;
+}
+
+.budget-line-figures {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.budget-over-text {
+  color: var(--neg);
+  font-weight: 600;
+}
+
+.budget-meter {
+  position: relative;
+  display: block;
+  height: 8px;
+  background: color-mix(in srgb, var(--rule) 45%, var(--paper));
+}
+
+.budget-meter-fill,
+.budget-meter-over {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.budget-meter-fill {
+  background: var(--stamp);
+}
+
+.budget-meter-over {
+  background: var(--neg);
+  border-left: 2px solid var(--paper);
+}
+
+/* The budget: a solid tick. Spending evenly through the month would put you at the pale one. */
+.budget-meter-limit,
+.budget-meter-pace {
+  position: absolute;
+  width: 2px;
+  margin-left: -1px;
+}
+
+.budget-meter-limit {
+  top: -3px;
+  bottom: -3px;
+  background: var(--ink);
+}
+
+.budget-meter-pace {
+  top: -2px;
+  bottom: -2px;
+  background: var(--faded);
+  opacity: 0.6;
+}
+
+.budget-form {
+  display: grid;
+  gap: 8px;
+}
+
+.budget-form-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8.5em;
+  align-items: center;
+  gap: 10px;
+}

@@ -184,7 +184,7 @@ export async function importFor(
 export async function getSpending(request: Request, env: Env): Promise<Response> {
   const user = await requireUser(request, env);
   const { household_id } = await requireMembership(env, user.id);
-  const [batches, totals, breakdown] = await env.DB.batch([
+  const [batches, totals, breakdown, budgets] = await env.DB.batch([
     env.DB.prepare(
       `SELECT id, person_id, name, start_date, end_date, entry_id, created_by, created_at
        FROM spending_batches WHERE household_id = ? ORDER BY start_date DESC, created_at DESC`,
@@ -197,8 +197,46 @@ export async function getSpending(request: Request, env: Env): Promise<Response>
       `SELECT d.entry_id, d.month, d.category, d.cents FROM entry_breakdown d
        JOIN entries e ON e.id = d.entry_id WHERE e.household_id = ? AND e.voided_at IS NULL`,
     ).bind(household_id),
+    env.DB.prepare("SELECT category, cents FROM budgets WHERE household_id = ? ORDER BY category").bind(household_id),
   ]);
-  return json({ batches: batches.results, totals: totals.results, breakdown: breakdown.results });
+  return json({
+    batches: batches.results,
+    totals: totals.results,
+    breakdown: breakdown.results,
+    budgets: budgets.results,
+  });
+}
+
+/**
+ * Replace the household's monthly budgets: { budgets: { groceries: 80000, ... } } in cents.
+ * A category left out has no budget. Either person can change them; they're shared.
+ */
+export async function setBudgets(request: Request, env: Env): Promise<Response> {
+  const user = await requireUser(request, env);
+  const { household_id } = await requireMembership(env, user.id);
+  const budgets = (await readBody(request)).budgets;
+  if (!budgets || typeof budgets !== "object" || Array.isArray(budgets)) {
+    throw new HttpError(400, "Expected budgets by category.");
+  }
+  const rows = Object.entries(budgets as Record<string, unknown>);
+  for (const [category, cents] of rows) {
+    if (!isSpendingCategory(category)) throw new HttpError(400, `Unknown category: ${category}.`);
+    if (!Number.isInteger(cents) || (cents as number) <= 0 || (cents as number) > MAX_AMOUNT_CENTS) {
+      throw new HttpError(400, "A budget is a whole number of cents above zero.");
+    }
+  }
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM budgets WHERE household_id = ?").bind(household_id),
+    ...rows.map(([category, cents]) =>
+      env.DB.prepare("INSERT INTO budgets (household_id, category, cents, updated_by) VALUES (?, ?, ?, ?)").bind(
+        household_id,
+        category,
+        cents,
+        user.id,
+      ),
+    ),
+  ]);
+  return json({ ok: true });
 }
 
 /**

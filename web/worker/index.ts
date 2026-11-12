@@ -21,7 +21,7 @@ import {
 } from "./passkeys";
 import { assertSameOrigin, type Env, HttpError, json } from "./http";
 import { createRecurring, stopRecurring, updateRecurring } from "./recurring";
-import { deleteBatch, getSpending, importStatement, moveSpending } from "./spending";
+import { deleteBatch, getSpending, importStatement, moveSpending, setBudgets } from "./spending";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -65,6 +65,7 @@ export default {
         if (pathname === "/api/household/reset") return await resetHousehold(request, env);
         if (pathname === "/api/statements/import") return await importStatement(request, env);
         if (pathname === "/api/spending/move") return await moveSpending(request, env);
+        if (pathname === "/api/budgets") return await setBudgets(request, env);
         const b = pathname.match(/^\/api\/statements\/([\w-]+)\/delete$/);
         if (b) return await deleteBatch(request, env, b[1]);
         if (pathname === "/api/recurring") return await createRecurring(request, env);

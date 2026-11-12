@@ -84,4 +84,6 @@ export interface SpendingData {
   totals: { batch_id: string; month: string; category: string; cents: number }[];
   /** Month/category split of imported shared entries (active ones only). */
   breakdown: { entry_id: string; month: string; category: string; cents: number }[];
+  /** The household's monthly budgets, by spending category. */
+  budgets?: { category: string; cents: number }[];
 }

@@ -109,6 +109,8 @@ export const importStatement = (body: StatementImport) =>
     today: todayLocal(),
   });
 export const getSpending = () => call<SpendingData>("GET", "/api/spending");
+/** Replace the household's monthly budgets: { category: cents }. */
+export const setBudgets = (budgets: Record<string, number>) => call("POST", "/api/budgets", { budgets });
 export const deleteUpload = (id: string) => call("POST", `/api/statements/${id}/delete`, {});
 /** Move money between categories in one month of an upload or an imported shared entry. */
 export const moveSpending = (move: {
