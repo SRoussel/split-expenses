@@ -9,8 +9,14 @@ export interface Plan {
   endAge: number;
   /** What you have now to invest and spend from: cash, investments and retirement, less debts other than a mortgage. */
   start: number;
-  /** The share in stocks (0 to 1); the rest is cash and bonds. */
+  /** The share in stocks now (0 to 1); the rest is cash and bonds. */
   stockShare: number;
+  /** The share in stocks from retirement on. It moves there a little each year until then. */
+  stockLater: number;
+  /** Income tax on what's taken out in retirement (0.12 for 12%), on the part that comes from pre-tax accounts. */
+  taxRate: number;
+  /** The share of savings in pre-tax accounts (a 401k or traditional IRA), whose withdrawals are taxed. */
+  pretaxShare: number;
   /** Added each month until retirement. */
   saveMonthly: number;
   /** Spent each month from retirement on. */
@@ -32,6 +38,8 @@ export interface Projection {
   high: number[];
   /** The share of outcomes where the money lasts through `endAge`. */
   lasts: number;
+  /** In the worst 1 in 10 outcomes, the age the money runs out; null when it lasts even then. */
+  worstRunsOut: number | null;
 }
 
 /** A small seeded random number generator, so the same plan always draws the same picture. */
@@ -48,44 +56,54 @@ function random(seed: number) {
   return () => Math.sqrt(-2 * Math.log(1 - next())) * Math.cos(2 * Math.PI * next());
 }
 
-/** One year's money in or out at a given age, in cents. */
-function flow(p: Plan, age: number): number {
+/** One year's money in or out at a given age, in cents. Withdrawals include the tax on them. */
+export function flow(p: Plan, age: number): number {
   if (age < p.retireAge) return p.saveMonthly * 12;
   const other = age >= p.otherIncomeAge ? p.otherIncomeMonthly : 0;
-  return (other - p.spendMonthly) * 12;
+  const need = (p.spendMonthly - other) * 12;
+  if (need <= 0) return -need;
+  // To spend `need` after tax, take out more from the part that's taxed.
+  return -need / (1 - Math.min(0.9, p.taxRate * p.pretaxShare));
+}
+
+/** The share in stocks at a given age: from today's mix, a step each year, to the retirement mix. */
+export function stocksAt(p: Plan, age: number): number {
+  if (age >= p.retireAge || p.retireAge <= p.age) return p.stockLater;
+  return p.stockShare + ((p.stockLater - p.stockShare) * (age - p.age)) / (p.retireAge - p.age);
 }
 
 /** Every run's balance at the start of each year: runs × years, row by row. */
 function runAll(p: Plan, runs: number, seed: number) {
   const years = Math.max(1, p.endAge - p.age + 1);
   const out = new Float64Array(runs * years);
+  const runsOut = new Float64Array(runs).fill(Infinity);
   const draw = random(seed);
+  const flows = Array.from({ length: years }, (_, y) => flow(p, p.age + y));
+  const mix = Array.from({ length: years }, (_, y) => stocksAt(p, p.age + y));
   let lasted = 0;
   for (let r = 0; r < runs; r++) {
     let bal = p.start;
-    let broke = false;
     for (let y = 0; y < years; y++) {
       out[r * years + y] = bal;
       const stocks = p.stockReturn + p.stockSwing * draw();
-      const ret = Math.max(-0.9, p.stockShare * stocks + (1 - p.stockShare) * p.cashReturn);
-      bal = bal * (1 + ret) + flow(p, p.age + y);
-      if (bal <= 0) {
-        // Ran out in retirement. (Before it, a negative start just means debt is still being paid off.)
-        if (p.age + y >= p.retireAge) {
-          broke = true;
-          bal = 0;
-        }
+      const ret = Math.max(-0.9, mix[y] * stocks + (1 - mix[y]) * p.cashReturn);
+      bal = bal * (1 + ret) + flows[y];
+      // Ran out in retirement. (Before it, a negative start just means debt is still being paid off.)
+      if (bal <= 0 && p.age + y >= p.retireAge) {
+        if (runsOut[r] === Infinity) runsOut[r] = p.age + y;
+        bal = 0;
       }
     }
-    if (!broke) lasted++;
+    if (runsOut[r] === Infinity) lasted++;
   }
-  return { out, years, lasted };
+  return { out, years, lasted, runsOut };
 }
 
 const pick = (sorted: Float64Array, q: number) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
 
 export function project(p: Plan, runs = 2000, seed = 1): Projection {
-  const { out, years, lasted } = runAll(p, runs, seed);
+  const { out, years, lasted, runsOut } = runAll(p, runs, seed);
+  const worst = pick(runsOut.sort(), 0.1);
   const ages: number[] = [];
   const low: number[] = [];
   const mid: number[] = [];
@@ -99,7 +117,7 @@ export function project(p: Plan, runs = 2000, seed = 1): Projection {
     mid.push(pick(column, 0.5));
     high.push(pick(column, 0.9));
   }
-  return { ages, low, mid, high, lasts: lasted / runs };
+  return { ages, low, mid, high, lasts: lasted / runs, worstRunsOut: Number.isFinite(worst) ? worst : null };
 }
 
 /**

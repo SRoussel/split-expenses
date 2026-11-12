@@ -625,6 +625,12 @@ kbd {
   gap: 12px 24px;
   margin-bottom: 8px;
 }
+.proj-col {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  min-width: 0;
+}
 .proj-inputs fieldset {
   border: 0;
   margin: 0;

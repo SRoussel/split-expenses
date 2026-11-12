@@ -195,6 +195,7 @@ def load(root, edited=True):
 #     Giving two merchants the same name merges them.
 # edits.json           {"<transaction id>": {"category": "groceries", "kind": "shared"}, ...}
 #     Your changes to how a transaction is filed. Only differences are kept.
+# projection.json      the numbers typed into "Where this is heading" on Net worth
 # added.json           {"<id>": {"date": ..., "cents": ..., "vendor": ..., "category": ..., "kind": ..., "person": ...}}
 #     Transactions you typed in yourself: cash, or anything no statement will show.
 # ---------------------------------------------------------------------------
@@ -730,6 +731,7 @@ def worth(root):
         "types": {k: {"group": g, "debt": d} for k, (g, d) in balances.TYPES.items()},
         "people": people,
         "me": ME,
+        "projection": read_projection(root),
     }
 
 
@@ -737,6 +739,44 @@ def change_worth(root, body):
     people = sorted({t["person"] for t in load(root)["transactions"]} | {ME})
     balances.change_accounts(desktop_file(root, "accounts.json"), people, body)
     return worth(root)
+
+
+# The numbers typed into "Where this is heading", as typed: {"age": "38", "retireAge": "65", ...}.
+# Anything left out uses the page's default, which comes from your accounts and transactions.
+PROJECTION_KEYS = {
+    "age",
+    "retireAge",
+    "endAge",
+    "save",
+    "spend",
+    "other",
+    "otherAge",
+    "stockShare",
+    "stockLater",
+    "stockReturn",
+    "stockSwing",
+    "cashReturn",
+    "tax",
+    "pretax",
+}
+
+
+def read_projection(root):
+    data = read_json(desktop_file(root, "projection.json"))
+    return {k: v for k, v in data.items() if k in PROJECTION_KEYS and isinstance(v, str) and len(v) <= 20}
+
+
+def save_projection(root, body):
+    """Replace the saved projection numbers with `body`, a {key: text} map."""
+    if not isinstance(body, dict):
+        raise ValueError("expected the projection's numbers")
+    for k, v in body.items():
+        if k not in PROJECTION_KEYS:
+            raise ValueError(f"unknown setting: {k}")
+        if not isinstance(v, str) or len(v) > 20:
+            raise ValueError("each setting is a short piece of text")
+    write_json(desktop_file(root, "projection.json"), body)
+    return read_projection(root)
 
 
 def rel(path, root):
@@ -897,6 +937,7 @@ class Handler(SimpleHTTPRequestHandler):
             "/api/app/send": lambda b: send_to_app(self.root, b),
             "/api/worth": lambda b: change_worth(self.root, b),
             "/api/added": lambda b: change_added(self.root, b),
+            "/api/projection": lambda b: save_projection(self.root, b),
         }
         if self.path not in routes:
             self.send_error(404)
@@ -910,7 +951,12 @@ class Handler(SimpleHTTPRequestHandler):
         except (ValueError, AttributeError) as e:
             self.send_json(400, {"error": str(e)})
             return
-        self.send_json(200, result if self.path in ("/api/export", "/api/app/send", "/api/worth") else load(self.root))
+        self.send_json(
+            200,
+            result
+            if self.path in ("/api/export", "/api/app/send", "/api/worth", "/api/projection")
+            else load(self.root),
+        )
 
     def end_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")

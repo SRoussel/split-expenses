@@ -1,17 +1,17 @@
 // "Where this is heading": today's savings and investments carried forward, with saving until
 // retirement and spending after it. A fan shows the range of outcomes across a couple of
-// thousand runs of good and bad market years. The numbers you type are remembered in this
-// browser only.
+// thousand runs of good and bad market years. The numbers you type are saved by split-insights
+// in desktop-data/projection.json.
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { project, sustainableSpend, type Plan } from "./projection";
 import { money, moneyCompact, moneyRound, percent } from "./format";
 
-const KEY = "insights-projection";
+const OLD_KEY = "insights-projection"; // where the first version kept them, in the browser
 const HEIGHT = 260;
 const PAD = { top: 16, right: 12, bottom: 28, left: 56 };
 
-type Inputs = Record<
+type Key =
   | "age"
   | "retireAge"
   | "endAge"
@@ -20,42 +20,45 @@ type Inputs = Record<
   | "other"
   | "otherAge"
   | "stockShare"
+  | "stockLater"
   | "stockReturn"
   | "stockSwing"
-  | "cashReturn",
-  string
->;
-
-function load(): Partial<Inputs> {
-  try {
-    const v = JSON.parse(localStorage.getItem(KEY) ?? "{}");
-    return v && typeof v === "object" ? v : {};
-  } catch {
-    return {};
-  }
-}
+  | "cashReturn"
+  | "tax"
+  | "pretax";
+type Inputs = Record<Key, string>;
 
 const num = (s: string | undefined) => {
   const n = Number((s ?? "").replace(/[$,%\s]/g, ""));
   return s !== undefined && s.trim() !== "" && Number.isFinite(n) ? n : null;
 };
+const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 
 export default function Projection({
   start,
   stockShare,
+  pretaxShare,
   saveMonthly,
   spendMonthly,
+  saved,
+  onSave,
 }: {
   /** Cash, investments and retirement now, less debts other than a mortgage, in cents. */
   start: number;
   /** The share of `start` in investment and retirement accounts now. */
   stockShare: number;
+  /** The share of `start` in retirement accounts now. */
+  pretaxShare: number;
   /** What you've kept each month on average, from your transactions; null without income. */
   saveMonthly: number | null;
   /** What you've spent each month on average, from your transactions. */
   spendMonthly: number;
+  /** The numbers typed here before, as saved by split-insights. */
+  saved: Partial<Inputs>;
+  onSave: (typed: Partial<Inputs>) => Promise<void>;
 }) {
   // Defaults come from your accounts and transactions; anything you type replaces them.
+  const now = Math.round(stockShare * 100);
   const defaults: Inputs = {
     age: "",
     retireAge: "65",
@@ -64,31 +67,52 @@ export default function Projection({
     spend: String(Math.round(spendMonthly / 100)),
     other: "0",
     otherAge: "67",
-    stockShare: String(Math.round(stockShare * 100)),
+    stockShare: String(now),
+    stockLater: String(Math.min(now, 60)),
     stockReturn: "5",
     stockSwing: "17",
     cashReturn: "0.5",
+    tax: "12",
+    pretax: String(Math.round(pretaxShare * 100)),
   };
-  const [typed, setTyped] = useState<Partial<Inputs>>(load);
+  const [typed, setTyped] = useState<Partial<Inputs>>(() => {
+    if (Object.keys(saved).length) return saved;
+    // Numbers from before they were saved with the page: bring them over once.
+    try {
+      const old = JSON.parse(localStorage.getItem(OLD_KEY) ?? "{}");
+      return old && typeof old === "object" ? old : {};
+    } catch {
+      return {};
+    }
+  });
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const first = useRef(true);
+  // Saved a moment after you stop typing.
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      // Nothing new to save yet, unless numbers came over from the browser.
+      if (Object.keys(saved).length || !Object.keys(typed).length) return;
+    }
+    const t = setTimeout(() => {
+      onSave(typed).then(
+        () => {
+          setSaveError(null);
+          try {
+            localStorage.removeItem(OLD_KEY);
+          } catch {
+            /* fine */
+          }
+        },
+        (e: Error) => setSaveError(e.message),
+      );
+    }, 600);
+    return () => clearTimeout(t);
+  }, [JSON.stringify(typed)]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const v: Inputs = { ...defaults, ...typed };
-  const set = (k: keyof Inputs, value: string) => {
-    const next = { ...typed, [k]: value };
-    setTyped(next);
-    try {
-      localStorage.setItem(KEY, JSON.stringify(next));
-    } catch {
-      /* not remembered, still used */
-    }
-  };
-  const reset = () => {
-    const next = v.age ? { age: v.age } : {};
-    setTyped(next);
-    try {
-      localStorage.setItem(KEY, JSON.stringify(next));
-    } catch {
-      /* fine */
-    }
-  };
+  const set = (k: Key, value: string) => setTyped({ ...typed, [k]: value });
+  const reset = () => setTyped(v.age ? { age: v.age } : {});
 
   const age = num(v.age);
   const plan: Plan | null =
@@ -100,7 +124,10 @@ export default function Projection({
             retireAge: Math.round(retireAge),
             endAge: Math.round(Math.min(110, Math.max(retireAge + 1, num(v.endAge) ?? 95))),
             start,
-            stockShare: Math.min(1, Math.max(0, (num(v.stockShare) ?? 80) / 100)),
+            stockShare: clamp01((num(v.stockShare) ?? 80) / 100),
+            stockLater: clamp01((num(v.stockLater) ?? 60) / 100),
+            taxRate: clamp01((num(v.tax) ?? 0) / 100),
+            pretaxShare: clamp01((num(v.pretax) ?? 0) / 100),
             saveMonthly: (num(v.save) ?? 0) * 100,
             spendMonthly: Math.max(0, (num(v.spend) ?? 0) * 100),
             otherIncomeMonthly: Math.max(0, (num(v.other) ?? 0) * 100),
@@ -115,7 +142,7 @@ export default function Projection({
   const result = useMemo(() => (plan ? project(plan) : null), [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const canSpend = useMemo(() => (plan ? sustainableSpend(plan) : null), [key]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const field = (k: keyof Inputs, label: string, unit: "$" | "%" | "", hint?: string) => (
+  const field = (k: Key, label: string, unit: "$" | "%" | "", hint?: string) => (
     <label className="proj-field" key={k}>
       <span>{label}</span>
       <span className={`proj-input${unit ? ` unit-${unit === "$" ? "money" : "pct"}` : ""}`}>
@@ -133,6 +160,7 @@ export default function Projection({
 
   const at = (a: number) => (result ? result.ages.indexOf(a) : -1);
   const r = plan && result ? at(plan.retireAge) : -1;
+  const last = result ? result.ages.length - 1 : -1;
 
   return (
     <section className="panel">
@@ -142,12 +170,24 @@ export default function Projection({
       </div>
 
       <div className="proj-inputs">
-        <fieldset>
-          <legend>You</legend>
-          {field("age", "Your age", "")}
-          {field("retireAge", "Retire at", "")}
-          {field("endAge", "Make it last to", "")}
-        </fieldset>
+        <div className="proj-col">
+          <fieldset>
+            <legend>You</legend>
+            {field("age", "Your age", "")}
+            {field("retireAge", "Retire at", "")}
+            {field("endAge", "Make it last to", "")}
+          </fieldset>
+          <fieldset>
+            <legend>Tax in retirement</legend>
+            {field("tax", "Income tax on withdrawals", "%", "roughly your average rate, not your top bracket")}
+            {field(
+              "pretax",
+              "Savings in pre-tax accounts",
+              "%",
+              "401k and traditional IRA; starts at your retirement share",
+            )}
+          </fieldset>
+        </div>
         <fieldset>
           <legend>Money</legend>
           {field(
@@ -162,7 +202,8 @@ export default function Projection({
         </fieldset>
         <fieldset>
           <legend>Markets, after inflation</legend>
-          {field("stockShare", "In stocks", "%", "starts at your investment and retirement share")}
+          {field("stockShare", "In stocks now", "%", "starts at your investment and retirement share")}
+          {field("stockLater", "In stocks from retirement", "%", "moving there a little each year")}
           {field("stockReturn", "Stocks return a year", "%")}
           {field("stockSwing", "…swinging by about", "%", "a typical year's ups and downs")}
           {field("cashReturn", "Cash and bonds return", "%")}
@@ -177,6 +218,7 @@ export default function Projection({
           </button>
         )}
       </p>
+      {saveError && <p className="warn">Couldn&apos;t save these numbers: {saveError}</p>}
 
       {!plan || !result ? (
         <p className="empty">Type your age to see the projection.</p>
@@ -189,8 +231,17 @@ export default function Projection({
                 {moneyRound(result.low[r])} and {moneyRound(result.high[r])}).{" "}
               </>
             ) : null}
-            Spending {moneyRound(plan.spendMonthly)} a month, the money lasts to {plan.endAge} in{" "}
+            Spending {moneyRound(plan.spendMonthly)} a month after tax, the money lasts to {plan.endAge} in{" "}
             <b>{percent(result.lasts)}</b> of outcomes.{" "}
+            {result.worstRunsOut !== null ? (
+              <>
+                In the worst 1 in 10, it runs out at <b>{result.worstRunsOut}</b>.{" "}
+              </>
+            ) : (
+              <>
+                Even in the worst 1 in 10, there&apos;s about {moneyRound(result.low[last])} left at {plan.endAge}.{" "}
+              </>
+            )}
             {canSpend !== null && (
               <>
                 To make it last in 9 of 10, keep spending to about <b>{moneyRound(canSpend)}</b> a month

@@ -686,6 +686,14 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(rules, {"freshway": {"split": "household"}})
         self.assertEqual(self.post_to("/api/nope", {})[0], 404)
 
+    def test_projection_numbers_are_kept(self):
+        status, body = self.post_to("/api/projection", {"age": "38", "tax": "12"})
+        self.assertEqual((status, json.loads(body)), (200, {"age": "38", "tax": "12"}))
+        self.assertEqual(json.loads(self.request("GET", "/api/worth")[1])["projection"], {"age": "38", "tax": "12"})
+        self.assertEqual(self.post_to("/api/projection", {"evil": "1"})[0], 400)
+        self.assertEqual(self.post_to("/api/projection", {"age": 38})[0], 400)
+        self.assertEqual(self.post_to("/api/projection", {"age": "x" * 21})[0], 400)
+
 
 class AddedTest(unittest.TestCase):
     def setUp(self):

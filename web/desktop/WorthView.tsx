@@ -222,6 +222,20 @@ export default function WorthView({ txns, income }: { txns: Txn[]; income: strin
                     (now.groups.cash + now.groups.invested + now.groups.retirement)
                   : 0.8
               }
+              pretaxShare={
+                now.groups.cash + now.groups.invested + now.groups.retirement > 0
+                  ? now.groups.retirement / (now.groups.cash + now.groups.invested + now.groups.retirement)
+                  : 0
+              }
+              saved={worth.projection ?? {}}
+              onSave={async (typed) => {
+                const r = await fetch("/api/projection", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(typed),
+                });
+                if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? `the server said ${r.status}`);
+              }}
               saveMonthly={saving.earned > 0 && txnMonths ? saving.kept / txnMonths : null}
               spendMonthly={txnMonths ? saving.spent / txnMonths : 0}
             />

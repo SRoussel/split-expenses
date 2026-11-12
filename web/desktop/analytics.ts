@@ -573,6 +573,8 @@ export interface Worth {
   types: Record<string, { group: Group; debt: boolean }>;
   people: string[];
   me: string;
+  /** The numbers typed into the projection, as typed. */
+  projection?: Record<string, string>;
 }
 export interface Point extends Balance {
   from: "typed" | "statement";
