@@ -617,6 +617,120 @@ kbd {
   margin-left: auto;
 }
 
+/* --- Where this is heading (the projection) --- */
+
+.proj-inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 24px;
+  margin-bottom: 8px;
+}
+.proj-inputs fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+.proj-inputs legend {
+  font: 500 11px var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.proj-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7.5em;
+  align-items: center;
+  gap: 2px 10px;
+  font-size: 13px;
+}
+.proj-field small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 11px;
+}
+.proj-input {
+  position: relative;
+  display: block;
+}
+.proj-input input {
+  width: 100%;
+  box-sizing: border-box;
+  font: 14px var(--sans);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 4px 8px;
+}
+.proj-input.unit-money input {
+  padding-left: 18px;
+}
+.proj-input.unit-money::before {
+  content: "$";
+  position: absolute;
+  left: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 13px;
+}
+.proj-input.unit-pct input {
+  padding-right: 20px;
+}
+.proj-input.unit-pct::after {
+  content: "%";
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 13px;
+}
+.proj-start {
+  margin: 4px 0 12px;
+  font-size: 12px;
+}
+.proj-lede {
+  max-width: 75ch;
+  margin: 0 0 8px;
+}
+.proj-band {
+  fill: var(--shared);
+  opacity: 0.18;
+}
+.proj-mid {
+  fill: none;
+  stroke: var(--shared);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.proj-retire,
+.proj-cross {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.proj-dot {
+  fill: var(--shared);
+  stroke: var(--panel);
+  stroke-width: 2;
+}
+.proj-key {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+.swatch.proj {
+  background: var(--shared);
+  opacity: 0.4;
+}
+
 /* --- Tables --- */
 
 .grid-table {

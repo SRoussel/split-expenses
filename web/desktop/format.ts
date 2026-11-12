@@ -7,10 +7,12 @@ export const money = (cents: number) => (cents < 0 ? "−" : "") + usd.format(Ma
 /** "$1,235": for headline figures, where cents are noise. */
 export const moneyRound = (cents: number) => (cents < 0 ? "−" : "") + usdRound.format(Math.abs(cents) / 100);
 
-/** "$1.2K", "$12K": axis labels only. */
+/** "$1.2K", "$12K", "$1.5M": axis labels only. */
 export function moneyCompact(cents: number): string {
   const d = Math.abs(cents) / 100;
   const sign = cents < 0 ? "−" : "";
+  if (d >= 10_000_000) return `${sign}$${Math.round(d / 1_000_000)}M`;
+  if (d >= 1_000_000) return `${sign}$${(d / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
   if (d >= 10_000) return `${sign}$${Math.round(d / 1000)}K`;
   if (d >= 1000) return `${sign}$${(d / 1000).toFixed(1).replace(/\.0$/, "")}K`;
   return `${sign}$${Math.round(d)}`;

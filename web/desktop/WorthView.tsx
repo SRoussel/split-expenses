@@ -22,6 +22,7 @@ import {
 import Lede, { Fig } from "./Lede";
 import { dayLabel, money, moneyRound, monthName, percent, personLabel } from "./format";
 import { Sparkline } from "./MonthChart";
+import Projection from "./Projection";
 import WorthChart, { GROUP_LABEL } from "./WorthChart";
 
 const TYPE_LABEL: Record<string, string> = {
@@ -89,6 +90,13 @@ export default function WorthView({ txns, income }: { txns: Txn[]; income: strin
   const lastTxnMonth = txns.length ? monthOf(txns[0].date) : null;
   const yearOfTxns = lastTxnMonth ? monthRange(shiftMonth(lastTxnMonth, -11), lastTxnMonth) : [];
   const saving = useMemo(() => savingsRate(txns, yearOfTxns, income), [txns, income, yearOfTxns.join()]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The projection is for the household, whatever "Whose" shows, and leaves the home out.
+  const now = useMemo(() => (worth ? (worthByMonth(worth, months).at(-1) ?? null) : null), [worth, months]);
+  const txnMonths = useMemo(
+    () => new Set(txns.map((t) => monthOf(t.date)).filter((m) => yearOfTxns.includes(m))).size,
+    [txns, yearOfTxns.join()], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   if (error) return <p className="warn">{error}</p>;
   if (!worth) return <p className="muted">Reading balances from your statements…</p>;
@@ -203,6 +211,20 @@ export default function WorthView({ txns, income }: { txns: Txn[]; income: strin
               </div>
               <WorthChart rows={rows} />
             </section>
+          )}
+
+          {now && (
+            <Projection
+              start={now.groups.cash + now.groups.invested + now.groups.retirement - (now.groups.debt - now.mortgage)}
+              stockShare={
+                now.groups.cash + now.groups.invested + now.groups.retirement > 0
+                  ? (now.groups.invested + now.groups.retirement) /
+                    (now.groups.cash + now.groups.invested + now.groups.retirement)
+                  : 0.8
+              }
+              saveMonthly={saving.earned > 0 && txnMonths ? saving.kept / txnMonths : null}
+              spendMonthly={txnMonths ? saving.spent / txnMonths : 0}
+            />
           )}
 
           <section className="panel">
