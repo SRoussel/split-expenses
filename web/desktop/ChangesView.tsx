@@ -1,24 +1,31 @@
 // What changed: one month against the months before it. Which categories and merchants
 // moved, where you went for the first time, and the regulars you skipped.
 
-import { useMemo, useState } from "react";
-import { monthOf, shiftMonth, whatChanged, type Filters, type Mover, type Txn } from "./analytics";
+import { useMemo } from "react";
+import { monthOf, monthRange, shiftMonth, whatChanged, type Filters, type Mover, type Txn } from "./analytics";
 import Lede, { Fig } from "./Lede";
 import { categoryLabel, dayLabel, monthName, moneyRound, rangeLabel } from "./format";
 
 export default function ChangesView({
   txns,
   income,
+  month: chosen,
+  onMonth,
   onOpen,
 }: {
   txns: Txn[];
   income: string;
+  /** The month picked here, kept by the page so it survives switching views; null for the latest. */
+  month: string | null;
+  onMonth: (month: string) => void;
   onOpen: (patch: Partial<Filters>) => void;
 }) {
   const first = txns.length ? monthOf(txns[txns.length - 1].date) : "";
   const last = txns.length ? monthOf(txns[0].date) : "";
   const lastDay = txns.length ? txns[0].date : "";
-  const [month, setMonth] = useState(last);
+  // Changing whose spending is shown can move the first and last months, so stay inside them.
+  const month = !chosen || chosen > last ? last : chosen < first ? first : chosen;
+  const months = useMemo(() => (first ? monthRange(first, last).reverse() : []), [first, last]);
   const c = useMemo(() => whatChanged(txns, month, income), [txns, month, income]);
   if (!txns.length) return <p className="muted">No transactions for this selection.</p>;
 
@@ -45,11 +52,22 @@ export default function ChangesView({
         ]}
         actions={
           <div className="stepper" role="group" aria-label="Month">
-            <button className="btn" disabled={month <= first} onClick={() => setMonth(shiftMonth(month, -1))}>
+            <button className="btn" disabled={month <= first} onClick={() => onMonth(shiftMonth(month, -1))}>
               ‹ <span className="sr-only">Previous month</span>
             </button>
-            <span className="stepper-label">{monthName(month)}</span>
-            <button className="btn" disabled={month >= last} onClick={() => setMonth(shiftMonth(month, 1))}>
+            <select
+              className="stepper-label"
+              aria-label="Month"
+              value={month}
+              onChange={(e) => onMonth(e.target.value)}
+            >
+              {months.map((m) => (
+                <option key={m} value={m}>
+                  {monthName(m)}
+                </option>
+              ))}
+            </select>
+            <button className="btn" disabled={month >= last} onClick={() => onMonth(shiftMonth(month, 1))}>
               › <span className="sr-only">Next month</span>
             </button>
           </div>

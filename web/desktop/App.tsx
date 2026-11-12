@@ -114,6 +114,7 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
   // null when the months shown aren't one of the presets (opened from Year in review).
   const [preset, setPreset] = useState<Preset | null>("12m");
   const [screen, setScreen] = useState<Screen>("overview");
+  const [changesMonth, setChangesMonth] = useState<string | null>(null);
   const [f, setF] = useState<Filters>(() => ({
     ...presetRange("12m", first, last),
     person: null,
@@ -369,7 +370,13 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
             </form>
           )}
           {screen === "changes" ? (
-            <ChangesView txns={scoped} income={income} onOpen={openInOverview} />
+            <ChangesView
+              txns={scoped}
+              income={income}
+              month={changesMonth}
+              onMonth={setChangesMonth}
+              onOpen={openInOverview}
+            />
           ) : screen === "worth" ? (
             <WorthView txns={txns} income={income} />
           ) : screen === "year" ? (
