@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { flow, project, stocksAt, sustainableSpend, type Plan } from "./projection";
+import { REAL_RETURNS } from "./history";
+import { flow, historyAverage, project, stocksAt, sustainableSpend, type Plan } from "./projection";
 
 const plan: Plan = {
   age: 40,
@@ -15,6 +16,8 @@ const plan: Plan = {
   spendMonthly: 4_000_00,
   otherIncomeMonthly: 2_000_00,
   otherIncomeAge: 67,
+  market: "smooth",
+  historyCut: 0,
   stockReturn: 0.05,
   stockSwing: 0.17,
   cashReturn: 0.005,
@@ -76,4 +79,24 @@ test("the worst 1 in 10 says when the money runs out, or null when it lasts", ()
   const tight = project({ ...plan, spendMonthly: 9_000_00 });
   assert.ok(tight.worstRunsOut !== null && tight.worstRunsOut >= 65 && tight.worstRunsOut < 95);
   assert.equal(project({ ...plan, spendMonthly: 2_000_00 }).worstRunsOut, null);
+});
+
+test("the history table runs year by year, and its average is about what's published", () => {
+  REAL_RETURNS.forEach(([year], i) => assert.equal(year, REAL_RETURNS[0][0] + i));
+  const avg = historyAverage();
+  assert.ok(avg > 0.06 && avg < 0.075, `got ${avg}`);
+});
+
+test("replaying history: a cut lowers the middle outcome, and the picture repeats", () => {
+  const history: Plan = { ...plan, market: "history" };
+  const a = project(history);
+  assert.deepEqual(a.mid, project(history).mid);
+  assert.ok(project({ ...history, historyCut: 0.02 }).mid[25] < a.mid[25]);
+  for (let i = 0; i < a.ages.length; i++) assert.ok(a.low[i] <= a.mid[i] && a.mid[i] <= a.high[i]);
+});
+
+test("with only cash and bonds, history keeps pace with inflation, roughly", () => {
+  const p = project({ ...plan, market: "history", stockShare: 0, stockLater: 0, saveMonthly: 0, retireAge: 95 });
+  // Half bills, half bonds averaged about 1% a year after inflation: 55 years shouldn't triple or halve it.
+  assert.ok(p.mid[p.mid.length - 1] > plan.start * 0.6 && p.mid[p.mid.length - 1] < plan.start * 3);
 });

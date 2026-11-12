@@ -4,7 +4,8 @@
 // in desktop-data/projection.json.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { project, sustainableSpend, type Plan } from "./projection";
+import { FIRST_YEAR, LAST_YEAR } from "./history";
+import { historyAverage, project, sustainableSpend, type Plan } from "./projection";
 import { money, moneyCompact, moneyRound, percent } from "./format";
 
 const OLD_KEY = "insights-projection"; // where the first version kept them, in the browser
@@ -25,7 +26,9 @@ type Key =
   | "stockSwing"
   | "cashReturn"
   | "tax"
-  | "pretax";
+  | "pretax"
+  | "market"
+  | "historyCut";
 type Inputs = Record<Key, string>;
 
 const num = (s: string | undefined) => {
@@ -72,6 +75,8 @@ export default function Projection({
     stockReturn: "5",
     stockSwing: "17",
     cashReturn: "0.5",
+    market: "history",
+    historyCut: "2",
     tax: "12",
     pretax: String(Math.round(pretaxShare * 100)),
   };
@@ -132,6 +137,8 @@ export default function Projection({
             spendMonthly: Math.max(0, (num(v.spend) ?? 0) * 100),
             otherIncomeMonthly: Math.max(0, (num(v.other) ?? 0) * 100),
             otherIncomeAge: num(v.otherAge) ?? 67,
+            market: v.market === "smooth" ? ("smooth" as const) : ("history" as const),
+            historyCut: (num(v.historyCut) ?? 0) / 100,
             stockReturn: (num(v.stockReturn) ?? 5) / 100,
             stockSwing: Math.max(0, (num(v.stockSwing) ?? 17) / 100),
             cashReturn: (num(v.cashReturn) ?? 0.5) / 100,
@@ -204,9 +211,32 @@ export default function Projection({
           <legend>Markets, after inflation</legend>
           {field("stockShare", "In stocks now", "%", "starts at your investment and retirement share")}
           {field("stockLater", "In stocks from retirement", "%", "moving there a little each year")}
-          {field("stockReturn", "Stocks return a year", "%")}
-          {field("stockSwing", "…swinging by about", "%", "a typical year's ups and downs")}
-          {field("cashReturn", "Cash and bonds return", "%")}
+          <label className="proj-field wide">
+            <span>Market years</span>
+            <select id="proj-market" value={v.market} onChange={(e) => set("market", e.target.value)}>
+              <option value="history">Replay history</option>
+              <option value="smooth">Smooth guesses</option>
+            </select>
+            <small>
+              {v.market === "smooth"
+                ? "each year drawn from a bell curve around the return below"
+                : `real US years from ${FIRST_YEAR} to ${LAST_YEAR}, a few in a row at a time, so long slumps come through too`}
+            </small>
+          </label>
+          {v.market === "smooth" ? (
+            <>
+              {field("stockReturn", "Stocks return a year", "%")}
+              {field("stockSwing", "…swinging by about", "%", "a typical year's ups and downs")}
+              {field("cashReturn", "Cash and bonds return", "%")}
+            </>
+          ) : (
+            field(
+              "historyCut",
+              "Expect stocks to do less by",
+              "%",
+              `a year; they averaged ${(historyAverage() * 100).toFixed(1)}% after inflation, and many forecasts expect less ahead`,
+            )
+          )}
         </fieldset>
       </div>
       <p className="proj-start muted">

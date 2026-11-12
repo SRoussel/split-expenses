@@ -1,3 +1,5 @@
+import { REAL_RETURNS } from "./history";
+
 // Where savings could go: years of saving until retirement, then years of spending from it,
 // run a couple of thousand times with the market up some years and down others. Everything is
 // in today's dollars, so returns are after inflation. Amounts are in cents.
@@ -24,11 +26,22 @@ export interface Plan {
   /** Social Security, a pension or the like, each month from `otherIncomeAge`. */
   otherIncomeMonthly: number;
   otherIncomeAge: number;
-  /** A year's return after inflation, and how much it swings from year to year (both as 0.05 for 5%). */
+  /**
+   * "history" replays real years since 1928, in runs of a few years at a time so long bad
+   * stretches (the 1930s, the 1970s, 2000 to 2009) come through. "smooth" draws each year from
+   * a bell curve with the return and swing below.
+   */
+  market: "history" | "smooth";
+  /** With history: how much less than history to expect from stocks each year (0.02 for 2%). */
+  historyCut: number;
+  /** With smooth: a year's return after inflation, and how much it swings from year to year. */
   stockReturn: number;
   stockSwing: number;
   cashReturn: number;
 }
+
+/** How many years in a row are replayed from history before jumping to another point in it. */
+const BLOCK = 5;
 
 export interface Projection {
   ages: number[];
@@ -42,18 +55,28 @@ export interface Projection {
   worstRunsOut: number | null;
 }
 
-/** A small seeded random number generator, so the same plan always draws the same picture. */
-function random(seed: number) {
+/** A small seeded random number generator (0 to 1), so the same plan always draws the same picture. */
+function uniform(seed: number) {
   let a = seed >>> 0;
-  const next = () => {
+  return () => {
     a = (a + 0x6d2b79f5) >>> 0;
     let t = a;
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-  // A normally distributed draw (Box-Muller).
+}
+
+/** A normally distributed draw (Box-Muller). */
+function random(seed: number) {
+  const next = uniform(seed);
   return () => Math.sqrt(-2 * Math.log(1 - next())) * Math.cos(2 * Math.PI * next());
+}
+
+/** Stocks' yearly return after inflation over the whole history, compounded. */
+export function historyAverage(): number {
+  const growth = REAL_RETURNS.reduce((g, [, s]) => g * (1 + s), 1);
+  return growth ** (1 / REAL_RETURNS.length) - 1;
 }
 
 /** One year's money in or out at a given age, in cents. Withdrawals include the tax on them. */
@@ -78,15 +101,27 @@ function runAll(p: Plan, runs: number, seed: number) {
   const out = new Float64Array(runs * years);
   const runsOut = new Float64Array(runs).fill(Infinity);
   const draw = random(seed);
+  const pickYear = uniform(seed + 7);
   const flows = Array.from({ length: years }, (_, y) => flow(p, p.age + y));
   const mix = Array.from({ length: years }, (_, y) => stocksAt(p, p.age + y));
   let lasted = 0;
   for (let r = 0; r < runs; r++) {
     let bal = p.start;
+    let at = 0;
     for (let y = 0; y < years; y++) {
       out[r * years + y] = bal;
-      const stocks = p.stockReturn + p.stockSwing * draw();
-      const ret = Math.max(-0.9, mix[y] * stocks + (1 - mix[y]) * p.cashReturn);
+      let stocks: number;
+      let cash: number;
+      if (p.market === "history") {
+        if (y % BLOCK === 0) at = Math.floor(pickYear() * REAL_RETURNS.length);
+        const [, s, bills, bonds] = REAL_RETURNS[(at + (y % BLOCK)) % REAL_RETURNS.length];
+        stocks = s - p.historyCut;
+        cash = (bills + bonds) / 2; // cash and bonds: half T-bills, half 10-year Treasuries
+      } else {
+        stocks = p.stockReturn + p.stockSwing * draw();
+        cash = p.cashReturn;
+      }
+      const ret = Math.max(-0.9, mix[y] * stocks + (1 - mix[y]) * cash);
       bal = bal * (1 + ret) + flows[y];
       // Ran out in retirement. (Before it, a negative start just means debt is still being paid off.)
       if (bal <= 0 && p.age + y >= p.retireAge) {

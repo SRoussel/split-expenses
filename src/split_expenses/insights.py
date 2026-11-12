@@ -758,6 +758,8 @@ PROJECTION_KEYS = {
     "cashReturn",
     "tax",
     "pretax",
+    "market",
+    "historyCut",
 }
 
 

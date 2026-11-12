@@ -654,10 +654,22 @@ kbd {
   gap: 2px 10px;
   font-size: 13px;
 }
+.proj-field.wide {
+  grid-template-columns: minmax(0, 1fr) 11em;
+}
 .proj-field small {
   grid-column: 1 / -1;
   color: var(--muted);
   font-size: 11px;
+}
+.proj-field select {
+  font: 13px var(--sans);
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 4px 6px;
+  min-width: 0;
 }
 .proj-input {
   position: relative;
