@@ -913,5 +913,27 @@ class AddedTest(unittest.TestCase):
                 self.add(months=bad)
 
 
+class OpenPageTest(unittest.TestCase):
+    def test_wsl_opens_the_windows_browser(self):
+        ran, opened = [], []
+        insights.open_page(
+            "http://127.0.0.1:8765/",
+            wsl=True,
+            which=lambda name: "/mnt/c/WINDOWS/explorer.exe",
+            run=lambda cmd, **kw: ran.append(cmd),
+            browser=opened.append,
+        )
+        self.assertEqual(ran, [["/mnt/c/WINDOWS/explorer.exe", "http://127.0.0.1:8765/"]])
+        self.assertEqual(opened, [], "no Linux browser")
+
+    def test_elsewhere_or_without_explorer_the_usual_browser(self):
+        for wsl, which in ((False, lambda n: "/x/explorer.exe"), (True, lambda n: None)):
+            ran, opened = [], []
+            insights.open_page(
+                "http://u/", wsl=wsl, which=which, run=lambda c, ran=ran, **k: ran.append(c), browser=opened.append
+            )
+            self.assertEqual((ran, opened), ([], ["http://u/"]))
+
+
 if __name__ == "__main__":
     unittest.main()

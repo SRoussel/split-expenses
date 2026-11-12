@@ -123,7 +123,7 @@ The phone app only ever sees monthly totals. This is the other side: every trans
     cd web && npm install && npm run build:desktop && cd ..
     uv run split-insights
 
-It opens http://127.0.0.1:8765 in your browser. `--port` picks another port, `--no-open` doesn't open the browser, and `--dir` reads the files from another folder. Ctrl+C stops it.
+It opens http://127.0.0.1:8765 in your browser (under WSL, your Windows browser). `--port` picks another port, `--no-open` doesn't open the browser, and `--dir` reads the files from another folder. Ctrl+C stops it.
 
 It reads every `split_transactions.csv` and `personal_transactions.csv` it can find: the current batch, `data/<person>/`, and everything in `archive/`. When the same statement shows up in more than one batch (an archived copy and a second pass, say), the newest file wins, so nothing is counted twice. The terminal prints what came from where.
 

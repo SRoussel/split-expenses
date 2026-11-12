@@ -20,6 +20,8 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -1101,6 +1103,26 @@ class Handler(SimpleHTTPRequestHandler):
         pass
 
 
+def in_wsl():
+    try:
+        return "microsoft" in Path("/proc/version").read_text().lower()
+    except OSError:
+        return False
+
+
+def open_page(url, wsl=None, which=shutil.which, run=subprocess.Popen, browser=webbrowser.open):
+    """Open the page in your usual browser. Under WSL that's the Windows one, not a Linux
+    browser installed inside WSL (which is what Python would pick)."""
+    explorer = which("explorer.exe") if (in_wsl() if wsl is None else wsl) else None
+    if explorer:
+        try:
+            run([explorer, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return
+        except OSError:
+            pass
+    browser(url)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="split-insights", description=__doc__.split("\n\n")[0])
     p.add_argument("--port", type=int, default=8765)
@@ -1128,7 +1150,7 @@ def main(argv=None):
     url = f"http://127.0.0.1:{args.port}/"
     print(f"\nOpen {url}  (Ctrl+C to stop; reload the page to pick up new files)")
     if not args.no_open:
-        webbrowser.open(url)
+        open_page(url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
