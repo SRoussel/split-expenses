@@ -853,6 +853,24 @@ class AddedTest(unittest.TestCase):
         )
         self.assertTrue(all(t["source"] == "desktop-data/added.json" for t in hand))
 
+    def test_the_partner_before_their_statements_are_here(self):
+        root = Path(self.tmp.name) / "alone"
+        write(root, "personal_transactions.csv", [["2026-03-01", "10.00", "A", "dining"]], 300)
+        change_added(
+            root,
+            {
+                "op": "add",
+                "date": "2026-03-05",
+                "cents": 2500,
+                "vendor": "Cash",
+                "category": "dining",
+                "kind": "shared",
+                "person": "partner",
+            },
+        )
+        hand = [t for t in load(root)["transactions"] if t.get("added")]
+        self.assertEqual([t["person"] for t in hand], ["partner"])
+
     def test_checks_what_it_saves(self):
         for bad in (
             {"date": "2026-02-30"},

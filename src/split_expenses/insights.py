@@ -44,6 +44,9 @@ FILES = {"split_transactions.csv": "shared", "personal_transactions.csv": "perso
 KINDS = ("shared", "personal")
 DESKTOP = "desktop-data"  # the page's own files
 ME = "me"  # whose statements the files at the top level (and directly in archive/) are
+# The other person, for things typed in here before any of their statements are (their
+# statements bring their name, from data/<name>/). Sent and exported as the other person.
+PARTNER = "partner"
 
 # The built page. `npm run build:desktop` in web/ writes it.
 STATIC = Path(__file__).resolve().parents[2] / "web" / "dist-desktop"
@@ -166,7 +169,7 @@ def load(root, edited=True):
                 "updated": datetime.fromtimestamp(batch["mtime"]).isoformat(timespec="seconds"),
             }
         )
-    hand = [t for t in read_added(root).values() if t["person"] in {ME, *(b["person"] for b in sources)}]
+    hand = [t for t in read_added(root).values() if t["person"] in {ME, PARTNER, *(b["person"] for b in sources)}]
     out += [{**t, "source": f"{DESKTOP}/added.json", "added": True} for t in hand]
     names = merchant_names([t["vendor"] for t in out])
     renamed = read_renames(root)
@@ -416,7 +419,7 @@ def change_added(root, body):
     if not isinstance(body, dict):
         raise ValueError("expected a change")
     added = {k: {f: v for f, v in t.items() if f != "id"} for k, t in read_added(root).items()}
-    people = {ME, *(b["person"] for b in find_batches(root))}
+    people = {ME, PARTNER, *(b["person"] for b in find_batches(root))}
     op = body.get("op")
     if op == "add":
         t = clean_added(body)

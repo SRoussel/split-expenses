@@ -188,18 +188,17 @@ export default function AddDialog({
               <option value="personal">Personal</option>
             </select>
           </label>
-          {people.length > 1 && (
-            <label>
-              Who paid
-              <select value={person} onChange={(e) => setPerson(e.target.value)}>
-                {people.map((p) => (
-                  <option key={p} value={p}>
-                    {personLabel(p, me)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+          <label>
+            Who paid
+            <select value={person} onChange={(e) => setPerson(e.target.value)}>
+              {/* Before any of the other person's statements are here, they're just "Partner". */}
+              {(people.length > 1 ? people : [me, "partner"]).map((p) => (
+                <option key={p} value={p}>
+                  {personLabel(p, me)}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
         {!isIncome && (
           <label className="check-row">
