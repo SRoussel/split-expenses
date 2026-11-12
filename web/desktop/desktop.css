@@ -441,6 +441,9 @@ kbd {
 .swatch.personal {
   background: var(--personal);
 }
+.swatch.kept {
+  background: var(--muted);
+}
 
 /* --- Month chart --- */
 
@@ -523,6 +526,85 @@ kbd {
   border-top: 1px solid var(--line);
   margin-top: 4px;
   padding-top: 4px;
+}
+
+/* --- Where it went (the flow chart) --- */
+
+.flow-chart {
+  position: relative;
+}
+.flow-chart svg {
+  display: block;
+  overflow: visible;
+}
+.flow-chart .tooltip {
+  transform: none;
+}
+.flow {
+  opacity: 0.32;
+  transition: opacity 0.12s;
+}
+.flow:hover {
+  opacity: 0.55;
+}
+.flow.faded {
+  opacity: 0.08;
+}
+.flow.shared {
+  fill: var(--shared);
+}
+.flow.personal {
+  fill: var(--personal);
+}
+.flow.kept {
+  fill: var(--muted);
+}
+.flow-node .hit {
+  fill: transparent;
+}
+.flow-node .bar {
+  fill: var(--ink);
+}
+.flow-node .bar.shared {
+  fill: var(--shared);
+}
+.flow-node .bar.personal {
+  fill: var(--personal);
+}
+.flow-node .bar.kept {
+  fill: var(--muted);
+}
+.flow-node text {
+  font-size: 12px;
+  fill: var(--text);
+}
+.flow-node .flow-amount {
+  fill: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.flow-mid {
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+.flow-node.clickable {
+  cursor: pointer;
+  outline: none;
+}
+.flow-node.clickable:hover .hit,
+.flow-node.clickable:focus-visible .hit {
+  fill: var(--panel-2);
+}
+.flow-node.on .flow-label {
+  font-weight: 600;
+}
+.flow-node.dim {
+  opacity: 0.4;
+}
+.panel-head .add-txn {
+  margin-left: auto;
 }
 
 /* --- Tables --- */

@@ -12,6 +12,7 @@ from pathlib import Path
 from split_expenses import insights
 from split_expenses.insights import (
     app_status,
+    change_added,
     classify,
     export,
     load,
@@ -684,6 +685,77 @@ class ServerTest(unittest.TestCase):
         rules = json.loads((self.root / ".split_state.json").read_text())["vendor_rules"]
         self.assertEqual(rules, {"freshway": {"split": "household"}})
         self.assertEqual(self.post_to("/api/nope", {})[0], 404)
+
+
+class AddedTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        write(self.root, "personal_transactions.csv", [["2026-03-01", "10.00", "A", "dining"]], 300)
+        write(self.root / "data" / "jordan", "personal_transactions.csv", [["2026-03-02", "5.00", "B", "gift"]], 300)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def add(self, **fields):
+        t = {"op": "add", "date": "2026-03-05", "cents": 2500, "vendor": "  Farmers   market ", "category": "groceries"}
+        return change_added(self.root, {**t, "kind": "shared", "person": "me", **fields})
+
+    def test_typed_in_transactions_show_up_with_the_rest(self):
+        self.add()
+        self.add(person="jordan", kind="personal", category="income", cents=10000, vendor="Cash gift")
+        hand = [t for t in load(self.root)["transactions"] if t.get("added")]
+        got = sorted((t["person"], t["vendor"], t["category"], t["kind"], t["cents"]) for t in hand)
+        self.assertEqual(
+            got,
+            [
+                ("jordan", "Cash gift", "income", "personal", 10000),
+                ("me", "Farmers market", "groceries", "shared", 2500),
+            ],
+        )
+        self.assertTrue(all(t["source"] == "desktop-data/added.json" for t in hand))
+
+    def test_checks_what_it_saves(self):
+        for bad in (
+            {"date": "2026-02-30"},
+            {"cents": 0},
+            {"cents": 12.5},
+            {"vendor": " "},
+            {"category": "nope"},
+            {"category": "income"},  # shared income
+            {"person": "sam"},  # nobody by that name here
+            {"person": "../x"},
+        ):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.add(**bad)
+        self.assertFalse((self.root / "desktop-data" / "added.json").exists())
+
+    def test_edit_refile_and_delete(self):
+        ident = next(iter(self.add()))
+        classify(self.root, [{"id": ident, "category": "dining", "kind": "shared"}])
+        self.assertEqual([t["category"] for t in load(self.root)["transactions"] if t["id"] == ident], ["dining"])
+        change_added(
+            self.root,
+            {
+                "op": "edit",
+                "id": ident,
+                "date": "2026-03-06",
+                "cents": 3000,
+                "vendor": "Market",
+                "category": "household",
+                "kind": "personal",
+                "person": "me",
+            },
+        )
+        t = next(t for t in load(self.root)["transactions"] if t["id"] == ident)
+        self.assertEqual(
+            (t["date"], t["cents"], t["category"], t["kind"]), ("2026-03-06", 3000, "household", "personal")
+        )
+        self.assertNotIn("original", t, "the form's category replaces the earlier refiling")
+        change_added(self.root, {"op": "delete", "id": ident})
+        self.assertFalse(any(t.get("added") for t in load(self.root)["transactions"]))
+        with self.assertRaises(ValueError):
+            change_added(self.root, {"op": "delete", "id": ident})
 
 
 if __name__ == "__main__":

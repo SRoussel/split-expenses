@@ -15,6 +15,7 @@ export interface Txn {
   kind: Kind;
   person: string;
   source: string;
+  added?: boolean; // typed in on this page, not from a statement
 }
 
 export interface Data {

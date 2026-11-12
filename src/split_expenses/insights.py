@@ -164,6 +164,8 @@ def load(root, edited=True):
                 "updated": datetime.fromtimestamp(batch["mtime"]).isoformat(timespec="seconds"),
             }
         )
+    hand = [t for t in read_added(root).values() if t["person"] in {ME, *(b["person"] for b in sources)}]
+    out += [{**t, "source": f"{DESKTOP}/added.json", "added": True} for t in hand]
     names = merchant_names([t["vendor"] for t in out])
     renamed = read_renames(root)
     edits = read_edits(root) if edited else {}
@@ -193,6 +195,8 @@ def load(root, edited=True):
 #     Giving two merchants the same name merges them.
 # edits.json           {"<transaction id>": {"category": "groceries", "kind": "shared"}, ...}
 #     Your changes to how a transaction is filed. Only differences are kept.
+# added.json           {"<id>": {"date": ..., "cents": ..., "vendor": ..., "category": ..., "kind": ..., "person": ...}}
+#     Transactions you typed in yourself: cash, or anything no statement will show.
 # ---------------------------------------------------------------------------
 
 MAX_NAME = 80
@@ -289,6 +293,75 @@ def classify(root, changes):
             edits[c["id"]] = {"category": c["category"], "kind": c["kind"]}
     write_json(desktop_file(root, "edits.json"), edits)
     return edits
+
+
+def read_added(root):
+    out = {}
+    for k, v in read_json(desktop_file(root, "added.json")).items():
+        try:
+            out[k] = {"id": k, **clean_added(v)}
+        except (ValueError, TypeError):
+            continue
+    return out
+
+
+def clean_added(t):
+    """A typed-in transaction, checked: {date, cents, vendor, category, kind, person}."""
+    if not isinstance(t, dict):
+        raise ValueError("expected a transaction")
+    date = t.get("date")
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        raise ValueError("pick a date") from None
+    cents = t.get("cents")
+    if not isinstance(cents, int) or isinstance(cents, bool) or cents == 0 or abs(cents) > 10**11:
+        raise ValueError("the amount must be whole cents, and not zero")
+    vendor = " ".join(str(t.get("vendor") or "").split())
+    if not vendor or len(vendor) > MAX_NAME:
+        raise ValueError(f"give it a name, under {MAX_NAME} characters")
+    category = current(t.get("category"))
+    valid_filing(category, t.get("kind"))
+    person = t.get("person")
+    if not isinstance(person, str) or not re.fullmatch(r"[a-z0-9_-]{1,40}", person):
+        raise ValueError("whose is it?")
+    return {"date": date, "cents": cents, "vendor": vendor, "category": category, "kind": t["kind"], "person": person}
+
+
+def change_added(root, body):
+    """Add, change or delete a typed-in transaction: {"op": "add"|"edit"|"delete", "id"?, ...fields}."""
+    if not isinstance(body, dict):
+        raise ValueError("expected a change")
+    added = {k: {f: v for f, v in t.items() if f != "id"} for k, t in read_added(root).items()}
+    people = {ME, *(b["person"] for b in find_batches(root))}
+    op = body.get("op")
+    if op == "add":
+        t = clean_added(body)
+        if t["person"] not in people:
+            raise ValueError("whose is it?")
+        added["hand-" + os.urandom(6).hex()] = t
+    elif op in ("edit", "delete"):
+        ident = body.get("id")
+        if ident not in added:
+            raise ValueError("no such transaction")
+        if op == "delete":
+            del added[ident]
+            edits = read_edits(root)
+            if edits.pop(ident, None):
+                write_json(desktop_file(root, "edits.json"), edits)
+        else:
+            t = clean_added(body)
+            if t["person"] not in people:
+                raise ValueError("whose is it?")
+            added[ident] = t
+            # The form sets the category, so an earlier refiling of this one no longer applies.
+            edits = read_edits(root)
+            if edits.pop(ident, None):
+                write_json(desktop_file(root, "edits.json"), edits)
+    else:
+        raise ValueError("unknown change")
+    write_json(desktop_file(root, "added.json"), added)
+    return added
 
 
 def remember(root, rules):
@@ -800,6 +873,7 @@ class Handler(SimpleHTTPRequestHandler):
             "/api/export": lambda b: export(self.root, b),
             "/api/app/send": lambda b: send_to_app(self.root, b),
             "/api/worth": lambda b: change_worth(self.root, b),
+            "/api/added": lambda b: change_added(self.root, b),
         }
         if self.path not in routes:
             self.send_error(404)

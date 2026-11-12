@@ -18,9 +18,11 @@ import {
   type Txn,
 } from "./analytics";
 import { categoryLabel, dayLabel, money, moneyRound, monthName, percent, personLabel, rangeLabel } from "./format";
+import AddDialog from "./AddDialog";
 import ChangesView from "./ChangesView";
 import ExportDialog from "./ExportDialog";
 import Lede, { Fig } from "./Lede";
+import FlowChart from "./FlowChart";
 import MonthChart from "./MonthChart";
 import RecurringView from "./RecurringView";
 import WorthView from "./WorthView";
@@ -126,6 +128,8 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
   }));
   const [theme, setTheme] = useTheme();
   const [exporting, setExporting] = useState(false);
+  // The typed-in transaction being changed; null while adding one; undefined when closed.
+  const [adding, setAdding] = useState<Txn | null | undefined>(undefined);
   const search = useRef<HTMLInputElement>(null);
   const set = (patch: Partial<Filters>) => setF((prev) => ({ ...prev, ...patch }));
 
@@ -202,6 +206,8 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
     set({ merchant: to ?? (names.length === 1 ? names[0] : null) });
   }
 
+  // The flow shows every category, so a picked category only highlights its line.
+  const flowTxns = useMemo(() => applyFilters(txns, f, "category"), [txns, f]);
   const merchants = useMemo(() => byMerchant(applyFilters(txns, f, "merchant"), income), [txns, f, income]);
 
   // The other views use only who and what type; they pick their own months.
@@ -455,6 +461,32 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
                 <MonthChart rows={monthRows} selected={f.month} onSelect={(month) => set({ month })} />
               </section>
 
+              <section className="panel">
+                <div className="panel-head">
+                  <h2>Where it went</h2>
+                  <div className="legend">
+                    <span>
+                      <span className="swatch shared" />
+                      Shared
+                    </span>
+                    <span>
+                      <span className="swatch personal" />
+                      Personal
+                    </span>
+                    <span>
+                      <span className="swatch kept" />
+                      Kept
+                    </span>
+                  </div>
+                </div>
+                <FlowChart
+                  txns={flowTxns}
+                  income={income}
+                  selected={f.category}
+                  onSelect={(category) => set({ category })}
+                />
+              </section>
+
               <div className="split">
                 <section className="panel">
                   <div className="panel-head">
@@ -504,6 +536,7 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
                 income={income}
                 categories={data.categories}
                 onMerchant={(merchant) => set({ merchant })}
+                onAdd={setAdding}
                 onClassify={(changes) => post("/api/classify", { changes })}
                 onRemember={(rules) => post("/api/rules", { rules })}
               />
@@ -513,6 +546,18 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
         <div className="torn" aria-hidden="true" />
       </main>
       {exporting && <ExportDialog data={data} onData={onData} onClose={() => setExporting(false)} />}
+      {adding !== undefined && (
+        <AddDialog
+          txn={adding}
+          me={me}
+          people={people}
+          income={income}
+          categories={data.categories}
+          merchants={[...autosByMerchant.keys()].sort()}
+          onSave={(body) => post("/api/added", body)}
+          onClose={() => setAdding(undefined)}
+        />
+      )}
     </div>
   );
 }
@@ -595,6 +640,7 @@ function TransactionsPanel({
   income,
   categories,
   onMerchant,
+  onAdd,
   onClassify,
   onRemember,
 }: {
@@ -604,6 +650,7 @@ function TransactionsPanel({
   income: string;
   categories: string[];
   onMerchant: (m: string) => void;
+  onAdd: (txn: Txn | null) => void;
   onClassify: (changes: Change[]) => Promise<void>;
   onRemember: (rules: Rule[]) => Promise<void>;
 }) {
@@ -750,6 +797,9 @@ function TransactionsPanel({
         <span className="muted">
           {txns.length.toLocaleString()} · {money(net)} spent
         </span>
+        <button className="btn add-txn" onClick={() => onAdd(null)}>
+          + Add transaction
+        </button>
       </div>
 
       {picked.length > 0 && (
@@ -859,6 +909,15 @@ function TransactionsPanel({
                 <button className="row-button" onClick={() => onMerchant(t.merchant)}>
                   {t.merchant}
                 </button>
+                {t.added && (
+                  <button
+                    className="edited"
+                    title="You typed this one in. Click to change or delete it."
+                    onClick={() => onAdd(t)}
+                  >
+                    added
+                  </button>
+                )}
               </td>
               <td className="nowrap">
                 {active !== t.id ? (
