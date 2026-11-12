@@ -740,13 +740,45 @@ kbd {
   stroke: var(--panel);
   stroke-width: 2;
 }
+.proj-band.inner {
+  opacity: 0.22;
+}
+.proj-example {
+  fill: none;
+  stroke: var(--text-2);
+  stroke-width: 1;
+  opacity: 0.55;
+}
 .proj-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+.proj-key .check-row {
+  margin: 0;
+}
+.proj-note {
   margin: 4px 0 0;
+  max-width: 90ch;
   font-size: 12px;
 }
 .swatch.proj {
   background: var(--shared);
-  opacity: 0.4;
+  opacity: 0.25;
+}
+.swatch.proj.inner {
+  opacity: 0.5;
+}
+.swatch.proj-line {
+  height: 2px;
+  background: var(--shared);
+}
+.swatch.proj-example {
+  height: 1px;
+  background: var(--text-2);
 }
 
 /* --- Tables --- */

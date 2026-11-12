@@ -5,8 +5,8 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FIRST_YEAR, LAST_YEAR } from "./history";
-import { historyAverage, project, RUNS, sustainableSpend, type Plan } from "./projection";
-import { money, moneyCompact, moneyRound, percent } from "./format";
+import { historyAverage, odds, project, RUNS, sustainableSpend, type Plan, type Projection } from "./projection";
+import { money, moneyCompact, moneyRound } from "./format";
 
 const OLD_KEY = "insights-projection"; // where the first version kept them, in the browser
 const HEIGHT = 260;
@@ -220,7 +220,7 @@ export default function Projection({
             <small>
               {v.market === "smooth"
                 ? "each year drawn from a bell curve around the return below"
-                : `real US years from ${FIRST_YEAR} to ${LAST_YEAR}, a few in a row at a time, so long slumps come through too`}
+                : `real US years from ${FIRST_YEAR} to ${LAST_YEAR}, in stretches of about 8 years, so long slumps come through too`}
             </small>
           </label>
           {v.market === "smooth" ? (
@@ -262,7 +262,10 @@ export default function Projection({
               </>
             ) : null}
             Spending {moneyRound(plan.spendMonthly)} a month after tax, the money lasts to {plan.endAge} in{" "}
-            <b>{percent(result.lasts)}</b> of outcomes.{" "}
+            <b title={`${(result.lasts * 100).toFixed(1)}% of ${RUNS.toLocaleString()} futures`}>
+              {odds(result.lasts)}
+            </b>{" "}
+            futures.{" "}
             {result.worstRunsOut !== null ? (
               <>
                 In the worst 1 in 10, it runs out at <b>{result.worstRunsOut}</b>.{" "}
@@ -282,35 +285,19 @@ export default function Projection({
               </>
             )}
           </p>
-          <FanChart
-            ages={result.ages}
-            low={result.low}
-            mid={result.mid}
-            high={result.high}
-            retireAge={plan.retireAge}
-          />
+          <FanChart result={result} retireAge={plan.retireAge} />
         </>
       )}
     </section>
   );
 }
 
-function FanChart({
-  ages,
-  low,
-  mid,
-  high,
-  retireAge,
-}: {
-  ages: number[];
-  low: number[];
-  mid: number[];
-  high: number[];
-  retireAge: number;
-}) {
+function FanChart({ result, retireAge }: { result: Projection; retireAge: number }) {
+  const { ages, low, lowMid, mid, highMid, high, examples } = result;
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const [hover, setHover] = useState<number | null>(null);
+  const [showExamples, setShowExamples] = useState(true);
   // Measured before the first paint, then kept up to date.
   useLayoutEffect(() => {
     const el = ref.current;
@@ -325,20 +312,22 @@ function FanChart({
   // would otherwise flatten everything else. Anything above is clipped (the tooltip has it all).
   const retireAt = ages.indexOf(retireAge);
   const top = Math.max(1, ...mid, retireAt >= 0 ? high[retireAt] : high[high.length - 1]) * 1.1;
-  const clipped = Math.max(...high) > top;
+  const clipped = Math.max(...high, ...(showExamples ? examples.flat() : [])) > top;
   const step = niceStep(top);
   const max = Math.ceil(top / step) * step;
   const plotW = width - PAD.left - PAD.right;
   const plotH = HEIGHT - PAD.top - PAD.bottom;
   const x = (i: number) => PAD.left + (ages.length > 1 ? (i / (ages.length - 1)) * plotW : 0);
-  const y = (v: number) => PAD.top + plotH - (Math.max(0, v) / max) * plotH;
+  // Clamped a little above the top, so a line running off the chart doesn't send the path miles away.
+  const y = (v: number) => PAD.top + plotH - (Math.min(Math.max(0, v), max * 1.5) / max) * plotH;
   const ticks = Array.from({ length: Math.round(max / step) + 1 }, (_, i) => i * step);
   const line = (vals: number[]) => vals.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
-  const band = `${line(high)}${low
-    .map((v, i) => [i, v] as const)
-    .reverse()
-    .map(([i, v]) => `L${x(i).toFixed(1)},${y(v).toFixed(1)}`)
-    .join("")}Z`;
+  const area = (upper: number[], lower: number[]) =>
+    `${line(upper)}${lower
+      .map((v, i) => [i, v] as const)
+      .reverse()
+      .map(([i, v]) => `L${x(i).toFixed(1)},${y(v).toFixed(1)}`)
+      .join("")}Z`;
   const ri = ages.indexOf(retireAge);
   const everyAge = plotW / ages.length < 28 ? 10 : 5;
   const thisYear = new Date().getFullYear();
@@ -376,7 +365,9 @@ function FanChart({
           <rect x={PAD.left} y={PAD.top} width={plotW} height={plotH} />
         </clipPath>
         <g clipPath="url(#proj-clip)">
-          <path className="proj-band" d={band} />
+          <path className="proj-band" d={area(high, low)} />
+          <path className="proj-band inner" d={area(highMid, lowMid)} />
+          {showExamples && examples.map((e, i) => <path key={i} className="proj-example" d={line(e)} />)}
           <path className="proj-mid" d={line(mid)} />
         </g>
         {ri > 0 && (
@@ -401,7 +392,13 @@ function FanChart({
             Age {ages[hover]} · {thisYear + hover}
           </div>
           <div className="tip-row">
-            Likely <b>{money(mid[hover])}</b>
+            Middle <b>{money(mid[hover])}</b>
+          </div>
+          <div className="tip-row">
+            Half between{" "}
+            <b>
+              {moneyCompact(lowMid[hover])}–{moneyCompact(highMid[hover])}
+            </b>
           </div>
           <div className="tip-row">
             8 in 10 between{" "}
@@ -411,10 +408,31 @@ function FanChart({
           </div>
         </div>
       )}
-      <p className="proj-key muted">
-        <span className="swatch proj" /> the line is the middle outcome; the shaded band holds 8 in 10 of them
-        {clipped ? " (its top runs off the chart later on; hover for the numbers)" : ""}. Every figure here comes from{" "}
+      <div className="proj-key muted">
+        <span>
+          <span className="swatch proj-line" /> middle outcome
+        </span>
+        <span>
+          <span className="swatch proj inner" /> half of futures
+        </span>
+        <span>
+          <span className="swatch proj" /> 8 in 10
+        </span>
+        <label className="check-row small">
+          <input
+            id="proj-examples"
+            type="checkbox"
+            checked={showExamples}
+            onChange={(e) => setShowExamples(e.target.checked)}
+          />
+          <span className="swatch proj-example" /> {examples.length} single futures
+        </label>
+      </div>
+      <p className="proj-note muted">
+        No single future follows the bands: each one zigzags, as the thin lines show.{" "}
+        {clipped ? "The top of the chart is cut off later on; hover for the numbers. " : ""}Every figure here comes from{" "}
         {RUNS.toLocaleString()} simulated futures, each with its own run of market years (a Monte Carlo simulation).
+        They vary the markets only: not how long you live, or how your saving and spending turn out.
       </p>
     </div>
   );

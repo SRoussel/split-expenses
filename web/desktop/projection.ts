@@ -40,15 +40,23 @@ export interface Plan {
   cashReturn: number;
 }
 
-/** How many years in a row are replayed from history before jumping to another point in it. */
-const BLOCK = 5;
+/**
+ * On average, how many years in a row are replayed from history before jumping to another point
+ * in it. The length of each stretch is random (a "stationary bootstrap"), so some long slumps
+ * stay whole and no stretch length is special.
+ */
+const STRETCH = 8;
 
 export interface Projection {
   ages: number[];
-  /** Per age: the balance at the start of that year in 1 in 10, half, and 9 in 10 of the outcomes. */
+  /** Per age, the balance at the start of that year at the 10th, 25th, 50th, 75th and 90th percentiles. */
   low: number[];
+  lowMid: number[];
   mid: number[];
+  highMid: number[];
   high: number[];
+  /** A few single futures, year by year, from low to high by where they end: real paths zigzag. */
+  examples: number[][];
   /** The share of outcomes where the money lasts through `endAge`. */
   lasts: number;
   /** In the worst 1 in 10 outcomes, the age the money runs out; null when it lasts even then. */
@@ -113,8 +121,10 @@ function runAll(p: Plan, runs: number, seed: number) {
       let stocks: number;
       let cash: number;
       if (p.market === "history") {
-        if (y % BLOCK === 0) at = Math.floor(pickYear() * REAL_RETURNS.length);
-        const [, s, bills, bonds] = REAL_RETURNS[(at + (y % BLOCK)) % REAL_RETURNS.length];
+        // A new stretch: the first year, then on average every STRETCH years. Otherwise the next year.
+        if (y === 0 || pickYear() < 1 / STRETCH) at = Math.floor(pickYear() * REAL_RETURNS.length);
+        else at = (at + 1) % REAL_RETURNS.length;
+        const [, s, bills, bonds] = REAL_RETURNS[at];
         stocks = s - p.historyCut;
         cash = (bills + bonds) / 2; // cash and bonds: half T-bills, half 10-year Treasuries
       } else {
@@ -143,19 +153,35 @@ export function project(p: Plan, runs = RUNS, seed = 1): Projection {
   const { out, years, lasted, runsOut } = runAll(p, runs, seed);
   const worst = pick(runsOut.sort(), 0.1);
   const ages: number[] = [];
-  const low: number[] = [];
-  const mid: number[] = [];
-  const high: number[] = [];
+  const bands: number[][] = [[], [], [], [], []];
+  const qs = [0.1, 0.25, 0.5, 0.75, 0.9];
   const column = new Float64Array(runs);
   for (let y = 0; y < years; y++) {
     for (let r = 0; r < runs; r++) column[r] = out[r * years + y];
     column.sort();
     ages.push(p.age + y);
-    low.push(pick(column, 0.1));
-    mid.push(pick(column, 0.5));
-    high.push(pick(column, 0.9));
+    qs.forEach((q, i) => bands[i].push(pick(column, q)));
   }
-  return { ages, low, mid, high, lasts: lasted / runs, worstRunsOut: Number.isFinite(worst) ? worst : null };
+  // Example futures: the runs that end at roughly the 15th, 40th, 65th and 90th percentiles.
+  const byEnd = Array.from({ length: runs }, (_, r) => r).sort(
+    (a, b) => out[a * years + years - 1] - out[b * years + years - 1],
+  );
+  const examples = [0.15, 0.4, 0.65, 0.9].map((q) => {
+    const r = byEnd[Math.min(runs - 1, Math.floor(q * runs))];
+    return Array.from(out.subarray(r * years, (r + 1) * years));
+  });
+  const [low, lowMid, mid, highMid, high] = bands;
+  return {
+    ages,
+    low,
+    lowMid,
+    mid,
+    highMid,
+    high,
+    examples,
+    lasts: lasted / runs,
+    worstRunsOut: Number.isFinite(worst) ? worst : null,
+  };
 }
 
 /**
@@ -174,4 +200,14 @@ export function sustainableSpend(p: Plan, odds = 0.9, runs = 1000, seed = 1): nu
     else hi = m;
   }
   return Math.floor(lo / 1000) * 1000; // to the $10
+}
+
+/** A share of futures in words: "about 9 in 10", "about 49 in 50". Exact percentages would overstate it. */
+export function odds(share: number): string {
+  if (share >= 0.995) return "more than 99 in 100";
+  if (share >= 0.985) return "about 49 in 50";
+  if (share >= 0.945) return "about 19 in 20";
+  if (share < 0.005) return "almost none of the";
+  if (share < 0.05) return "fewer than 1 in 20";
+  return `about ${Math.round(share * 10)} in 10`;
 }

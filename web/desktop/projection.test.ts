@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { REAL_RETURNS } from "./history";
-import { flow, historyAverage, project, stocksAt, sustainableSpend, type Plan } from "./projection";
+import { flow, historyAverage, odds, project, stocksAt, sustainableSpend, type Plan } from "./projection";
 
 const plan: Plan = {
   age: 40,
@@ -36,8 +36,21 @@ test("the band is ordered and the same plan draws the same picture", () => {
   const a = project(plan);
   const b = project(plan);
   assert.deepEqual(a.mid, b.mid);
-  for (let i = 0; i < a.ages.length; i++) assert.ok(a.low[i] <= a.mid[i] && a.mid[i] <= a.high[i]);
+  for (let i = 0; i < a.ages.length; i++) {
+    const order = [a.low[i], a.lowMid[i], a.mid[i], a.highMid[i], a.high[i]];
+    assert.deepEqual(
+      order,
+      [...order].sort((x, y) => x - y),
+    );
+  }
   assert.ok(a.high[25] > a.low[25] * 2, "markets swing, so outcomes spread out");
+  assert.equal(a.examples.length, 4);
+  assert.ok(a.examples.every((e) => e.length === a.ages.length && e[0] === plan.start));
+  const ends = a.examples.map((e) => e[e.length - 1]);
+  assert.deepEqual(
+    ends,
+    [...ends].sort((x, y) => x - y),
+  );
 });
 
 test("spending more makes the money last less often", () => {
@@ -99,4 +112,39 @@ test("with only cash and bonds, history keeps pace with inflation, roughly", () 
   const p = project({ ...plan, market: "history", stockShare: 0, stockLater: 0, saveMonthly: 0, retireAge: 95 });
   // Half bills, half bonds averaged about 1% a year after inflation: 55 years shouldn't triple or halve it.
   assert.ok(p.mid[p.mid.length - 1] > plan.start * 0.6 && p.mid[p.mid.length - 1] < plan.start * 3);
+});
+
+test("history stretches run in order for a while, then jump", () => {
+  // With no saving and all stocks, each year's growth reveals which historical year was used.
+  const p: Plan = {
+    ...plan,
+    market: "history",
+    stockShare: 1,
+    stockLater: 1,
+    saveMonthly: 0,
+    retireAge: 200,
+    endAge: 139,
+  };
+  const r = project(p, 1);
+  const path = r.examples[0];
+  const years = path.slice(1).map((b, i) => {
+    const growth = b / path[i] - 1;
+    return REAL_RETURNS.findIndex(([, s]) => Math.abs(s - growth) < 1e-9);
+  });
+  assert.ok(
+    years.every((i) => i >= 0),
+    "every year comes from the table",
+  );
+  const jumps = years.slice(1).filter((y, i) => y !== (years[i] + 1) % REAL_RETURNS.length).length;
+  // 99 steps with a 1 in 8 chance of a jump each: expect about 12, never none or most.
+  assert.ok(jumps >= 4 && jumps <= 25, `got ${jumps} jumps`);
+});
+
+test("odds read as words, not overly exact percentages", () => {
+  assert.equal(odds(1), "more than 99 in 100");
+  assert.equal(odds(0.98), "about 19 in 20");
+  assert.equal(odds(0.99), "about 49 in 50");
+  assert.equal(odds(0.93), "about 9 in 10");
+  assert.equal(odds(0.5), "about 5 in 10");
+  assert.equal(odds(0.02), "fewer than 1 in 20");
 });
