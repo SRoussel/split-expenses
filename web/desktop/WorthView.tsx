@@ -493,13 +493,14 @@ function BalancesDialog({
   // The end of last month, the usual moment to note balances.
   const now = new Date();
   const [date, setDate] = useState(new Date(Date.UTC(now.getFullYear(), now.getMonth(), 0)).toISOString().slice(0, 10));
-  const open = worth.accounts.filter((a) => !a.closed);
-  const typed = open.filter((a) => !a.match);
-  const fromStatements = open.filter((a) => a.match);
+  // Accounts linked to statements are here too: a typed balance fills a month the statements
+  // miss, and wins over a statement balance on the same day.
+  const typed = worth.accounts.filter((a) => !a.closed);
+  const asMoney = (cents: number | null) => (cents === null ? "" : (cents / 100).toFixed(2));
   const known = (a: Account) => {
     const exact = worth.balances.find((b) => b.account === a.id && b.date === date);
-    const value = exact ? exact.cents : balanceAt(pointsFor(a, worth), monthOf(date));
-    return value === null ? "" : (value / 100).toFixed(2);
+    if (exact) return asMoney(exact.cents);
+    return a.match ? "" : asMoney(balanceAt(pointsFor(a, worth), monthOf(date)));
   };
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(typed.map((a) => [a.id, known(a)])),
@@ -551,13 +552,14 @@ function BalancesDialog({
                     <span className="cell-sub">
                       {who(a.owner)} · {TYPE_LABEL[a.type]}
                       {worth.types[a.type]?.debt ? " (amount owed)" : ""}
+                      {a.match ? " · from statements, type to override" : ""}
                     </span>
                   </td>
                   <td className="num">
                     <input
                       id={`bal-${a.id}`}
                       inputMode="decimal"
-                      placeholder="0.00"
+                      placeholder={a.match ? asMoney(balanceAt(pointsFor(a, worth), monthOf(date))) || "0.00" : "0.00"}
                       aria-invalid={parsed[a.id] === undefined}
                       value={values[a.id] ?? ""}
                       onChange={(e) => setValues({ ...values, [a.id]: e.target.value })}
@@ -568,12 +570,12 @@ function BalancesDialog({
             </tbody>
           </table>
         ) : (
-          <p className="hint">Every account fills in from statements, so there's nothing to type.</p>
+          <p className="hint">Every account is closed, so there's nothing to update.</p>
         )}
-        {fromStatements.length > 0 && (
+        {typed.some((a) => a.match) && (
           <p className="hint">
-            From downloads, no typing needed: {fromStatements.map((a) => a.name).join(", ")}. Put new statements in
-            statements/ and brokerage or retirement downloads in balances/, then reload.
+            Accounts from statements fill in by themselves when you put new statements in statements/ (or brokerage and
+            retirement downloads in balances/) and reload. Leave them blank unless a statement is missing or wrong.
           </p>
         )}
         {bad.length > 0 && <p className="warn">Amounts look like 12,345.67.</p>}
