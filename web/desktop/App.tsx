@@ -549,6 +549,7 @@ function Workspace({ data, onData }: { data: Data; onData: (d: Data) => void }) 
       {adding !== undefined && (
         <AddDialog
           txn={adding}
+          seriesSize={adding?.series ? txns.filter((t) => t.series === adding.series).length : 0}
           me={me}
           people={people}
           income={income}

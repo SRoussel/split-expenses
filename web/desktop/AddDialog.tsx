@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Kind, Txn } from "./analytics";
-import { categoryLabel, personLabel } from "./format";
+import { categoryLabel, monthName, personLabel } from "./format";
 
 export type Added = {
   date: string;
@@ -29,6 +29,7 @@ const today = () => {
 
 export default function AddDialog({
   txn,
+  seriesSize,
   me,
   people,
   income,
@@ -39,6 +40,8 @@ export default function AddDialog({
 }: {
   /** The typed-in transaction being changed, or null to add one. */
   txn: Txn | null;
+  /** How many typed-in transactions share this one's series (repeats added together), 0 if none. */
+  seriesSize: number;
   me: string;
   people: string[];
   income: string;
@@ -64,10 +67,22 @@ export default function AddDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [repeat, setRepeat] = useState(false);
+  const [until, setUntil] = useState("");
 
   const isIncome = category === income;
   const cents = parseAmount(amount);
-  const ready = !!date && !!vendor.trim() && !!category && cents !== null;
+  // Repeats: the same day each month, from the date's month through `until`.
+  const startMonth = date.slice(0, 7);
+  const months =
+    repeat && /^\d{4}-\d{2}$/.test(until) && until >= startMonth
+      ? (Number(until.slice(0, 4)) - Number(startMonth.slice(0, 4))) * 12 +
+        Number(until.slice(5)) -
+        Number(startMonth.slice(5)) +
+        1
+      : 1;
+  const repeatBad = repeat && (months < 2 || months > 120);
+  const ready = !!date && !!vendor.trim() && !!category && cents !== null && !repeatBad;
 
   async function run(body: Record<string, unknown>) {
     setBusy(true);
@@ -91,7 +106,7 @@ export default function AddDialog({
       kind: isIncome ? "personal" : kind,
       person,
     };
-    void run(txn ? { op: "edit", id: txn.id, ...fields } : { op: "add", ...fields });
+    void run(txn ? { op: "edit", id: txn.id, ...fields } : { op: "add", ...fields, months });
   }
 
   return (
@@ -192,19 +207,55 @@ export default function AddDialog({
             Money back (a refund or return)
           </label>
         )}
+        {!txn && (
+          <div className="field">
+            <label className="check-row">
+              <input type="checkbox" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} />
+              Repeat every month, like rent
+            </label>
+            {repeat && (
+              <label className="repeat-until">
+                Through
+                <input type="month" min={startMonth} value={until} onChange={(e) => setUntil(e.target.value)} />
+                <span className="hint">
+                  {months >= 2 && months <= 120
+                    ? `Adds ${months}, one on day ${Number(date.slice(8))} of each month from ${monthName(startMonth)} to ${monthName(until)} (or the month's last day).`
+                    : months > 120
+                      ? "Up to 120 months at a time."
+                      : "Pick the last month."}
+                </span>
+              </label>
+            )}
+          </div>
+        )}
+        {txn && seriesSize > 1 && (
+          <p className="hint">One of {seriesSize} added together as a monthly repeat. Saving changes only this one.</p>
+        )}
         {amount !== "" && cents === null && <p className="warn">Amounts look like 12.50.</p>}
         {error && <p className="warn">{error}</p>}
         <div className="export-actions">
           {txn &&
             (confirmDelete ? (
-              <button
-                type="button"
-                className="btn danger"
-                disabled={busy}
-                onClick={() => void run({ op: "delete", id: txn.id })}
-              >
-                Delete it
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn danger"
+                  disabled={busy}
+                  onClick={() => void run({ op: "delete", id: txn.id })}
+                >
+                  {seriesSize > 1 ? "Delete this one" : "Delete it"}
+                </button>
+                {seriesSize > 1 && (
+                  <button
+                    type="button"
+                    className="btn danger"
+                    disabled={busy}
+                    onClick={() => void run({ op: "delete", id: txn.id, series: true })}
+                  >
+                    Delete all {seriesSize}
+                  </button>
+                )}
+              </>
             ) : (
               <button type="button" className="link" onClick={() => setConfirmDelete(true)}>
                 Delete…
@@ -214,7 +265,7 @@ export default function AddDialog({
             Cancel
           </button>
           <button className="btn primary" disabled={busy || !ready}>
-            {txn ? "Save" : "Add it"}
+            {txn ? "Save" : months > 1 ? `Add ${months}` : "Add it"}
           </button>
         </div>
       </form>

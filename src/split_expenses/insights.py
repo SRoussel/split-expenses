@@ -302,7 +302,21 @@ def read_added(root):
             out[k] = {"id": k, **clean_added(v)}
         except (ValueError, TypeError):
             continue
+        if isinstance(v.get("series"), str) and re.fullmatch(r"[0-9a-f]{12}", v["series"]):
+            out[k]["series"] = v["series"]
     return out
+
+
+MAX_REPEAT = 120  # months
+
+
+def months_later(date, n):
+    """The same day n months on, or that month's last day when it's shorter (Jan 31 -> Feb 28)."""
+    d = datetime.strptime(date, "%Y-%m-%d")
+    y, m = divmod(d.month - 1 + n, 12)
+    y, m = d.year + y, m + 1
+    last = (datetime(y + m // 12, m % 12 + 1, 1) - datetime(y, m, 1)).days
+    return f"{y:04d}-{m:02d}-{min(d.day, last):02d}"
 
 
 def clean_added(t):
@@ -339,21 +353,30 @@ def change_added(root, body):
         t = clean_added(body)
         if t["person"] not in people:
             raise ValueError("whose is it?")
-        added["hand-" + os.urandom(6).hex()] = t
+        months = body.get("months", 1)
+        if not isinstance(months, int) or isinstance(months, bool) or not 1 <= months <= MAX_REPEAT:
+            raise ValueError(f"repeat for 1 to {MAX_REPEAT} months")
+        # Repeats share a series, so they can be deleted together.
+        series = {"series": os.urandom(6).hex()} if months > 1 else {}
+        for n in range(months):
+            added["hand-" + os.urandom(6).hex()] = {**t, "date": months_later(t["date"], n), **series}
     elif op in ("edit", "delete"):
         ident = body.get("id")
         if ident not in added:
             raise ValueError("no such transaction")
         if op == "delete":
-            del added[ident]
+            series = added[ident].get("series") if body.get("series") else None
+            gone = [k for k, t in added.items() if k == ident or (series and t.get("series") == series)]
             edits = read_edits(root)
-            if edits.pop(ident, None):
-                write_json(desktop_file(root, "edits.json"), edits)
+            for k in gone:
+                del added[k]
+                edits.pop(k, None)
+            write_json(desktop_file(root, "edits.json"), edits)
         else:
             t = clean_added(body)
             if t["person"] not in people:
                 raise ValueError("whose is it?")
-            added[ident] = t
+            added[ident] = {**t, **({"series": added[ident]["series"]} if "series" in added[ident] else {})}
             # The form sets the category, so an earlier refiling of this one no longer applies.
             edits = read_edits(root)
             if edits.pop(ident, None):

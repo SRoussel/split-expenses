@@ -757,6 +757,23 @@ class AddedTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             change_added(self.root, {"op": "delete", "id": ident})
 
+    def test_repeats_every_month_and_deletes_together(self):
+        added = self.add(date="2026-01-31", months=4, vendor="Rent", category="housing", cents=240000)
+        dates = sorted(t["date"] for t in added.values())
+        self.assertEqual(dates, ["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30"])
+        self.assertEqual(len({t["series"] for t in added.values()}), 1)
+        self.add()  # a one-off, not in the series
+        first = next(k for k, t in added.items() if t["date"] == "2026-03-31")
+        change_added(self.root, {"op": "delete", "id": first})
+        self.assertEqual(len([t for t in load(self.root)["transactions"] if t.get("added")]), 4)
+        rest = next(k for k, t in added.items() if t["date"] == "2026-01-31")
+        change_added(self.root, {"op": "delete", "id": rest, "series": True})
+        left = [t["vendor"] for t in load(self.root)["transactions"] if t.get("added")]
+        self.assertEqual(left, ["Farmers market"])
+        for bad in (0, 121, "3", True):
+            with self.subTest(months=bad), self.assertRaises(ValueError):
+                self.add(months=bad)
+
 
 if __name__ == "__main__":
     unittest.main()

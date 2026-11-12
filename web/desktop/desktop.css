@@ -603,6 +603,16 @@ kbd {
 .flow-node.dim {
   opacity: 0.4;
 }
+.repeat-until {
+  display: grid;
+  grid-template-columns: auto minmax(0, 12em);
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 6px;
+}
+.repeat-until .hint {
+  grid-column: 1 / -1;
+}
 .panel-head .add-txn {
   margin-left: auto;
 }

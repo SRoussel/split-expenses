@@ -16,6 +16,7 @@ export interface Txn {
   person: string;
   source: string;
   added?: boolean; // typed in on this page, not from a statement
+  series?: string; // typed in with "Repeat every month": the others added with it share this
 }
 
 export interface Data {
