@@ -136,7 +136,10 @@ function runAll(p: Plan, runs: number, seed: number) {
 
 const pick = (sorted: Float64Array, q: number) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
 
-export function project(p: Plan, runs = 2000, seed = 1): Projection {
+/** How many futures each projection runs. */
+export const RUNS = 2000;
+
+export function project(p: Plan, runs = RUNS, seed = 1): Projection {
   const { out, years, lasted, runsOut } = runAll(p, runs, seed);
   const worst = pick(runsOut.sort(), 0.1);
   const ages: number[] = [];

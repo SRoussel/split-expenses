@@ -5,7 +5,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FIRST_YEAR, LAST_YEAR } from "./history";
-import { historyAverage, project, sustainableSpend, type Plan } from "./projection";
+import { historyAverage, project, RUNS, sustainableSpend, type Plan } from "./projection";
 import { money, moneyCompact, moneyRound, percent } from "./format";
 
 const OLD_KEY = "insights-projection"; // where the first version kept them, in the browser
@@ -413,7 +413,8 @@ function FanChart({
       )}
       <p className="proj-key muted">
         <span className="swatch proj" /> the line is the middle outcome; the shaded band holds 8 in 10 of them
-        {clipped ? " (its top runs off the chart later on; hover for the numbers)" : ""}
+        {clipped ? " (its top runs off the chart later on; hover for the numbers)" : ""}. Every figure here comes from{" "}
+        {RUNS.toLocaleString()} simulated futures, each with its own run of market years (a Monte Carlo simulation).
       </p>
     </div>
   );
